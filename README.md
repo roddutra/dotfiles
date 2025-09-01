@@ -1,6 +1,6 @@
 # dotfiles
 
-My MacOS dotfiles, managed using GNU Stow.
+My MacOS dotfiles, managed using [GNU Stow](https://www.gnu.org/software/stow/) to easily create symlinks from this repo's dotfiles in a new machine.
 
 ## Fresh MacOS installation steps
 
