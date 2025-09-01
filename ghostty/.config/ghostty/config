@@ -49,5 +49,5 @@ theme = catppuccin-mocha
 shell-integration-features = no-cursor
 cursor-style = block
 cursor-invert-fg-bg = true
-# cursor-text = red
-cursor-click-to-move = 
+cursor-style-blink = false
+cursor-click-to-move = true
