@@ -77,3 +77,9 @@ export PHP_INI_SCAN_DIR="/Users/roddutra/.config/herd-lite/bin:$PHP_INI_SCAN_DIR
 # Shell integrations
 source <(fzf --zsh)
 eval "$(zoxide init --cmd cd zsh)"
+
+# Herd injected PHP 8.4 configuration.
+export HERD_PHP_84_INI_SCAN_DIR="/Users/roddutra/Library/Application Support/Herd/config/php/84/"
+
+# Herd injected PHP binary.
+export PATH="/Users/roddutra/Library/Application Support/Herd/bin/":$PATH

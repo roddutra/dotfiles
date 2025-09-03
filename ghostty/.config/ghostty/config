@@ -51,3 +51,8 @@ cursor-style = block
 cursor-invert-fg-bg = true
 cursor-style-blink = false
 cursor-click-to-move = true
+window-width = 120
+window-height = 40
+window-save-state = always
+
+auto-update = check

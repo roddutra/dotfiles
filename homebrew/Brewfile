@@ -1,4 +1,7 @@
 tap "jandedobbeleer/oh-my-posh"
+tap "jesseduffield/lazydocker"
+# Bourne-Again SHell, a UNIX command interpreter
+brew "bash"
 # Resource monitor. C++ version and continuation of bashtop and bpytop
 brew "btop"
 # Simple, fast and user-friendly alternative to find
@@ -7,6 +10,12 @@ brew "fd"
 brew "fzf"
 # GitHub command-line tool
 brew "gh"
+# Interpreter for PostScript and PDF
+brew "ghostscript"
+# Tools and libraries to manipulate images in many formats
+brew "imagemagick"
+# Simple terminal UI for git commands
+brew "lazygit"
 # Package manager for the Lua programming language
 brew "luarocks"
 # Ambitious Vim-fork focused on extensibility and agility
@@ -29,6 +38,8 @@ brew "wget"
 brew "zoxide"
 # Prompt theme engine for any shell
 brew "jandedobbeleer/oh-my-posh/oh-my-posh"
+# A simple terminal UI for docker, written in Go
+brew "jesseduffield/lazydocker/lazydocker"
 # Command-line interface for 1Password
 cask "1password-cli"
 # Chromium based browser
@@ -61,6 +72,8 @@ cask "iterm2"
 cask "notion-calendar"
 # Knowledge base that works on top of a local folder of plain text Markdown files
 cask "obsidian"
+# Replacement for Docker Desktop
+cask "orbstack"
 # App wrapper for Postgres
 cask "postgres-unofficial"
 # All-in-one bookmark manager
