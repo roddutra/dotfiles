@@ -50,6 +50,8 @@ cask "brave-browser"
 cask "chatgpt"
 # Anthropic's official Claude AI desktop app
 cask "claude"
+# Write, edit, and chat about your code with AI
+cask "cursor"
 # Client for the Dropbox cloud storage service
 cask "dropbox"
 # Web browser
@@ -68,6 +70,8 @@ cask "google-drive"
 cask "herd"
 # Terminal emulator as alternative to Apple's Terminal app
 cask "iterm2"
+# Keyboard customiser
+cask "karabiner-elements"
 # Calendar for professionals and teams
 cask "notion-calendar"
 # Knowledge base that works on top of a local folder of plain text Markdown files
@@ -132,6 +136,7 @@ vscode "formulahendry.auto-rename-tag"
 vscode "github.github-vscode-theme"
 vscode "github.vscode-github-actions"
 vscode "grapecity.gc-excelviewer"
+vscode "graphql.vscode-graphql-syntax"
 vscode "gruntfuggly.todo-tree"
 vscode "hdoro.sanity-snippets"
 vscode "jock.svg"

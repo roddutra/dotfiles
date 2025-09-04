@@ -54,5 +54,6 @@ cursor-click-to-move = true
 window-width = 120
 window-height = 40
 window-save-state = always
+window-vsync = true
 
 auto-update = check
