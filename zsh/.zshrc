@@ -61,9 +61,9 @@ alias lg='lazygit'
 # VSCode extensions should be managed through VSCode's built-in sync
 brew-dump() {
     echo "Dumping Homebrew packages..."
-    brew bundle dump --describe --force --file=~/dotfiles/homebrew/Brewfile
+    brew bundle dump --describe --force --file="$HOME/dotfiles/homebrew/Brewfile"
     # Remove all vscode lines from the Brewfile
-    sed -i '' '/^vscode /d' ~/dotfiles/homebrew/Brewfile
+    sed -i '' '/^vscode /d' "$HOME/dotfiles/homebrew/Brewfile"
     echo "✓ Brewfile updated (VSCode extensions excluded)"
 }
 
@@ -84,15 +84,15 @@ eval "$(uv generate-shell-completion zsh)"
 eval "$(uvx --generate-shell-completion zsh)"
 
 # PHP & Laravel
-export PATH="/Users/roddutra/.config/herd-lite/bin:$PATH"
-export PHP_INI_SCAN_DIR="/Users/roddutra/.config/herd-lite/bin:$PHP_INI_SCAN_DIR"
+export PATH="$HOME/.config/herd-lite/bin:$PATH"
+export PHP_INI_SCAN_DIR="$HOME/.config/herd-lite/bin:$PHP_INI_SCAN_DIR"
 
 # Shell integrations
 source <(fzf --zsh)
 eval "$(zoxide init --cmd cd zsh)"
 
 # Herd injected PHP 8.4 configuration.
-export HERD_PHP_84_INI_SCAN_DIR="/Users/roddutra/Library/Application Support/Herd/config/php/84/"
+export HERD_PHP_84_INI_SCAN_DIR="$HOME/Library/Application Support/Herd/config/php/84/"
 
 # Herd injected PHP binary.
-export PATH="/Users/roddutra/Library/Application Support/Herd/bin/":$PATH
+export PATH="$HOME/Library/Application Support/Herd/bin/":$PATH

@@ -53,3 +53,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Claude Code - ignore all files and directories except version-controlled configs
+claude/.claude/*
+!claude/.claude/agents/
+!claude/.claude/commands/
+!claude/.claude/hooks/
