@@ -1,0 +1,55 @@
+# macOS
+.DS_Store
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Shell history that might accidentally get added
+.zsh_history
+.bash_history
+
+# Tmux
+# Ignore TPM-installed plugins (except our submodules)
+tmux/.config/tmux/plugins/*
+!tmux/.config/tmux/plugins/tpm
+!tmux/.config/tmux/plugins/catppuccin
+# Tmux resurrect automatic saves
+tmux/.config/tmux/resurrect/
+
+# Neovim
+nvim/.config/nvim/plugin/packer_compiled.lua
+nvim/.config/nvim/lazy-lock.json
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# SSH (safety - in case someone accidentally tries to add these)
+ssh/.ssh/id_*
+!ssh/.ssh/id_*.pub
+ssh/.ssh/known_hosts
+
+# GPG
+gnupg/.gnupg/random_seed
+gnupg/.gnupg/*.lock
+
+# Git credentials (safety)
+git/.config/git/credentials
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -51,8 +51,21 @@ setopt hist_find_no_dups
 
 # Aliases
 alias ls='ls --color'
-alias python="python3"
-alias pip="pip3"
+alias python='python3'
+alias pip='pip3'
+alias lg='lazygit'
+
+# Custom Functions
+# Brew bundle dump without VSCode extensions
+# This prevents VSCode extensions from cluttering the Brewfile
+# VSCode extensions should be managed through VSCode's built-in sync
+brew-dump() {
+    echo "Dumping Homebrew packages..."
+    brew bundle dump --describe --force --file=~/dotfiles/homebrew/Brewfile
+    # Remove all vscode lines from the Brewfile
+    sed -i '' '/^vscode /d' ~/dotfiles/homebrew/Brewfile
+    echo "✓ Brewfile updated (VSCode extensions excluded)"
+}
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
