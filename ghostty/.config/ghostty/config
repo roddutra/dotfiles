@@ -55,5 +55,6 @@ window-width = 120
 window-height = 40
 window-save-state = always
 window-vsync = true
+# macos-option-as-alt = true
 
 auto-update = check
