@@ -159,7 +159,11 @@ git submodule update
 
 ## Tmux Setup
 
-The tmux configuration uses TPM (Tmux Plugin Manager) for plugin management.
+The tmux configuration uses TPM (Tmux Plugin Manager) for plugin management. All plugins are consolidated in `~/.config/tmux/plugins/` for a clean, organized structure.
+
+### Configuration Details:
+- **Plugin Path**: The tmux.conf sets `TMUX_PLUGIN_MANAGER_PATH` to `~/.config/tmux/plugins/` to ensure all plugins install to the same location as our submodules
+- **No ~/.tmux directory**: Everything is kept under `~/.config/tmux/` following XDG base directory standards
 
 ### After running `stow tmux`:
 
@@ -170,7 +174,7 @@ The tmux configuration uses TPM (Tmux Plugin Manager) for plugin management.
 
 2. Install TPM plugins (inside tmux):
    - Press `Ctrl+Space` (prefix) then `Shift+I`
-   - TPM will automatically install all plugins listed in `.tmux.conf`
+   - TPM will automatically install all plugins listed in `.tmux.conf` to `~/.config/tmux/plugins/`
 
 ### Included Plugins:
 - **TPM**: Plugin manager (included as submodule)
