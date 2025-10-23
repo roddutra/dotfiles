@@ -96,3 +96,15 @@ export HERD_PHP_84_INI_SCAN_DIR="$HOME/Library/Application Support/Herd/config/p
 
 # Herd injected PHP binary.
 export PATH="$HOME/Library/Application Support/Herd/bin/":$PATH
+
+
+# Herd injected PHP 8.4 configuration.
+export HERD_PHP_84_INI_SCAN_DIR="/Users/roddutra/Library/Application Support/Herd/config/php/84/"
+
+# pnpm
+export PNPM_HOME="/Users/roddutra/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+# pnpm end

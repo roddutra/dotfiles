@@ -59,3 +59,4 @@ claude/.claude/*
 !claude/.claude/agents/
 !claude/.claude/commands/
 !claude/.claude/hooks/
+!claude/.claude/skills/

@@ -45,7 +45,7 @@ font-size = 13
 font-thicken = true
 bold-is-bright = true
 
-theme = catppuccin-mocha
+theme = catppuccin-mocha.conf
 shell-integration-features = no-cursor
 cursor-style = block
 cursor-invert-fg-bg = true
@@ -55,6 +55,7 @@ window-width = 120
 window-height = 40
 window-save-state = always
 window-vsync = true
+clipboard-paste-protection = false
 # macos-option-as-alt = true
 
 auto-update = check
