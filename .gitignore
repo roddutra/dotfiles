@@ -11,6 +11,7 @@
 .env
 .env.*
 !.env.example
+zsh/.zshrc.local
 
 # Shell history that might accidentally get added
 .zsh_history

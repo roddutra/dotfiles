@@ -1,0 +1,26 @@
+# .zshrc.local - Sensitive Environment Variables
+#
+# This file is for storing sensitive environment variables that should NOT be
+# version controlled or committed to GitHub (API keys, tokens, passwords, etc.)
+#
+# SETUP INSTRUCTIONS:
+# 1. Copy this file to .zshrc.local in the same directory:
+#    cp .zshrc.local.example .zshrc.local
+#
+# 2. Edit .zshrc.local and add your sensitive variables below
+#
+# 3. Run `stow zsh` to symlink it to your home directory
+#
+# The .zshrc file will automatically source .zshrc.local if it exists.
+# The .zshrc.local file is gitignored and will never be committed to the repo.
+#
+# EXAMPLE USAGE:
+# export GITHUB_TOKEN="your_github_personal_access_token"
+# export OPENAI_API_KEY="your_openai_api_key"
+# export AWS_ACCESS_KEY_ID="your_aws_access_key"
+# export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
+# export DATABASE_PASSWORD="your_database_password"
+#
+# Add your environment variables below this line:
+# --------------------------------------------------
+

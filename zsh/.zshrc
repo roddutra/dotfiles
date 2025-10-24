@@ -108,3 +108,7 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME:$PATH" ;;
 esac
 # pnpm end
+
+# Secrets / Sensitive Environment Variables
+# Load sensitive environment varibales from a file that is gitignored / not version controlled
+[ -f ~/.zshrc.local ] && source ~/.zshrc.local

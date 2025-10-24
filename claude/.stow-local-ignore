@@ -1,0 +1,8 @@
+# Stow local ignore file
+# Files and patterns listed here will NOT be symlinked when running `stow claude`
+
+# Don't symlink the MCP config - users should copy it manually to their project or ~/.claude.json
+\.mcp\.json
+
+# Don't symlink the README - it's documentation for the repo
+README\.md

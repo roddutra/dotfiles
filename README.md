@@ -120,6 +120,37 @@ brew bundle dump --describe --force
 sed -i '' '/^vscode /d' Brewfile
 ```
 
+### Managing Sensitive Environment Variables
+
+The zsh configuration supports a separate `.zshrc.local` file for storing sensitive environment variables (API keys, tokens, passwords, etc.) that should never be committed to version control.
+
+#### How it works:
+
+- **`.zshrc.local`**: Your actual file containing sensitive variables (gitignored, never committed)
+- **`.zshrc.local.example`**: A template file showing what variables you can add (version controlled)
+- The main `.zshrc` file automatically sources `.zshrc.local` if it exists
+
+#### Adding sensitive variables:
+
+1. Copy the example file to create your local file:
+   ```shell
+   cd ~/dotfiles/zsh
+   cp .zshrc.local.example .zshrc.local
+   ```
+
+2. Edit `.zshrc.local` and add your sensitive variables:
+   ```shell
+   export GITHUB_TOKEN="your_token_here"
+   export OPENAI_API_KEY="your_api_key_here"
+   ```
+
+3. The file is already symlinked if you've run `stow zsh`, or run it now:
+   ```shell
+   stow zsh
+   ```
+
+The `.zshrc.local` file lives in your `dotfiles/zsh/` directory, gets symlinked to `~/.zshrc.local` by stow, but is never committed to GitHub thanks to `.gitignore`.
+
 ## Importing config files from this repo
 
 To setup the symlinks for each app in a new machine, make sure you have [GNU Stow installed](#to-install-gnu-stow-only) and run the following command from this project's root directory:
@@ -156,6 +187,21 @@ stow -D nvim
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow */` will symlink ALL application configs at once
+
+### Setting up sensitive environment variables on a new machine:
+
+After running `stow zsh`, you'll need to create your `.zshrc.local` file for sensitive environment variables:
+
+```shell
+# Copy the example file
+cd ~/dotfiles/zsh
+cp .zshrc.local.example .zshrc.local
+
+# Edit and add your sensitive variables
+# The file is already symlinked by stow, so changes take effect immediately
+```
+
+See the [Managing Sensitive Environment Variables](#managing-sensitive-environment-variables) section for more details.
 
 ## Git Submodules
 
