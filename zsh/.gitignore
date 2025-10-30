@@ -1,0 +1,5 @@
+# Ignore sensitive environment variables file
+.zsh-secrets
+
+# Backwards compatibility - ignore old naming convention
+.zshrc.local
