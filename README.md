@@ -39,6 +39,15 @@ git clone --recurse-submodules https://github.com/roddutra/dotfiles.git
 
 > **Important:** The `--recurse-submodules` flag ensures that git submodules (like tmux plugins) are automatically downloaded.
 
+5. Run the setup script to configure the repository:
+
+```shell
+cd ~/dotfiles
+./setup.sh
+```
+
+This script configures git to handle the modular zsh configuration properly and creates template files for your secrets.
+
 ### To install GNU Stow only
 
 To install GNU Stow on a Mac using homebrew, run:
@@ -67,7 +76,9 @@ dotfiles/
 │       └── nvim/          # Will be symlinked to ~/.config/nvim/
 │           └── lua/
 ├── zsh/
-│   └── .zshrc             # Will be symlinked to ~/.zshrc
+│   ├── .zshrc             # Will be symlinked to ~/.zshrc (loader)
+│   ├── .zsh-settings      # Will be symlinked to ~/.zsh-settings (your config)
+│   └── .zsh-secrets       # Will be symlinked to ~/.zsh-secrets (gitignored)
 └── ghostty/
     └── .config/
         └── ghostty/       # Will be symlinked to ~/.config/ghostty/
@@ -120,25 +131,37 @@ brew bundle dump --describe --force
 sed -i '' '/^vscode /d' Brewfile
 ```
 
+### ZSH Configuration Structure
+
+The zsh configuration is split into three modular files to separate concerns and enable version control without polluting your curated settings:
+
+**How it works:**
+- **`.zshrc`** - Minimal loader that sources the other files. Tools (NVM, pnpm, Herd, etc.) auto-append their configs here, but changes aren't tracked by git.
+- **`.zsh-settings`** - Your curated shell configuration (version controlled): Oh My Posh theme, Zinit plugins, aliases, custom functions, history settings, completion styling, etc.
+- **`.zsh-secrets`** - Sensitive environment variables (gitignored): API keys, tokens, passwords, etc.
+
+**Why this structure:**
+This allows you to version control your personalized shell setup while letting package managers work normally - they'll append to `.zshrc` as expected, but those auto-generated configs won't pollute your git history. Your curated settings stay clean in `.zsh-settings`, and secrets remain safely gitignored in `.zsh-secrets`.
+
 ### Managing Sensitive Environment Variables
 
-The zsh configuration supports a separate `.zshrc.local` file for storing sensitive environment variables (API keys, tokens, passwords, etc.) that should never be committed to version control.
+The zsh configuration supports a separate `.zsh-secrets` file for storing sensitive environment variables (API keys, tokens, passwords, etc.) that should never be committed to version control.
 
 #### How it works:
 
-- **`.zshrc.local`**: Your actual file containing sensitive variables (gitignored, never committed)
-- **`.zshrc.local.example`**: A template file showing what variables you can add (version controlled)
-- The main `.zshrc` file automatically sources `.zshrc.local` if it exists
+- **`.zsh-secrets`**: Your actual file containing sensitive variables (gitignored, never committed)
+- **`.zsh-secrets.example`**: A template file showing what variables you can add (version controlled)
+- The main `.zshrc` file automatically sources `.zsh-secrets` if it exists
 
 #### Adding sensitive variables:
 
-1. Copy the example file to create your local file:
+1. Copy the example file to create your local file (or run `./setup.sh` which does this automatically):
    ```shell
    cd ~/dotfiles/zsh
-   cp .zshrc.local.example .zshrc.local
+   cp .zsh-secrets.example .zsh-secrets
    ```
 
-2. Edit `.zshrc.local` and add your sensitive variables:
+2. Edit `.zsh-secrets` and add your sensitive variables:
    ```shell
    export GITHUB_TOKEN="your_token_here"
    export OPENAI_API_KEY="your_api_key_here"
@@ -149,7 +172,7 @@ The zsh configuration supports a separate `.zshrc.local` file for storing sensit
    stow zsh
    ```
 
-The `.zshrc.local` file lives in your `dotfiles/zsh/` directory, gets symlinked to `~/.zshrc.local` by stow, but is never committed to GitHub thanks to `.gitignore`.
+The `.zsh-secrets` file lives in your `dotfiles/zsh/` directory, gets symlinked to `~/.zsh-secrets` by stow, but is never committed to GitHub thanks to `.gitignore`.
 
 ## Importing config files from this repo
 
@@ -190,14 +213,14 @@ stow -D nvim
 
 ### Setting up sensitive environment variables on a new machine:
 
-After running `stow zsh`, you'll need to create your `.zshrc.local` file for sensitive environment variables:
+After running `./setup.sh` and `stow zsh`, you'll need to edit your `.zsh-secrets` file for sensitive environment variables:
 
 ```shell
-# Copy the example file
+# The setup.sh script already created .zsh-secrets from the template
+# Just edit it and add your sensitive variables
 cd ~/dotfiles/zsh
-cp .zshrc.local.example .zshrc.local
+# Edit .zsh-secrets (or ~/.zsh-secrets after running stow)
 
-# Edit and add your sensitive variables
 # The file is already symlinked by stow, so changes take effect immediately
 ```
 
