@@ -12,6 +12,7 @@
 .env.*
 !.env.example
 zsh/.zshrc.local
+zsh/.zsh-secrets
 
 # Shell history that might accidentally get added
 .zsh_history
