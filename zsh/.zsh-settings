@@ -24,6 +24,11 @@ zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
+zinit light zsh-users/zsh-history-substring-search
+
+# Keybindings for history substring search
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
 
 # Add in snippets
 zinit snippet OMZL::git.zsh
