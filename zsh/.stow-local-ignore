@@ -3,3 +3,6 @@
 
 # Don't symlink the example file - users should copy it manually to .zsh-secrets
 \.zsh-secrets\.example
+
+# Don't symlink the template - setup.sh copies it to .zshrc
+\.zshrc\.template

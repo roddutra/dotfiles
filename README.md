@@ -8,6 +8,7 @@ This repository contains my personal configuration files (dotfiles) for various 
 - **GNU Stow** for symlink management - allowing easy installation/uninstallation of configs
 - **Git Submodules** for tracking external plugin repositories (e.g., tmux plugins)
 - **Homebrew Bundle** for consistent package installation across machines
+- **gitleaks** pre-commit hook to prevent accidental secret commits
 
 ## Fresh MacOS installation steps
 
@@ -46,7 +47,7 @@ cd ~/dotfiles
 ./setup.sh
 ```
 
-This script configures git to handle the modular zsh configuration properly and creates template files for your secrets.
+This script creates local config files from templates (`.zshrc`, `.zsh-secrets`) and installs the gitleaks pre-commit hook.
 
 ### To install GNU Stow only
 
@@ -76,7 +77,8 @@ dotfiles/
 │       └── nvim/          # Will be symlinked to ~/.config/nvim/
 │           └── lua/
 ├── zsh/
-│   ├── .zshrc             # Will be symlinked to ~/.zshrc (loader)
+│   ├── .zshrc.template    # Template for .zshrc (version controlled)
+│   ├── .zshrc             # Local copy with tool configs (gitignored, symlinked to ~/.zshrc)
 │   ├── .zsh-settings      # Will be symlinked to ~/.zsh-settings (your config)
 │   └── .zsh-secrets       # Will be symlinked to ~/.zsh-secrets (gitignored)
 └── ghostty/
@@ -136,12 +138,13 @@ sed -i '' '/^vscode /d' Brewfile
 The zsh configuration is split into three modular files to separate concerns and enable version control without polluting your curated settings:
 
 **How it works:**
-- **`.zshrc`** - Minimal loader that sources the other files. Tools (NVM, pnpm, Herd, etc.) auto-append their configs here, but changes aren't tracked by git.
+- **`.zshrc.template`** - Version-controlled clean loader (the source of truth). Copied to `.zshrc` by `setup.sh` on first run.
+- **`.zshrc`** - Local working copy (gitignored). Tools (NVM, pnpm, Herd, etc.) auto-append their configs here without polluting git history.
 - **`.zsh-settings`** - Your curated shell configuration (version controlled): Oh My Posh theme, Zinit plugins, aliases, custom functions, history settings, completion styling, etc.
 - **`.zsh-secrets`** - Sensitive environment variables (gitignored): API keys, tokens, passwords, etc.
 
 **Why this structure:**
-This allows you to version control your personalized shell setup while letting package managers work normally - they'll append to `.zshrc` as expected, but those auto-generated configs won't pollute your git history. Your curated settings stay clean in `.zsh-settings`, and secrets remain safely gitignored in `.zsh-secrets`.
+This allows you to version control your personalized shell setup while letting package managers work normally - they'll append to `.zshrc` as expected, but those auto-generated configs won't pollute your git history since `.zshrc` is gitignored. Your curated settings stay clean in `.zsh-settings`, and secrets remain safely gitignored in `.zsh-secrets`.
 
 ### Managing Sensitive Environment Variables
 
@@ -206,7 +209,7 @@ stow -D nvim
 ```
 
 ### Examples:
-- `stow zsh` will symlink the `.zshrc` file to the home directory `~/.zshrc` as the config file is nested directly under the `./zsh` folder in this repo
+- `stow zsh` will symlink `.zshrc`, `.zsh-settings`, and `.zsh-secrets` to the home directory (the `.zshrc.template` is excluded via `.stow-local-ignore`)
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow */` will symlink ALL application configs at once

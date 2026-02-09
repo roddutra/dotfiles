@@ -10,6 +10,8 @@ brew "fd"
 brew "fzf"
 # GitHub command-line tool
 brew "gh"
+# Detect and prevent hardcoded secrets like passwords, API keys, and tokens
+brew "gitleaks"
 # Interpreter for PostScript and PDF
 brew "ghostscript"
 # Tools and libraries to manipulate images in many formats

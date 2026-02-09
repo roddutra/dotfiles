@@ -15,10 +15,14 @@ NC='\033[0m' # No Color
 # Change to dotfiles directory
 cd "$(dirname "$0")"
 
-echo "Step 1: Configuring git to ignore local changes to .zshrc..."
-git update-index --assume-unchanged zsh/.zshrc
-echo -e "${GREEN}✓${NC} Git will ignore local .zshrc modifications"
-echo "  (Tools can now auto-append configs without polluting git)"
+echo "Step 1: Creating .zshrc from template if needed..."
+if [ ! -f "zsh/.zshrc" ]; then
+    cp zsh/.zshrc.template zsh/.zshrc
+    echo -e "${GREEN}✓${NC} Created zsh/.zshrc from template"
+    echo -e "  ${YELLOW}→${NC} Tools can auto-append configs to this file"
+else
+    echo -e "${BLUE}ℹ${NC} zsh/.zshrc already exists, skipping"
+fi
 echo ""
 
 echo "Step 2: Creating .zsh-secrets file if needed..."
@@ -29,6 +33,27 @@ if [ ! -f "zsh/.zsh-secrets" ]; then
 else
     echo -e "${BLUE}ℹ${NC} zsh/.zsh-secrets already exists, skipping"
 fi
+echo ""
+
+echo "Step 3: Installing gitleaks pre-commit hook..."
+mkdir -p .git/hooks
+cat > .git/hooks/pre-commit << 'HOOK'
+#!/bin/bash
+if command -v gitleaks &> /dev/null; then
+    gitleaks protect --staged --verbose
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "gitleaks detected secrets in staged changes."
+        echo "If this is a false positive, commit with: git commit --no-verify"
+        exit 1
+    fi
+else
+    echo "Warning: gitleaks is not installed. Skipping secret scan."
+    echo "Install with: brew install gitleaks"
+fi
+HOOK
+chmod +x .git/hooks/pre-commit
+echo -e "${GREEN}✓${NC} Installed gitleaks pre-commit hook"
 echo ""
 
 echo "============================================"

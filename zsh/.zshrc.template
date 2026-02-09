@@ -6,7 +6,7 @@
 #   - .zsh-secrets:  Sensitive environment variables (API keys, tokens, etc.)
 #
 # Tools like NVM, pnpm, Herd, etc. will auto-append their configs below.
-# These auto-generated configs are NOT version controlled (git assume-unchanged).
+# The actual .zshrc is gitignored; this template is the version-controlled source.
 # ============================================================================
 
 # Load curated shell settings
