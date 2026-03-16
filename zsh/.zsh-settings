@@ -59,6 +59,8 @@ alias ls='ls --color'
 alias python='python3'
 alias pip='pip3'
 alias lg='lazygit'
+alias cc='claude'
+alias ccd='claude --dangerously-skip-permissions'
 
 # Custom Functions
 # Brew bundle dump without VSCode extensions

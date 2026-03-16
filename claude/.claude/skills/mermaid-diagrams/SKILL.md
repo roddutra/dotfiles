@@ -145,6 +145,7 @@ linkStyle default stroke:#999
 4. **Entity codes**: Use `#quot;` for `"`, `#amp;` for `&`, `#35;` for `#` inside node text.
 5. **Markdown in nodes**: Use `` "` `` and `` `" `` as delimiters inside node brackets: `` A["`**bold**`"] ``.
 6. **No return statements in click callbacks**: Click events require `securityLevel='loose'`.
+7. **Line breaks in node labels**: Use `<br/>` not `\n`. The `\n` escape is inconsistently supported across renderers (e.g. VS Code Mermaid extension shows literal `\n`). `<br/>` works universally.
 
 ## Best Practices
 
