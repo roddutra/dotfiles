@@ -80,7 +80,7 @@ python <skill-path>/scripts/cleanup_session.py --session <session-path>
 
 Deletes all prompt, output, and metadata files for the session.
 
-**Do NOT clean up automatically.** Session files live in `/tmp` and are harmless to keep. Only clean up when the user explicitly asks, or when you are 100% certain the work is fully complete (e.g., committed to main, feature branch merged, and the user has moved on to a different topic). When in doubt, leave the files — losing review history mid-flow is far worse than a few temp files.
+**Never clean up unless the user explicitly asks you to.** Session files live in `/tmp` and are harmless to keep. Do not clean up after reaching consensus with Codex, after committing, after pushing, or after merging. The user may need to reference these files in a future conversation. Only run this script when the user directly instructs you to clean up.
 
 ### Discovering Past Sessions
 
@@ -244,7 +244,7 @@ Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber
 7. **Apply changes** — modify the actual files for accepted findings before contacting Codex again
 8. **Follow up** — generate next round paths, write follow-up prompt listing what changed and what was rejected with reasoning, `resume_review.py`. Codex re-reviews the actual updated artifacts.
 9. **Iterate** — repeat steps 6-8 until both sides converge: Codex raises no new substantive findings, and all accepted changes are applied
-10. **Clean up** — only when the user asks, or work is fully complete and merged. Do NOT clean up proactively.
+10. **Do NOT clean up** — never run cleanup unless the user explicitly asks
 
 ### Presenting Results to the User
 
