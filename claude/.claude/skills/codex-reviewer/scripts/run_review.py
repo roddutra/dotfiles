@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Run an initial Codex review with safety enforcement.
 
-Invokes `codex exec` in read-only sandbox mode, suppresses stdout to avoid
-flooding the caller's context, captures the session ID from the output header,
-and writes the final response to the specified output file via -o.
+Invokes `codex exec` in read-only sandbox mode, suppresses stdout (which
+contains a duplicate of the response text), captures the session ID from
+stderr (where Codex sends its session banner when piped), and writes the
+final response to the specified output file via -o.
 
-Safety: This script hardcodes --sandbox read-only and rejects any attempt
-to override it. Forbidden flags are blocked at the code level.
+Safety: This script hardcodes --sandbox read-only. The command is constructed
+internally with no mechanism to inject other flags.
 """
 
 import argparse
@@ -15,15 +16,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-
-
-FORBIDDEN_FLAGS = {
-    "--sandbox workspace-write",
-    "--sandbox danger-full-access",
-    "--full-auto",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--yolo",
-}
 
 
 def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_metadata: Path | None = None) -> dict:
@@ -56,13 +48,15 @@ def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_
         process = subprocess.run(
             cmd,
             stdin=stdin_file,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
         )
 
+    # Codex sends the session banner (including session ID) to stderr,
+    # not stdout, when piped via subprocess.
     session_id = None
-    for line in process.stdout.splitlines():
+    for line in process.stderr.splitlines():
         match = re.search(r"session id:\s*(\S+)", line)
         if match:
             session_id = match.group(1)

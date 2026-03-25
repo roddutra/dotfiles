@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate a correctly formatted file path for a Codex review file.
+"""Generate correctly formatted file paths for a Codex review round.
 
-Returns the full path following the naming convention:
+Returns both prompt and output paths following the naming convention:
   /tmp/codex-reviews/<project>-<timestamp>-<title>-r<round>-<type>.<ext>
 """
 
@@ -12,38 +12,35 @@ from pathlib import Path
 REVIEWS_DIR = Path("/tmp/codex-reviews")
 
 
-def generate_path(project: str, timestamp: str, title: str, round_num: int, file_type: str) -> str:
-    """Generate a review file path.
+def generate_paths(project: str, timestamp: str, title: str, round_num: int) -> dict:
+    """Generate prompt and output file paths for a review round.
 
     Args:
         project: Project name (kebab-case)
         timestamp: Session timestamp (YYYYMMDD-HHmmss)
         title: Review title (kebab-case)
         round_num: Round number (1, 2, 3, ...)
-        file_type: Either 'prompt' or 'output'
 
     Returns:
-        Full file path as string
+        Dict with prompt_path and output_path
     """
-    if file_type not in ("prompt", "output"):
-        raise ValueError(f"file_type must be 'prompt' or 'output', got '{file_type}'")
-
-    ext = ".txt" if file_type == "prompt" else ".md"
-    filename = f"{project}-{timestamp}-{title}-r{round_num}-{file_type}{ext}"
-    return str(REVIEWS_DIR / filename)
+    base = f"{project}-{timestamp}-{title}-r{round_num}"
+    return {
+        "prompt_path": str(REVIEWS_DIR / f"{base}-prompt.txt"),
+        "output_path": str(REVIEWS_DIR / f"{base}-output.md"),
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a Codex review file path")
+    parser = argparse.ArgumentParser(description="Generate Codex review file paths for a round")
     parser.add_argument("--project", required=True, help="Project name (kebab-case)")
     parser.add_argument("--timestamp", required=True, help="Session timestamp (YYYYMMDD-HHmmss)")
     parser.add_argument("--title", required=True, help="Review title (kebab-case)")
     parser.add_argument("--round", type=int, required=True, help="Round number (1, 2, 3, ...)")
-    parser.add_argument("--type", required=True, choices=["prompt", "output"], help="File type")
     args = parser.parse_args()
 
-    path = generate_path(args.project, args.timestamp, args.title, args.round, args.type)
-    print(json.dumps({"path": path}))
+    paths = generate_paths(args.project, args.timestamp, args.title, args.round)
+    print(json.dumps(paths))
 
 
 if __name__ == "__main__":

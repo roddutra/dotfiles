@@ -8,7 +8,6 @@ if the directory already exists.
 
 import argparse
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +34,13 @@ def init_session(project: str, title: str) -> dict:
     metadata_path = REVIEWS_DIR / f"{base_prefix}-session.json"
     metadata_path.write_text(json.dumps(metadata, indent=2))
 
-    return {**metadata, "metadata_path": str(metadata_path)}
+    # Return only the fields the invoker needs — project and title are
+    # already known (caller passed them in), and base_prefix/reviews_dir
+    # are derivable.
+    return {
+        "timestamp": timestamp,
+        "metadata_path": str(metadata_path),
+    }
 
 
 def main():

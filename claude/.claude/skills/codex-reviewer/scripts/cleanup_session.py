@@ -22,23 +22,20 @@ def cleanup_session(project: str, timestamp: str, title: str) -> dict:
         title: Review title
 
     Returns:
-        Dict with count of deleted files and their paths
+        Dict with count of deleted files
     """
     base_prefix = f"{project}-{timestamp}-{title}"
-    deleted = []
+    deleted_count = 0
 
     if not REVIEWS_DIR.exists():
-        return {"deleted_count": 0, "deleted_files": []}
+        return {"deleted_count": 0}
 
     for file in REVIEWS_DIR.iterdir():
         if file.name.startswith(base_prefix):
             file.unlink()
-            deleted.append(str(file))
+            deleted_count += 1
 
-    return {
-        "deleted_count": len(deleted),
-        "deleted_files": deleted,
-    }
+    return {"deleted_count": deleted_count}
 
 
 def main():

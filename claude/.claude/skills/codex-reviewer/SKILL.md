@@ -60,7 +60,7 @@ Before the first review, initialize a session to create the reviews directory an
 python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
 ```
 
-Returns JSON with `timestamp`, `base_prefix`, `metadata_path`, and `reviews_dir`. Store these values — you'll use them for all subsequent steps.
+Returns JSON with `timestamp` and `metadata_path`. Store these values — you'll use them for all subsequent steps.
 
 **Example:**
 ```bash
@@ -68,27 +68,20 @@ python <skill-path>/scripts/init_session.py --project my-api --title prd-review
 ```
 ```json
 {
-  "project": "my-api",
   "timestamp": "20260325-141500",
-  "title": "prd-review",
-  "base_prefix": "my-api-20260325-141500-prd-review",
-  "reviews_dir": "/tmp/codex-reviews",
-  "current_round": 0,
-  "codex_session_id": null,
   "metadata_path": "/tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json"
 }
 ```
 
 ### Step 2: Generate File Paths
 
-Use the path generator to get correctly formatted file paths for prompts and outputs:
+Use the path generator to get correctly formatted file paths for a round's prompt and output:
 
 ```bash
-python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N> --type prompt
-python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N> --type output
+python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N>
 ```
 
-Returns JSON with the full `path`. Use these paths when writing prompt files and passing output paths to the review scripts.
+Returns JSON with `prompt_path` and `output_path`. Use these paths when writing prompt files and passing output paths to the review scripts.
 
 ### Step 3: Write the Prompt File
 
@@ -405,11 +398,10 @@ Be transparent. Don't silently incorporate or reject Codex's feedback — the us
 ```bash
 # Initialize session
 python <skill-path>/scripts/init_session.py --project my-api --title prd-review
-# Returns: timestamp, metadata_path, etc.
+# Returns: timestamp, metadata_path
 
-# Generate r1 paths
-python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1 --type prompt
-python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1 --type output
+# Generate r1 paths (returns both prompt_path and output_path)
+python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1
 
 # Write prompt file (via Write tool), then run initial review
 python <skill-path>/scripts/run_review.py --prompt-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-prompt.txt --output-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-output.md --cd /path/to/project --session-metadata /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
@@ -435,8 +427,7 @@ python <skill-path>/scripts/init_session.py --project my-api --title cache-appro
 ## Important Notes
 
 ### Safety (enforced by scripts)
-- **`--sandbox read-only` is hardcoded** in `run_review.py` and `resume_review.py` — it cannot be omitted or overridden.
-- **Forbidden flags are rejected** at the code level — the scripts will never pass `--full-auto`, `--workspace-write`, `--danger-full-access`, or `--yolo` to Codex.
+- **`--sandbox read-only` is hardcoded** in `run_review.py` and `resume_review.py` — it cannot be omitted or overridden. The scripts construct the command internally with no mechanism to inject other sandbox flags.
 - **`--last` is blocked** in `resume_review.py` — an explicit session ID is always required.
 - **Stdout is suppressed** via `subprocess` — Codex's execution trace never reaches your context window.
 - **Always include the no-modification instruction in the prompt** — belt and suspenders. The sandbox enforces it technically, but the prompt instruction prevents Codex from even attempting modifications.
