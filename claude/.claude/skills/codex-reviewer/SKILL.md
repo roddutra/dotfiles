@@ -72,13 +72,35 @@ Use `run_in_background: true` for long reviews. Read the output file with the Re
 
 Always resume rather than starting a new session when continuing a review.
 
-### Step 6: Clean Up
+### Step 6: Clean Up (User-Initiated Only)
 
 ```bash
 python <skill-path>/scripts/cleanup_session.py --session <session-path>
 ```
 
 Deletes all prompt, output, and metadata files for the session.
+
+**Do NOT clean up automatically.** Session files live in `/tmp` and are harmless to keep. Only clean up when the user explicitly asks, or when you are 100% certain the work is fully complete (e.g., committed to main, feature branch merged, and the user has moved on to a different topic). When in doubt, leave the files — losing review history mid-flow is far worse than a few temp files.
+
+### Discovering Past Sessions
+
+```bash
+python <skill-path>/scripts/list_sessions.py [options]
+```
+
+Returns JSON with matching sessions, their metadata, and associated files (prompts + outputs). Use this from a fresh conversation to find and reference prior review history.
+
+**Filter options:**
+
+- `--project <name>` — filter by project name
+- `--date today` / `--date yesterday` / `--date 2026-03-25` — specific date
+- `--from 2026-03-01 --to 2026-03-25` — date range
+- `--week` — current week
+- `--month` — current month
+
+All filters are combinable (e.g., `--project my-app --week`).
+
+**When to use:** At the start of a new conversation when the user references a prior review, or when you need context from an earlier session on the same project. Read the returned prompt/output files to recover the full review history.
 
 ### Handling Long-Running Reviews
 
@@ -212,7 +234,7 @@ Keep concise — one sentence per point.
 6. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 7. **Follow up** — generate next round paths, write follow-up prompt, `resume_review.py`. Repeat.
 8. **Converge** when findings are minor/stylistic or all substantive feedback is addressed
-9. **Clean up** — `cleanup_session.py --session <s>`
+9. **Clean up** — only when the user asks, or work is fully complete and merged. Do NOT clean up proactively.
 
 ### Presenting Results to the User
 
