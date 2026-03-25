@@ -33,7 +33,7 @@ def generate_paths(session_path: Path, round_num: int) -> dict:
     base = f"{metadata['base_prefix']}-r{round_num}"
 
     return {
-        "prompt_path": str(reviews_dir / f"{base}-prompt.txt"),
+        "prompt_path": str(reviews_dir / f"{base}-prompt.md"),
         "output_path": str(reviews_dir / f"{base}-output.md"),
     }
 
