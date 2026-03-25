@@ -154,6 +154,26 @@ The prompt must be:
 3. **Clear about what to review** — include the full artifact or tell Codex where to find it
 4. **Specific about what feedback you want** — generic "review this" produces generic feedback
 5. **Structured** — ask for findings in a format you can easily process
+6. **Clear about desired output length and detail level** — tell Codex how concise or detailed its response should be
+
+### Controlling Codex's Output
+
+Codex's response will be read back into your context window. A verbose, sprawling review wastes tokens and buries the signal in noise. **Always tell Codex how you want its output shaped** — be explicit about length, detail level, and what to focus on.
+
+**Scale output instructions to the task:**
+
+- **Large or complex reviews** (full PRD, multi-file code review, architecture assessment): Tell Codex to summarize its findings concisely. Focus on what matters most. Example: *"Keep your response concise. Provide a brief summary, then a numbered list of findings with severity ratings. No more than 2-3 sentences per finding. Skip minor stylistic issues — focus on substantive problems."*
+
+- **Focused reviews** (single file, specific concern, narrow question): Codex can be more detailed since the scope is small. Example: *"Be thorough in your analysis of this specific function. Include code-level detail where relevant."*
+
+- **Follow-up rounds**: These should always be concise since Codex is only responding to specific points. Example: *"Keep your response brief. For each of my points, reply with whether you accept my reasoning or still disagree (and why, in 1-2 sentences)."*
+
+**What to tell Codex about output format:**
+
+- Whether you want a summary or detailed analysis
+- Maximum length guidance (e.g., "keep findings to one sentence each", "no more than 10 findings")
+- What to skip (e.g., "skip minor stylistic suggestions", "don't comment on formatting", "focus only on logic errors and security")
+- What to prioritize (e.g., "only flag Critical and Major issues", "focus on feasibility, not polish")
 
 ### Prompt Template — Initial Review
 
@@ -185,6 +205,13 @@ ARTIFACT TO REVIEW:
 REVIEW FOCUS:
 [List specific areas to evaluate — e.g., completeness, feasibility, edge cases, security, performance]
 Your recommendations should be appropriate given the background and goals above. Do not recommend approaches that conflict with the stated constraints or goals.
+
+OUTPUT INSTRUCTIONS:
+[Adjust based on the scope and complexity of the review. Examples:
+- For large reviews: "Be concise. No more than 2-3 sentences per finding. Focus on Critical and Major issues only. Skip minor stylistic suggestions."
+- For focused reviews: "Be thorough and detailed for this specific area."
+- For follow-ups: "Keep it brief — one sentence per point."
+Choose the appropriate level for this review.]
 
 Please provide your review in the following format:
 
@@ -235,6 +262,7 @@ Also review the changes I made for:
 3. Any remaining concerns
 
 Same constraints apply: do NOT modify any files. Provide your analysis as text output only.
+Keep your response concise — one sentence per point where possible. Focus on whether you accept or reject my reasoning, and flag only new or remaining issues.
 ```
 
 This back-and-forth on objections is where the real value emerges. It forces both sides to sharpen their arguments and often surfaces the correct answer through debate.
