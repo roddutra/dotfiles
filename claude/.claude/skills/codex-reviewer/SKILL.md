@@ -104,9 +104,11 @@ All filters are combinable (e.g., `--project my-app --week`).
 
 ### Handling Long-Running Reviews
 
-Codex can take 10-20+ minutes for complex reviews. The Bash tool has a max timeout of 10 minutes.
+Codex reviews can take 10-20+ minutes. The Bash tool has a max timeout of 10 minutes.
 
-**Always run `run_review.py` and `resume_review.py` with `run_in_background: true`** to avoid the timeout ceiling.
+**Always run `run_review.py` and `resume_review.py` with `run_in_background: true`.** This is mandatory, not optional. Do not run these scripts in the foreground.
+
+**After launching a background task, stop and wait.** You will be automatically notified when the task completes. Do NOT poll for completion by running `sleep` + `ls` loops, checking file existence, or any other polling mechanism. Simply tell the user the review is running in the background and wait for the system notification. If something triggers you before the notification arrives (e.g., the user sends a message), check the output file existence once to determine status — but do not loop.
 
 **If a review is interrupted**, the session is NOT lost — the session ID is already in the metadata file. Resume via `resume_review.py`.
 
