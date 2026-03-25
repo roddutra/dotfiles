@@ -64,22 +64,22 @@ codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-review-output
 
 **This is critical.** After the initial review, all subsequent interactions with Codex on the same topic MUST use `codex exec resume` to continue the existing conversation. This preserves Codex's full context — the original artifact, its prior findings, and the discussion history — so it doesn't need to re-read everything or lose track of what was already discussed.
 
-Resume the most recent session:
+**Always resume by session ID, not `--last`.** The user may be running multiple Claude and Codex sessions in parallel across different projects. Using `resume --last` risks resuming a session from a completely different project. Always capture the session ID from the initial `codex exec` output and use it explicitly for all follow-ups.
+
+**Capturing the session ID:** When you run the initial `codex exec`, the output header includes a `session id:` line (e.g., `session id: 019d224b-d9d7-7373-bb22-e15d9606df20`). Extract and store this ID so you can use it in subsequent `resume` commands.
+
+**Flag ordering note:** Global flags like `--sandbox` and `-o` MUST come before the `resume` subcommand. Placing them after `resume` will cause a CLI error.
+
+Resume by session ID:
 
 ```bash
-codex exec resume --last --sandbox read-only -o /tmp/codex-review-round2.md "Your follow-up prompt here"
-```
-
-Resume a specific session by ID:
-
-```bash
-codex exec resume <SESSION_ID> --sandbox read-only -o /tmp/codex-review-round2.md "Your follow-up prompt here"
+codex exec --sandbox read-only -o /tmp/codex-review-round2.md resume <SESSION_ID> "Your follow-up prompt here"
 ```
 
 For longer follow-up prompts, pipe from a file:
 
 ```bash
-codex exec resume --last --sandbox read-only -o /tmp/codex-review-round2.md - < /tmp/codex-followup-prompt.txt
+codex exec --sandbox read-only -o /tmp/codex-review-round2.md resume <SESSION_ID> - < /tmp/codex-followup-prompt.txt
 ```
 
 **Always prefer resuming over starting a new session** when continuing a review. Only start a new session when the topic is entirely different or unrelated to any prior review.
@@ -92,8 +92,7 @@ codex exec resume --last --sandbox read-only -o /tmp/codex-review-round2.md - < 
 | `--cd <path>` | Sets the working directory so Codex can read the relevant codebase. Only needed on the initial invocation — resumed sessions inherit the working directory. |
 | `-o <path>` | Writes Codex's final response to a file (useful for capturing long reviews). |
 | `--model <model>` | Override the model if needed. |
-| `resume --last` | Continue the most recent Codex session. Use for follow-up rounds. |
-| `resume <SESSION_ID>` | Continue a specific Codex session by ID. |
+| `resume <SESSION_ID>` | Continue a specific Codex session by ID. **Always use the explicit session ID**, never `--last`. |
 
 ### Capturing Output
 
@@ -302,13 +301,13 @@ The real power of this skill is the iterative review loop — bouncing work betw
 
 4. **Send the updated artifact back for another round** — **resume the same session**:
    ```bash
-   codex exec resume --last --sandbox read-only -o /tmp/codex-review-r2.md - < /tmp/codex-followup-prompt.txt
+   codex exec --sandbox read-only -o /tmp/codex-review-r2.md resume <SESSION_ID> - < /tmp/codex-followup-prompt.txt
    ```
    Codex retains the full context of its original review, your changes, and can assess whether its findings were properly addressed.
 
 5. **Continue resuming** for as many rounds as needed:
    ```bash
-   codex exec resume --last --sandbox read-only -o /tmp/codex-review-r3.md "I've addressed your remaining concerns about X and Y. The updated PRD now includes Z. Please do a final review and confirm if you're satisfied."
+   codex exec --sandbox read-only -o /tmp/codex-review-r3.md resume <SESSION_ID> "I've addressed your remaining concerns about X and Y. The updated PRD now includes Z. Please do a final review and confirm if you're satisfied."
    ```
 
 6. **Converge** when Codex's findings are minor/stylistic or when you've addressed all substantive feedback.
@@ -344,7 +343,7 @@ codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-prd-review-r1
 # Read /tmp/codex-prd-review-r1.md, assess findings, update the PRD
 
 # Round 2: Resume the session with changes
-codex exec resume --last --sandbox read-only -o /tmp/codex-prd-review-r2.md - < /tmp/codex-prd-followup.txt
+codex exec --sandbox read-only -o /tmp/codex-prd-review-r2.md resume <SESSION_ID> - < /tmp/codex-prd-followup.txt
 
 # Read /tmp/codex-prd-review-r2.md, continue iterating until converged
 ```
@@ -356,7 +355,7 @@ codex exec resume --last --sandbox read-only -o /tmp/codex-prd-review-r2.md - < 
 codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-code-review-r1.md "You are an independent code reviewer. Do NOT modify any files. Read the files [list files] and review them for bugs, security issues, and design problems. Provide findings as a numbered list with severity ratings."
 
 # Address findings, then resume for verification
-codex exec resume --last --sandbox read-only -o /tmp/codex-code-review-r2.md "I've fixed the issues you identified in findings #1, #2, and #4. Please re-read the updated files and verify the fixes. Flag any remaining or new issues."
+codex exec --sandbox read-only -o /tmp/codex-code-review-r2.md resume <SESSION_ID> "I've fixed the issues you identified in findings #1, #2, and #4. Please re-read the updated files and verify the fixes. Flag any remaining or new issues."
 ```
 
 ### Example 3: Quick Sanity Check (No Follow-Up Needed)
@@ -376,7 +375,7 @@ codex exec --sandbox read-only --cd /path/to/project "Do NOT modify any files. R
 - **Self-check every command** — before executing, visually confirm `--sandbox read-only` is present and no forbidden flags snuck in.
 
 ### Workflow
-- **Always resume sessions for follow-up rounds** — never start a new session to continue an existing review. Use `codex exec resume --last` or `codex exec resume <SESSION_ID>`.
+- **Always resume sessions for follow-up rounds** — never start a new session to continue an existing review. Always use the explicit session ID: `codex exec --sandbox read-only resume <SESSION_ID>`. Never use `--last` as it may resume a session from a different project.
 - **Codex is not infallible — think critically** — treat its findings as suggestions to evaluate, not commands to follow. Reflect on and validate each finding before acting on it. Research topics you're uncertain about. Push back on findings you believe are wrong and explain your reasoning in the follow-up prompt so Codex can respond to your objections.
 - **Provide conversation context** — Codex has no knowledge of your discussion with the user. Include relevant goals, constraints, and decisions so Codex reviews under the same conditions.
 - **Be specific in your prompts** — the more context and focus you provide, the better the review.
