@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """List and filter past Codex review sessions.
 
-Scans the reviews directory for session metadata files and returns
-matching sessions with their associated prompt/output files. Useful
-for discovering previous review history from a fresh conversation.
+Walks the directory tree under /tmp/codex-reviews/ looking for session.json
+files. Supports filtering by project, date, date range, week, and month.
+
+Directory structure:
+  /tmp/codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
 """
 
 import argparse
@@ -11,48 +13,44 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-REVIEWS_DIR = Path("/tmp/codex-reviews")
+from generate_path import REVIEWS_DIR, to_kebab_case
 
 
 def parse_date(date_str: str) -> str:
-    """Normalize a date string to YYYYMMDD format."""
+    """Normalize a date string to YYYY-MM-DD format."""
     today = datetime.now()
     if date_str == "today":
-        return today.strftime("%Y%m%d")
+        return today.strftime("%Y-%m-%d")
     if date_str == "yesterday":
-        return (today - timedelta(days=1)).strftime("%Y%m%d")
-    # Accept YYYY-MM-DD or YYYYMMDD
-    return date_str.replace("-", "")
+        return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    # Already YYYY-MM-DD
+    return date_str
 
 
 def get_week_range() -> tuple[str, str]:
-    """Return (monday, sunday) of the current week as YYYYMMDD strings."""
+    """Return (monday, sunday) of the current week as YYYY-MM-DD strings."""
     today = datetime.now()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
-    return monday.strftime("%Y%m%d"), sunday.strftime("%Y%m%d")
+    return monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
 
 
 def get_month_range() -> tuple[str, str]:
-    """Return (first_day, last_day) of the current month as YYYYMMDD strings."""
+    """Return (first_day, last_day) of the current month as YYYY-MM-DD strings."""
     today = datetime.now()
     first = today.replace(day=1)
-    # Last day: next month's first day minus one day
     if today.month == 12:
         last = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
     else:
         last = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
-    return first.strftime("%Y%m%d"), last.strftime("%Y%m%d")
+    return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d")
 
 
-def find_session_files(session_path: Path) -> list[str]:
-    """Find all prompt and output files belonging to a session."""
-    metadata = json.loads(session_path.read_text())
-    base_prefix = metadata["base_prefix"]
-
+def find_round_files(session_dir: Path) -> list[str]:
+    """Find all prompt and output files in a session directory."""
     files = sorted(
-        str(f) for f in REVIEWS_DIR.glob(f"{base_prefix}-r*")
-        if f.suffix in (".md", ".txt")
+        str(f) for f in session_dir.iterdir()
+        if f.suffix == ".md" and f.name.startswith("r")
     )
     return files
 
@@ -66,10 +64,10 @@ def list_sessions(
     """List sessions matching the given filters.
 
     Args:
-        project: Filter by project name (exact match)
-        date: Filter by specific date (YYYYMMDD)
-        date_from: Start of date range (YYYYMMDD), inclusive
-        date_to: End of date range (YYYYMMDD), inclusive
+        project: Filter by project name (matches project directory slug)
+        date: Filter by specific date (YYYY-MM-DD)
+        date_from: Start of date range (YYYY-MM-DD), inclusive
+        date_to: End of date range (YYYY-MM-DD), inclusive
 
     Returns:
         Dict with list of matching sessions
@@ -78,48 +76,61 @@ def list_sessions(
         return {"sessions": []}
 
     sessions = []
-    for session_path in sorted(REVIEWS_DIR.glob("*-session.json")):
-        try:
-            metadata = json.loads(session_path.read_text())
-        except (json.JSONDecodeError, OSError):
+
+    # Walk: project dirs -> date dirs -> session dirs -> session.json
+    for project_dir in sorted(REVIEWS_DIR.iterdir()):
+        if not project_dir.is_dir():
             continue
 
-        # Filter by project
-        if project and metadata.get("project") != project:
+        # Filter by project (slugify input to match directory name)
+        if project and project_dir.name != to_kebab_case(project):
             continue
 
-        # Extract date portion from timestamp (YYYYMMDD-HHMMSS -> YYYYMMDD)
-        ts = metadata.get("timestamp", "")
-        session_date = ts.split("-")[0] if "-" in ts else ts
+        for date_dir in sorted(project_dir.iterdir()):
+            if not date_dir.is_dir():
+                continue
 
-        # Filter by exact date
-        if date and session_date != date:
-            continue
+            dir_date = date_dir.name  # YYYY-MM-DD
 
-        # Filter by date range
-        if date_from and session_date < date_from:
-            continue
-        if date_to and session_date > date_to:
-            continue
+            # Filter by exact date
+            if date and dir_date != date:
+                continue
 
-        files = find_session_files(session_path)
+            # Filter by date range
+            if date_from and dir_date < date_from:
+                continue
+            if date_to and dir_date > date_to:
+                continue
 
-        sessions.append({
-            "session_path": str(session_path),
-            "project": metadata.get("project"),
-            "title": metadata.get("title"),
-            "timestamp": ts,
-            "current_round": metadata.get("current_round", 0),
-            "codex_session_id": metadata.get("codex_session_id"),
-            "files": files,
-        })
+            for session_dir in sorted(session_dir for session_dir in date_dir.iterdir() if session_dir.is_dir()):
+                session_file = session_dir / "session.json"
+                if not session_file.exists():
+                    continue
+
+                try:
+                    metadata = json.loads(session_file.read_text())
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+                files = find_round_files(session_dir)
+
+                sessions.append({
+                    "session_path": str(session_file),
+                    "project": metadata.get("project"),
+                    "title": metadata.get("title"),
+                    "date": metadata.get("date"),
+                    "time": metadata.get("time"),
+                    "current_round": metadata.get("current_round", 0),
+                    "codex_session_id": metadata.get("codex_session_id"),
+                    "files": files,
+                })
 
     return {"sessions": sessions}
 
 
 def main():
     parser = argparse.ArgumentParser(description="List past Codex review sessions")
-    parser.add_argument("--project", help="Filter by project name")
+    parser.add_argument("--project", help="Filter by project name (slug)")
     parser.add_argument(
         "--date",
         help="Filter by date: YYYY-MM-DD, 'today', or 'yesterday'",

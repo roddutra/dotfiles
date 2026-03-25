@@ -39,8 +39,28 @@ def write_prompt(session_path: Path, content: str) -> dict:
         print("Error: No prompt content received on stdin", file=sys.stderr)
         sys.exit(1)
 
-    metadata = json.loads(session_path.read_text())
-    round_num = metadata.get("current_round", 0) + 1
+    try:
+        metadata = json.loads(session_path.read_text())
+    except json.JSONDecodeError:
+        print(f"Error: Invalid JSON in session file: {session_path}", file=sys.stderr)
+        sys.exit(1)
+
+    current_round = metadata.get("current_round", 0)
+
+    # Prevent orphaned rounds: block writing a new prompt if the previous
+    # round's review has not been run yet (output file missing).
+    if current_round > 0:
+        prev_paths = generate_paths(session_path, current_round)
+        prev_output = Path(prev_paths["output_path"])
+        if not prev_output.exists():
+            print(
+                f"Error: Round {current_round} output not found. "
+                f"Run the review before writing the next prompt.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    round_num = current_round + 1
 
     paths = generate_paths(session_path, round_num)
     prompt_path = Path(paths["prompt_path"])

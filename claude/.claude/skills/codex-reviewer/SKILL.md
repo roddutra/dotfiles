@@ -67,7 +67,7 @@ Reads the current round from metadata to locate the correct files. Returns JSON 
 python <skill-path>/scripts/cleanup_session.py --session <session-path>
 ```
 
-Deletes all prompt, output, and metadata files for the session.
+Deletes all prompt, output, and metadata files for the session, removes the session directory, and prunes empty parent directories.
 
 **Never clean up unless the user explicitly asks you to.** Session files live in `/tmp` and are harmless to keep. Do not clean up after reaching consensus with Codex, after committing, after pushing, or after merging. The user may need to reference these files in a future conversation. Only run this script when the user directly instructs you to clean up.
 
@@ -81,7 +81,7 @@ Returns JSON with matching sessions, their metadata, and associated files (promp
 
 **Filter options:**
 
-- `--project <name>` — filter by project name
+- `--project <name>` — filter by project name (auto-slugified to match directory)
 - `--date today` / `--date yesterday` / `--date 2026-03-25` — specific date
 - `--from 2026-03-01 --to 2026-03-25` — date range
 - `--week` — current week

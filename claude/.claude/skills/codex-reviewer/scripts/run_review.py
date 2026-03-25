@@ -38,7 +38,11 @@ def run_review(session_path: Path, project_dir: Path | None = None) -> dict:
         print(f"Error: Session file not found: {session_path}", file=sys.stderr)
         sys.exit(1)
 
-    metadata = json.loads(session_path.read_text())
+    try:
+        metadata = json.loads(session_path.read_text())
+    except json.JSONDecodeError:
+        print(f"Error: Invalid JSON in session file: {session_path}", file=sys.stderr)
+        sys.exit(1)
     round_num = metadata.get("current_round", 0)
     session_id = metadata.get("codex_session_id")
     is_resume = bool(session_id and session_id != "--last")

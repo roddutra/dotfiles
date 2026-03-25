@@ -1,56 +1,68 @@
 #!/usr/bin/env python3
 """Initialize a Codex review session.
 
-Creates the review directory and generates a session metadata file with
-a fixed timestamp that all rounds will share. Idempotent — safe to call
-if the directory already exists.
+Creates a nested directory structure and writes a session.json metadata
+file. The directory hierarchy encodes project, date, and session identity:
+
+  /tmp/codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
 """
 
 import argparse
 import json
-import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
-REVIEWS_DIR = Path("/tmp/codex-reviews")
-
-
-def to_kebab_case(text: str) -> str:
-    """Convert arbitrary text to kebab-case."""
-    text = text.strip().lower()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    return text.strip("-")
+from generate_path import REVIEWS_DIR, to_kebab_case
 
 
 def init_session(project: str, title: str) -> dict:
-    """Create the reviews directory and return session metadata path."""
+    """Create the session directory and return session metadata path."""
     REVIEWS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     REVIEWS_DIR.chmod(0o700)
 
     project_slug = to_kebab_case(project)
     title_slug = to_kebab_case(title)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base_prefix = f"{project_slug}-{timestamp}-{title_slug}"
+
+    if not project_slug:
+        print(f"Error: Project name produces empty slug: {project!r}", file=sys.stderr)
+        sys.exit(1)
+    if not title_slug:
+        print(f"Error: Title produces empty slug: {title!r}", file=sys.stderr)
+        sys.exit(1)
+
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H%M%S")
+
+    session_dir = REVIEWS_DIR / project_slug / date_str / f"{time_str}-{title_slug}"
+
+    session_dir.mkdir(parents=True, exist_ok=True)
 
     metadata = {
         "project": project,
-        "timestamp": timestamp,
+        "date": date_str,
+        "time": time_str,
         "title": title,
-        "base_prefix": base_prefix,
         "current_round": 0,
         "codex_session_id": None,
     }
 
-    metadata_path = REVIEWS_DIR / f"{base_prefix}-session.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2))
+    metadata_path = session_dir / "session.json"
+    try:
+        with metadata_path.open("x") as f:
+            f.write(json.dumps(metadata, indent=2))
+    except FileExistsError:
+        print(f"Error: Session already exists: {metadata_path}", file=sys.stderr)
+        sys.exit(1)
 
     return {"session": str(metadata_path)}
 
 
 def main():
     parser = argparse.ArgumentParser(description="Initialize a Codex review session")
-    parser.add_argument("--project", required=True, help="Project name (kebab-case)")
-    parser.add_argument("--title", required=True, help="Review title (kebab-case, e.g., prd-review)")
+    parser.add_argument("--project", required=True, help="Project name")
+    parser.add_argument("--title", required=True, help="Review title (e.g., prd-review)")
     args = parser.parse_args()
 
     result = init_session(args.project, args.title)
