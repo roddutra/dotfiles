@@ -8,10 +8,18 @@ if the directory already exists.
 
 import argparse
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 REVIEWS_DIR = Path("/tmp/codex-reviews")
+
+
+def to_kebab_case(text: str) -> str:
+    """Convert arbitrary text to kebab-case."""
+    text = text.strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
 
 
 def init_session(project: str, title: str) -> dict:
@@ -19,7 +27,8 @@ def init_session(project: str, title: str) -> dict:
     REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base_prefix = f"{project}-{timestamp}-{title}"
+    slug = to_kebab_case(title)
+    base_prefix = f"{project}-{timestamp}-{slug}"
 
     metadata = {
         "project": project,
