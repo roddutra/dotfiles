@@ -19,7 +19,7 @@ Invoke Codex when you need an independent review of something you have produced:
 
 ## How to Invoke Codex
 
-Use the `codex exec` subcommand for non-interactive execution. Codex runs, streams its response to stdout, and exits.
+Use the `codex exec` subcommand for non-interactive execution. Codex runs, writes its final response to a file via `-o`, and exits. Always suppress stdout to keep Codex's execution trace out of your context window.
 
 ### Safety: Read-Only Mode Is Mandatory
 
@@ -46,63 +46,104 @@ This skill is strictly for **review only**. Codex must NEVER modify files, creat
 
 If any check fails, fix the command before executing it.
 
-### Command Pattern — Initial Review
+### Scripts — Use These Instead of Raw CLI Commands
 
-For short prompts:
+This skill includes Python scripts in the `scripts/` directory that handle all Codex CLI invocations. **Always use these scripts** instead of constructing `codex exec` commands manually. The scripts enforce safety constraints (read-only sandbox, stdout suppression, session ID tracking, file naming) at the code level, so they cannot be forgotten or mistyped.
 
-```bash
-codex exec --sandbox read-only "Your prompt here"
-```
+The scripts are located relative to this skill's directory. Determine the skill path at runtime and reference scripts from there.
 
-For longer prompts (which reviews typically require), write the prompt to a temporary file and pipe it:
+### Step 1: Initialize a Session
 
-```bash
-codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-review-output.md - < /tmp/codex-review-prompt.txt
-```
-
-### Command Pattern — Follow-Up Rounds (Session Resume)
-
-**This is critical.** After the initial review, all subsequent interactions with Codex on the same topic MUST use `codex exec resume` to continue the existing conversation. This preserves Codex's full context — the original artifact, its prior findings, and the discussion history — so it doesn't need to re-read everything or lose track of what was already discussed.
-
-**Always resume by session ID, not `--last`.** The user may be running multiple Claude and Codex sessions in parallel across different projects. Using `resume --last` risks resuming a session from a completely different project. Always capture the session ID from the initial `codex exec` output and use it explicitly for all follow-ups.
-
-**Capturing the session ID:** When you run the initial `codex exec`, the output header includes a `session id:` line (e.g., `session id: 019d224b-d9d7-7373-bb22-e15d9606df20`). Extract and store this ID so you can use it in subsequent `resume` commands.
-
-**Flag ordering note:** Global flags like `--sandbox` and `-o` MUST come before the `resume` subcommand. Placing them after `resume` will cause a CLI error.
-
-Resume by session ID:
+Before the first review, initialize a session to create the reviews directory and generate the session metadata (timestamp, file naming prefix):
 
 ```bash
-codex exec --sandbox read-only -o /tmp/codex-review-round2.md resume <SESSION_ID> "Your follow-up prompt here"
+python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
 ```
 
-For longer follow-up prompts, pipe from a file:
+Returns JSON with `timestamp`, `base_prefix`, `metadata_path`, and `reviews_dir`. Store these values — you'll use them for all subsequent steps.
+
+**Example:**
+```bash
+python <skill-path>/scripts/init_session.py --project my-api --title prd-review
+```
+```json
+{
+  "project": "my-api",
+  "timestamp": "20260325-141500",
+  "title": "prd-review",
+  "base_prefix": "my-api-20260325-141500-prd-review",
+  "reviews_dir": "/tmp/codex-reviews",
+  "current_round": 0,
+  "codex_session_id": null,
+  "metadata_path": "/tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json"
+}
+```
+
+### Step 2: Generate File Paths
+
+Use the path generator to get correctly formatted file paths for prompts and outputs:
 
 ```bash
-codex exec --sandbox read-only -o /tmp/codex-review-round2.md resume <SESSION_ID> - < /tmp/codex-followup-prompt.txt
+python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N> --type prompt
+python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N> --type output
 ```
 
-**Always prefer resuming over starting a new session** when continuing a review. Only start a new session when the topic is entirely different or unrelated to any prior review.
+Returns JSON with the full `path`. Use these paths when writing prompt files and passing output paths to the review scripts.
 
-### Key Flags
+### Step 3: Write the Prompt File
 
-| Flag | Purpose |
-|------|---------|
-| `--sandbox read-only` | **Required.** Prevents Codex from modifying files. |
-| `--cd <path>` | Sets the working directory so Codex can read the relevant codebase. Only needed on the initial invocation — resumed sessions inherit the working directory. |
-| `-o <path>` | Writes Codex's final response to a file (useful for capturing long reviews). |
-| `--model <model>` | Override the model if needed. |
-| `resume <SESSION_ID>` | Continue a specific Codex session by ID. **Always use the explicit session ID**, never `--last`. |
+Use the Write tool to create the prompt file at the path from Step 2. See the "Constructing the Review Prompt" section below for prompt templates.
 
-### Capturing Output
-
-For reviews that may be long, capture the output to a file so you can read it reliably:
+### Step 4: Run the Initial Review
 
 ```bash
-codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-review-output.md - < /tmp/codex-review-prompt.txt
+python <skill-path>/scripts/run_review.py --prompt-file <prompt-path> --output-file <output-path> --cd <project-dir> --session-metadata <metadata-path>
 ```
 
-Then read `/tmp/codex-review-output.md` to process the findings.
+This script:
+- Enforces `--sandbox read-only` (hardcoded, cannot be overridden)
+- Suppresses Codex's execution trace from your context window
+- Captures the Codex session ID and returns it as JSON
+- Updates the session metadata file with the session ID
+
+Returns JSON with `session_id` and `output_file`. **Store the `session_id`** for follow-up rounds.
+
+Then use the Read tool to read only the output file — this is the only part of Codex's response you need.
+
+### Step 5: Resume for Follow-Up Rounds
+
+```bash
+python <skill-path>/scripts/resume_review.py --session-id <session-id> --prompt-file <prompt-path> --output-file <output-path> --round <N> --session-metadata <metadata-path>
+```
+
+This script:
+- Enforces `--sandbox read-only` (hardcoded)
+- Uses the explicit session ID (rejects `--last` to prevent cross-project conflicts)
+- Suppresses all stdout
+- Updates the session metadata with the current round number
+
+Returns JSON with `output_file` and `round`. Read the output file with the Read tool.
+
+**Always resume** rather than starting a new session when continuing a review. Only start a new session when the topic is entirely different.
+
+### Step 6: Clean Up
+
+After the review loop is complete:
+
+```bash
+python <skill-path>/scripts/cleanup_session.py --project <project> --timestamp <timestamp> --title <title>
+```
+
+Deletes all prompt, output, and metadata files for the session.
+
+### Why Scripts Instead of Raw Commands
+
+The scripts enforce safety at the code level rather than relying on instructions:
+- `--sandbox read-only` is hardcoded — cannot be omitted or overridden
+- `--last` is explicitly rejected — must use session ID
+- Stdout is suppressed via `subprocess` — execution trace never reaches your context
+- File naming convention is generated by code — no manual path construction
+- Session metadata tracks state across rounds automatically
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
@@ -315,30 +356,28 @@ The real power of this skill is the iterative review loop — bouncing work betw
 
 1. **Draft your artifact** (PRD, plan, code, etc.)
 
-2. **Send it to Codex for initial review** — start a new `codex exec` session:
-   ```bash
-   codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-review-r1.md - < /tmp/codex-review-prompt.txt
-   ```
+2. **Initialize a session** — run `init_session.py` to create the reviews directory and generate session metadata. Store the returned `timestamp`, `base_prefix`, and `metadata_path`.
 
-3. **Critically assess each finding** — do NOT blindly follow Codex's recommendations:
+3. **Generate file paths** — run `generate_path.py` for the r1 prompt and output paths.
+
+4. **Write the prompt** — use the Write tool to create the prompt file at the generated path (see prompt templates below).
+
+5. **Run the initial review** — run `run_review.py` with the prompt file, output file, project directory, and metadata path. Store the returned `session_id`.
+
+6. **Read the output** — use the Read tool on the output file to see Codex's review.
+
+7. **Critically assess each finding** — do NOT blindly follow Codex's recommendations:
    - **Validate each finding** — is it accurate? Does Codex have the full picture?
    - **Research if uncertain** — read code, check docs, verify assumptions before deciding
    - **Accept and implement** findings you agree with
    - **Reject with reasoning** findings you disagree with — document exactly why
    - **Flag for discussion** findings you're unsure about — ask Codex a follow-up
 
-4. **Send the updated artifact back for another round** — **resume the same session**:
-   ```bash
-   codex exec --sandbox read-only -o /tmp/codex-review-r2.md resume <SESSION_ID> - < /tmp/codex-followup-prompt.txt
-   ```
-   Codex retains the full context of its original review, your changes, and can assess whether its findings were properly addressed.
+8. **Send follow-ups** — generate r2 paths, write the follow-up prompt, run `resume_review.py` with the session ID. Read the output file. Repeat for r3, r4, etc.
 
-5. **Continue resuming** for as many rounds as needed:
-   ```bash
-   codex exec --sandbox read-only -o /tmp/codex-review-r3.md resume <SESSION_ID> "I've addressed your remaining concerns about X and Y. The updated PRD now includes Z. Please do a final review and confirm if you're satisfied."
-   ```
+9. **Converge** when Codex's findings are minor/stylistic or when you've addressed all substantive feedback.
 
-6. **Converge** when Codex's findings are minor/stylistic or when you've addressed all substantive feedback.
+10. **Clean up** — run `cleanup_session.py` to delete all review files for this session.
 
 ### Why Session Resume Matters
 
@@ -364,49 +403,47 @@ Be transparent. Don't silently incorporate or reject Codex's feedback — the us
 ### Example 1: PRD Review with Follow-Up
 
 ```bash
-# Round 1: Initial review
-# Write the review prompt including the full PRD to a temp file, then:
-codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-prd-review-r1.md - < /tmp/codex-prd-prompt.txt
+# Initialize session
+python <skill-path>/scripts/init_session.py --project my-api --title prd-review
+# Returns: timestamp, metadata_path, etc.
 
-# Read /tmp/codex-prd-review-r1.md, assess findings, update the PRD
+# Generate r1 paths
+python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1 --type prompt
+python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1 --type output
 
-# Round 2: Resume the session with changes
-codex exec --sandbox read-only -o /tmp/codex-prd-review-r2.md resume <SESSION_ID> - < /tmp/codex-prd-followup.txt
+# Write prompt file (via Write tool), then run initial review
+python <skill-path>/scripts/run_review.py --prompt-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-prompt.txt --output-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-output.md --cd /path/to/project --session-metadata /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
+# Returns: session_id. Read the output file via Read tool.
 
-# Read /tmp/codex-prd-review-r2.md, continue iterating until converged
+# Round 2: Generate r2 paths, write follow-up prompt, resume
+python <skill-path>/scripts/resume_review.py --session-id <SESSION_ID> --prompt-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r2-prompt.txt --output-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r2-output.md --round 2 --session-metadata /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
+# Read the r2 output file, continue iterating until converged
+
+# Clean up when done
+python <skill-path>/scripts/cleanup_session.py --project my-api --timestamp 20260325-141500 --title prd-review
 ```
 
-### Example 2: Code Review of Recent Changes
+### Example 2: Quick Sanity Check
+
+Even for a one-off review, use the scripts — they're just as easy and enforce all safety constraints:
 
 ```bash
-# Round 1: Initial code review
-codex exec --sandbox read-only --cd /path/to/project -o /tmp/codex-code-review-r1.md "You are an independent code reviewer. Do NOT modify any files. Read the files [list files] and review them for bugs, security issues, and design problems. Provide findings as a numbered list with severity ratings."
-
-# Address findings, then resume for verification
-codex exec --sandbox read-only -o /tmp/codex-code-review-r2.md resume <SESSION_ID> "I've fixed the issues you identified in findings #1, #2, and #4. Please re-read the updated files and verify the fixes. Flag any remaining or new issues."
-```
-
-### Example 3: Quick Sanity Check (No Follow-Up Needed)
-
-For a one-off check where you don't expect iteration, a single invocation is fine:
-
-```bash
-codex exec --sandbox read-only --cd /path/to/project "Do NOT modify any files. Review the approach in [file] for [specific concern]. Reply with your assessment in 2-3 paragraphs."
+python <skill-path>/scripts/init_session.py --project my-api --title cache-approach
+# Write prompt, run review, read output, clean up
 ```
 
 ## Important Notes
 
-### Safety (non-negotiable)
-- **`--sandbox read-only` on EVERY command** — both initial invocations and resumed sessions. Never omit it. Never substitute it with a different sandbox mode.
-- **NEVER use `--full-auto`, `--sandbox workspace-write`, `--sandbox danger-full-access`, or `--yolo`** — these flags allow Codex to modify files. They are forbidden in this skill. This skill is review-only.
-- **Always include the no-modification instruction in the prompt** — belt and suspenders. The sandbox enforces it technically, but the prompt instruction prevents Codex from even attempting modifications that would be blocked.
-- **Self-check every command** — before executing, visually confirm `--sandbox read-only` is present and no forbidden flags snuck in.
+### Safety (enforced by scripts)
+- **`--sandbox read-only` is hardcoded** in `run_review.py` and `resume_review.py` — it cannot be omitted or overridden.
+- **Forbidden flags are rejected** at the code level — the scripts will never pass `--full-auto`, `--workspace-write`, `--danger-full-access`, or `--yolo` to Codex.
+- **`--last` is blocked** in `resume_review.py` — an explicit session ID is always required.
+- **Stdout is suppressed** via `subprocess` — Codex's execution trace never reaches your context window.
+- **Always include the no-modification instruction in the prompt** — belt and suspenders. The sandbox enforces it technically, but the prompt instruction prevents Codex from even attempting modifications.
 
 ### Workflow
-- **Always resume sessions for follow-up rounds** — never start a new session to continue an existing review. Always use the explicit session ID: `codex exec --sandbox read-only resume <SESSION_ID>`. Never use `--last` as it may resume a session from a different project.
+- **Always use the scripts** — never construct raw `codex exec` commands manually. The scripts exist to enforce constraints you might otherwise forget.
 - **Codex is not infallible — think critically** — treat its findings as suggestions to evaluate, not commands to follow. Reflect on and validate each finding before acting on it. Research topics you're uncertain about. Push back on findings you believe are wrong and explain your reasoning in the follow-up prompt so Codex can respond to your objections.
 - **Provide conversation context** — Codex has no knowledge of your discussion with the user. Include relevant goals, constraints, and decisions so Codex reviews under the same conditions.
 - **Be specific in your prompts** — the more context and focus you provide, the better the review.
-- **Use `--cd`** on the initial invocation to point Codex at the project directory so it can read relevant code for context.
-- **For long artifacts**, write the prompt (including the artifact) to a temp file and pipe it in, rather than trying to fit everything in a CLI argument.
-- **Clean up temp files** after the review loop is complete.
+- **Clean up** — run `cleanup_session.py` when the review loop is complete.
