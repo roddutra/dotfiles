@@ -224,6 +224,15 @@ Keep concise — one sentence per point.
 
 ## The Review Loop
 
+### Apply First, Then Re-Review
+
+**Never ask Codex to pre-approve planned changes.** When Codex gives feedback:
+
+1. Apply accepted changes to the actual files
+2. Then resume the session so Codex can review the real result
+
+Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber-stamp agreement, not a real review. Codex needs to see actual code/artifacts to give meaningful feedback.
+
 ### Workflow
 
 1. **Draft** your artifact
@@ -232,9 +241,10 @@ Keep concise — one sentence per point.
 4. **Write prompt** at `prompt_path`
 5. **Run review** — `run_review.py` with `run_in_background: true`. Read output when done.
 6. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
-7. **Follow up** — generate next round paths, write follow-up prompt, `resume_review.py`. Repeat.
-8. **Converge** when findings are minor/stylistic or all substantive feedback is addressed
-9. **Clean up** — only when the user asks, or work is fully complete and merged. Do NOT clean up proactively.
+7. **Apply changes** — modify the actual files for accepted findings before contacting Codex again
+8. **Follow up** — generate next round paths, write follow-up prompt listing what changed and what was rejected with reasoning, `resume_review.py`. Codex re-reviews the actual updated artifacts.
+9. **Iterate** — repeat steps 6-8 until both sides converge: Codex raises no new substantive findings, and all accepted changes are applied
+10. **Clean up** — only when the user asks, or work is fully complete and merged. Do NOT clean up proactively.
 
 ### Presenting Results to the User
 
