@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Resume a Codex review session with safety enforcement.
 
-Invokes `codex exec resume` with an explicit session ID in read-only sandbox
-mode. Suppresses all stdout to keep the caller's context clean. Reads the
-final response from the -o output file.
+Reads the session ID from the metadata file and invokes `codex exec resume`
+in read-only sandbox mode. Suppresses all stdout to keep the caller's
+context clean. Reads the final response from the -o output file.
 
-Safety: This script hardcodes --sandbox read-only. The session ID is required
-— --last is never used to prevent cross-project session conflicts.
+Safety: This script hardcodes --sandbox read-only. The session ID is read
+from the metadata file — --last is never used to prevent cross-project
+session conflicts.
 """
 
 import argparse
@@ -17,30 +18,35 @@ from pathlib import Path
 
 
 def resume_review(
-    session_id: str,
+    session_path: Path,
     prompt_file: Path,
     output_file: Path,
     round_num: int,
-    session_metadata: Path | None = None,
 ) -> dict:
     """Resume a codex review session.
 
     Args:
-        session_id: The Codex session ID to resume
+        session_path: Path to the session metadata JSON file
         prompt_file: Path to the follow-up prompt file
         output_file: Path where codex will write its response
         round_num: Current round number (for metadata tracking)
-        session_metadata: Optional path to session.json to update
 
     Returns:
-        Dict with output_file path
+        Dict with output_file path and round
     """
+    if not session_path.exists():
+        print(f"Error: Session file not found: {session_path}", file=sys.stderr)
+        sys.exit(1)
+
     if not prompt_file.exists():
         print(f"Error: Prompt file not found: {prompt_file}", file=sys.stderr)
         sys.exit(1)
 
+    metadata = json.loads(session_path.read_text())
+    session_id = metadata.get("codex_session_id")
+
     if not session_id or session_id == "--last":
-        print("Error: An explicit session ID is required. --last is not allowed.", file=sys.stderr)
+        print("Error: No valid session ID found in metadata. Run an initial review first.", file=sys.stderr)
         sys.exit(1)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -62,17 +68,12 @@ def resume_review(
             text=True,
         )
 
-    if session_metadata:
-        metadata_path = Path(session_metadata)
-        if metadata_path.exists():
-            metadata = json.loads(metadata_path.read_text())
-            metadata["current_round"] = round_num
-            metadata_path.write_text(json.dumps(metadata, indent=2))
+    # Update round in metadata
+    metadata["current_round"] = round_num
+    session_path.write_text(json.dumps(metadata, indent=2))
 
     if process.returncode != 0 and not output_file.exists():
         print(f"Error: Codex exited with code {process.returncode}", file=sys.stderr)
-        if process.stderr:
-            print(process.stderr, file=sys.stderr)
         sys.exit(1)
 
     return {
@@ -83,19 +84,17 @@ def resume_review(
 
 def main():
     parser = argparse.ArgumentParser(description="Resume a Codex review session (read-only)")
-    parser.add_argument("--session-id", required=True, help="Codex session ID to resume")
+    parser.add_argument("--session", required=True, help="Path to session metadata JSON file")
     parser.add_argument("--prompt-file", required=True, help="Path to the follow-up prompt file")
     parser.add_argument("--output-file", required=True, help="Path for Codex's output")
     parser.add_argument("--round", type=int, required=True, help="Current round number")
-    parser.add_argument("--session-metadata", default=None, help="Path to session.json to update")
     args = parser.parse_args()
 
     result = resume_review(
-        session_id=args.session_id,
+        session_path=Path(args.session),
         prompt_file=Path(args.prompt_file),
         output_file=Path(args.output_file),
         round_num=args.round,
-        session_metadata=Path(args.session_metadata) if args.session_metadata else None,
     )
     print(json.dumps(result, indent=2))
 

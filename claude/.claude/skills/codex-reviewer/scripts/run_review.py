@@ -6,6 +6,10 @@ contains a duplicate of the response text), captures the session ID from
 stderr (where Codex sends its session banner when piped), and writes the
 final response to the specified output file via -o.
 
+The session ID is written to the metadata file as soon as it appears in
+stderr — before Codex finishes its review. This means the session can be
+recovered even if the process is interrupted (e.g., by a timeout).
+
 Safety: This script hardcodes --sandbox read-only. The command is constructed
 internally with no mechanism to inject other flags.
 """
@@ -18,18 +22,22 @@ import sys
 from pathlib import Path
 
 
-def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_metadata: Path | None = None) -> dict:
+def run_review(session_path: Path, prompt_file: Path, output_file: Path, project_dir: Path) -> dict:
     """Run an initial codex review and return the session ID.
 
     Args:
+        session_path: Path to the session metadata JSON file
         prompt_file: Path to the prompt file to pipe to codex
         output_file: Path where codex will write its final response
         project_dir: Working directory for codex (--cd)
-        session_metadata: Optional path to session.json to update with session ID
 
     Returns:
         Dict with session_id and output_file path
     """
+    if not session_path.exists():
+        print(f"Error: Session file not found: {session_path}", file=sys.stderr)
+        sys.exit(1)
+
     if not prompt_file.exists():
         print(f"Error: Prompt file not found: {prompt_file}", file=sys.stderr)
         sys.exit(1)
@@ -45,7 +53,7 @@ def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_
     ]
 
     with open(prompt_file) as stdin_file:
-        process = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             stdin=stdin_file,
             stdout=subprocess.DEVNULL,
@@ -53,27 +61,24 @@ def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_
             text=True,
         )
 
-    # Codex sends the session banner (including session ID) to stderr,
-    # not stdout, when piped via subprocess.
+    # Stream stderr line-by-line. The session ID appears in the banner at
+    # the very start, so we capture it almost immediately and persist it to
+    # the metadata file right away — protecting against later timeouts.
     session_id = None
-    for line in process.stderr.splitlines():
-        match = re.search(r"session id:\s*(\S+)", line)
-        if match:
-            session_id = match.group(1)
-            break
+    for line in iter(process.stderr.readline, ""):
+        if session_id is None:
+            match = re.search(r"session id:\s*(\S+)", line)
+            if match:
+                session_id = match.group(1)
+                metadata = json.loads(session_path.read_text())
+                metadata["codex_session_id"] = session_id
+                metadata["current_round"] = 1
+                session_path.write_text(json.dumps(metadata, indent=2))
 
-    if session_id and session_metadata:
-        metadata_path = Path(session_metadata)
-        if metadata_path.exists():
-            metadata = json.loads(metadata_path.read_text())
-            metadata["codex_session_id"] = session_id
-            metadata["current_round"] = 1
-            metadata_path.write_text(json.dumps(metadata, indent=2))
+    process.wait()
 
     if process.returncode != 0 and not output_file.exists():
         print(f"Error: Codex exited with code {process.returncode}", file=sys.stderr)
-        if process.stderr:
-            print(process.stderr, file=sys.stderr)
         sys.exit(1)
 
     return {
@@ -84,17 +89,17 @@ def run_review(prompt_file: Path, output_file: Path, project_dir: Path, session_
 
 def main():
     parser = argparse.ArgumentParser(description="Run an initial Codex review (read-only)")
+    parser.add_argument("--session", required=True, help="Path to session metadata JSON file")
     parser.add_argument("--prompt-file", required=True, help="Path to the prompt file")
     parser.add_argument("--output-file", required=True, help="Path for Codex's output")
     parser.add_argument("--cd", required=True, help="Project directory for Codex to read")
-    parser.add_argument("--session-metadata", default=None, help="Path to session.json to update")
     args = parser.parse_args()
 
     result = run_review(
+        session_path=Path(args.session),
         prompt_file=Path(args.prompt_file),
         output_file=Path(args.output_file),
         project_dir=Path(args.cd),
-        session_metadata=Path(args.session_metadata) if args.session_metadata else None,
     )
     print(json.dumps(result, indent=2))
 

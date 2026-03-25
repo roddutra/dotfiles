@@ -54,64 +54,57 @@ The scripts are located relative to this skill's directory. Determine the skill 
 
 ### Step 1: Initialize a Session
 
-Before the first review, initialize a session to create the reviews directory and generate the session metadata (timestamp, file naming prefix):
+Before the first review, initialize a session to create the reviews directory and generate the session metadata:
 
 ```bash
 python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
 ```
 
-Returns JSON with `timestamp` and `metadata_path`. Store these values — you'll use them for all subsequent steps.
+Returns JSON with a single `session` path. **This is the only value you need to track** — all other scripts take `--session` and read what they need from the metadata file internally.
 
 **Example:**
 ```bash
 python <skill-path>/scripts/init_session.py --project my-api --title prd-review
 ```
 ```json
-{
-  "timestamp": "20260325-141500",
-  "metadata_path": "/tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json"
-}
+{"session": "/tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json"}
 ```
 
 ### Step 2: Generate File Paths
 
-Use the path generator to get correctly formatted file paths for a round's prompt and output:
-
 ```bash
-python <skill-path>/scripts/generate_path.py --project <project> --timestamp <timestamp> --title <title> --round <N>
+python <skill-path>/scripts/generate_path.py --session <session-path> --round <N>
 ```
 
 Returns JSON with `prompt_path` and `output_path`. Use these paths when writing prompt files and passing output paths to the review scripts.
 
 ### Step 3: Write the Prompt File
 
-Use the Write tool to create the prompt file at the path from Step 2. See the "Constructing the Review Prompt" section below for prompt templates.
+Use the Write tool to create the prompt file at the `prompt_path` from Step 2. See the "Constructing the Review Prompt" section below for prompt templates.
 
 ### Step 4: Run the Initial Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --prompt-file <prompt-path> --output-file <output-path> --cd <project-dir> --session-metadata <metadata-path>
+python <skill-path>/scripts/run_review.py --session <session-path> --prompt-file <prompt-path> --output-file <output-path> --cd <project-dir>
 ```
 
 This script:
 - Enforces `--sandbox read-only` (hardcoded, cannot be overridden)
 - Suppresses Codex's execution trace from your context window
-- Captures the Codex session ID and returns it as JSON
-- Updates the session metadata file with the session ID
-
-Returns JSON with `session_id` and `output_file`. **Store the `session_id`** for follow-up rounds.
+- Captures the Codex session ID **immediately** when it appears in stderr (before Codex finishes), writing it to the metadata file right away — so the session can be recovered even if the process is interrupted
+- Returns JSON with `session_id` and `output_file`
 
 Then use the Read tool to read only the output file — this is the only part of Codex's response you need.
 
 ### Step 5: Resume for Follow-Up Rounds
 
 ```bash
-python <skill-path>/scripts/resume_review.py --session-id <session-id> --prompt-file <prompt-path> --output-file <output-path> --round <N> --session-metadata <metadata-path>
+python <skill-path>/scripts/resume_review.py --session <session-path> --prompt-file <prompt-path> --output-file <output-path> --round <N>
 ```
 
 This script:
 - Enforces `--sandbox read-only` (hardcoded)
-- Uses the explicit session ID (rejects `--last` to prevent cross-project conflicts)
+- Reads the session ID from the metadata file (rejects `--last` to prevent cross-project conflicts)
 - Suppresses all stdout
 - Updates the session metadata with the current round number
 
@@ -124,19 +117,28 @@ Returns JSON with `output_file` and `round`. Read the output file with the Read 
 After the review loop is complete:
 
 ```bash
-python <skill-path>/scripts/cleanup_session.py --project <project> --timestamp <timestamp> --title <title>
+python <skill-path>/scripts/cleanup_session.py --session <session-path>
 ```
 
 Deletes all prompt, output, and metadata files for the session.
+
+### Handling Long-Running Reviews
+
+Codex can take a long time for complex reviews (10-20+ minutes for large code reviews or architecture assessments). The Bash tool has a default timeout of 2 minutes and a maximum of 10 minutes. To handle this:
+
+**Always run `run_review.py` and `resume_review.py` in the background** using the Bash tool's `run_in_background: true` parameter. This avoids the timeout ceiling and lets Codex run to completion. You will be notified when the command finishes, at which point you can read the output file.
+
+**If a review is interrupted** (timeout, crash, etc.), the session is NOT lost. The session ID is written to the metadata file as soon as Codex starts (before it does any work), so you can always resume via `resume_review.py`. Check the metadata file — if `codex_session_id` is populated, the session exists on Codex's side and can be continued.
 
 ### Why Scripts Instead of Raw Commands
 
 The scripts enforce safety at the code level rather than relying on instructions:
 - `--sandbox read-only` is hardcoded — cannot be omitted or overridden
-- `--last` is explicitly rejected — must use session ID
+- `--last` is explicitly rejected — session ID is read from the metadata file
 - Stdout is suppressed via `subprocess` — execution trace never reaches your context
 - File naming convention is generated by code — no manual path construction
-- Session metadata tracks state across rounds automatically
+- Session metadata is the single source of truth — you only track one value (the session path)
+- Session ID is captured early via `Popen` streaming — survives timeouts and interruptions
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
@@ -349,28 +351,26 @@ The real power of this skill is the iterative review loop — bouncing work betw
 
 1. **Draft your artifact** (PRD, plan, code, etc.)
 
-2. **Initialize a session** — run `init_session.py` to create the reviews directory and generate session metadata. Store the returned `timestamp`, `base_prefix`, and `metadata_path`.
+2. **Initialize a session** — run `init_session.py`. Store the returned `session` path — this is the only value you need.
 
-3. **Generate file paths** — run `generate_path.py` for the r1 prompt and output paths.
+3. **Generate file paths** — run `generate_path.py --session <session> --round 1`.
 
-4. **Write the prompt** — use the Write tool to create the prompt file at the generated path (see prompt templates below).
+4. **Write the prompt** — use the Write tool to create the prompt file at `prompt_path` (see prompt templates below).
 
-5. **Run the initial review** — run `run_review.py` with the prompt file, output file, project directory, and metadata path. Store the returned `session_id`.
+5. **Run the initial review** — run `run_review.py` with `run_in_background: true` for long reviews. When it completes, read the output file.
 
-6. **Read the output** — use the Read tool on the output file to see Codex's review.
-
-7. **Critically assess each finding** — do NOT blindly follow Codex's recommendations:
+6. **Critically assess each finding** — do NOT blindly follow Codex's recommendations:
    - **Validate each finding** — is it accurate? Does Codex have the full picture?
    - **Research if uncertain** — read code, check docs, verify assumptions before deciding
    - **Accept and implement** findings you agree with
    - **Reject with reasoning** findings you disagree with — document exactly why
    - **Flag for discussion** findings you're unsure about — ask Codex a follow-up
 
-8. **Send follow-ups** — generate r2 paths, write the follow-up prompt, run `resume_review.py` with the session ID. Read the output file. Repeat for r3, r4, etc.
+7. **Send follow-ups** — generate r2 paths, write the follow-up prompt, run `resume_review.py`. Read the output file. Repeat for r3, r4, etc.
 
-9. **Converge** when Codex's findings are minor/stylistic or when you've addressed all substantive feedback.
+8. **Converge** when Codex's findings are minor/stylistic or when you've addressed all substantive feedback.
 
-10. **Clean up** — run `cleanup_session.py` to delete all review files for this session.
+9. **Clean up** — run `cleanup_session.py --session <session>` to delete all review files.
 
 ### Why Session Resume Matters
 
@@ -396,23 +396,25 @@ Be transparent. Don't silently incorporate or reject Codex's feedback — the us
 ### Example 1: PRD Review with Follow-Up
 
 ```bash
-# Initialize session
+# Initialize session — store the session path (the only value you track)
 python <skill-path>/scripts/init_session.py --project my-api --title prd-review
-# Returns: timestamp, metadata_path
+# → {"session": "/tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json"}
 
-# Generate r1 paths (returns both prompt_path and output_path)
-python <skill-path>/scripts/generate_path.py --project my-api --timestamp 20260325-141500 --title prd-review --round 1
+# Generate r1 paths
+python <skill-path>/scripts/generate_path.py --session /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json --round 1
+# → {"prompt_path": "...-r1-prompt.txt", "output_path": "...-r1-output.md"}
 
-# Write prompt file (via Write tool), then run initial review
-python <skill-path>/scripts/run_review.py --prompt-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-prompt.txt --output-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r1-output.md --cd /path/to/project --session-metadata /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
-# Returns: session_id. Read the output file via Read tool.
+# Write prompt file (via Write tool), then run initial review (use run_in_background for large reviews)
+python <skill-path>/scripts/run_review.py --session /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json --prompt-file <prompt_path> --output-file <output_path> --cd /path/to/project
+# → {"session_id": "...", "output_file": "..."}. Read the output file via Read tool.
 
 # Round 2: Generate r2 paths, write follow-up prompt, resume
-python <skill-path>/scripts/resume_review.py --session-id <SESSION_ID> --prompt-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r2-prompt.txt --output-file /tmp/codex-reviews/my-api-20260325-141500-prd-review-r2-output.md --round 2 --session-metadata /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
+python <skill-path>/scripts/generate_path.py --session /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json --round 2
+python <skill-path>/scripts/resume_review.py --session /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json --prompt-file <r2_prompt_path> --output-file <r2_output_path> --round 2
 # Read the r2 output file, continue iterating until converged
 
 # Clean up when done
-python <skill-path>/scripts/cleanup_session.py --project my-api --timestamp 20260325-141500 --title prd-review
+python <skill-path>/scripts/cleanup_session.py --session /tmp/codex-reviews/my-api-20260325-141500-prd-review-session.json
 ```
 
 ### Example 2: Quick Sanity Check
@@ -421,14 +423,14 @@ Even for a one-off review, use the scripts — they're just as easy and enforce 
 
 ```bash
 python <skill-path>/scripts/init_session.py --project my-api --title cache-approach
-# Write prompt, run review, read output, clean up
+# Store session path, generate paths, write prompt, run review, read output, clean up
 ```
 
 ## Important Notes
 
 ### Safety (enforced by scripts)
 - **`--sandbox read-only` is hardcoded** in `run_review.py` and `resume_review.py` — it cannot be omitted or overridden. The scripts construct the command internally with no mechanism to inject other sandbox flags.
-- **`--last` is blocked** in `resume_review.py` — an explicit session ID is always required.
+- **`--last` is blocked** in `resume_review.py` — the session ID is read from the metadata file, never from `--last`.
 - **Stdout is suppressed** via `subprocess` — Codex's execution trace never reaches your context window.
 - **Always include the no-modification instruction in the prompt** — belt and suspenders. The sandbox enforces it technically, but the prompt instruction prevents Codex from even attempting modifications.
 

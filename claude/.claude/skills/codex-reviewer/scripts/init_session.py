@@ -15,7 +15,7 @@ REVIEWS_DIR = Path("/tmp/codex-reviews")
 
 
 def init_session(project: str, title: str) -> dict:
-    """Create the reviews directory and return session metadata."""
+    """Create the reviews directory and return session metadata path."""
     REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -34,13 +34,7 @@ def init_session(project: str, title: str) -> dict:
     metadata_path = REVIEWS_DIR / f"{base_prefix}-session.json"
     metadata_path.write_text(json.dumps(metadata, indent=2))
 
-    # Return only the fields the invoker needs — project and title are
-    # already known (caller passed them in), and base_prefix/reviews_dir
-    # are derivable.
-    return {
-        "timestamp": timestamp,
-        "metadata_path": str(metadata_path),
-    }
+    return {"session": str(metadata_path)}
 
 
 def main():
@@ -50,7 +44,7 @@ def main():
     args = parser.parse_args()
 
     result = init_session(args.project, args.title)
-    print(json.dumps(result, indent=2))
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
