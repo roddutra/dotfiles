@@ -24,18 +24,19 @@ def to_kebab_case(text: str) -> str:
 
 def init_session(project: str, title: str) -> dict:
     """Create the reviews directory and return session metadata path."""
-    REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
+    REVIEWS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    REVIEWS_DIR.chmod(0o700)
 
+    project_slug = to_kebab_case(project)
+    title_slug = to_kebab_case(title)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    slug = to_kebab_case(title)
-    base_prefix = f"{project}-{timestamp}-{slug}"
+    base_prefix = f"{project_slug}-{timestamp}-{title_slug}"
 
     metadata = {
         "project": project,
         "timestamp": timestamp,
         "title": title,
         "base_prefix": base_prefix,
-        "reviews_dir": str(REVIEWS_DIR),
         "current_round": 0,
         "codex_session_id": None,
     }

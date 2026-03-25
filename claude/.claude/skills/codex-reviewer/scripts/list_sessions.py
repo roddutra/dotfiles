@@ -49,10 +49,9 @@ def find_session_files(session_path: Path) -> list[str]:
     """Find all prompt and output files belonging to a session."""
     metadata = json.loads(session_path.read_text())
     base_prefix = metadata["base_prefix"]
-    reviews_dir = Path(metadata["reviews_dir"])
 
     files = sorted(
-        str(f) for f in reviews_dir.glob(f"{base_prefix}-r*")
+        str(f) for f in REVIEWS_DIR.glob(f"{base_prefix}-r*")
         if f.suffix in (".md", ".txt")
     )
     return files

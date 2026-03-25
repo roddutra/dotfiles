@@ -38,45 +38,30 @@ Returns JSON with a single `session` path — **the only value you need to track
 Pipe prompt content via stdin using a heredoc:
 
 ```bash
-cat <<'PROMPT' | python <skill-path>/scripts/write_prompt.py --session <session-path> --round <N>
+cat <<'PROMPT' | python <skill-path>/scripts/write_prompt.py --session <session-path>
 Your prompt content here...
 PROMPT
 ```
 
-Returns JSON with `prompt_path` and `output_path`. The script generates the correct file path internally, rejects overwrites, and validates non-empty content.
+Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`, and `round`. Rejects overwrites and empty content.
 
-**Do not create prompt files manually with the Write tool.** Always use this script — it handles path generation, naming, and validation in one step.
+**Do not create prompt files manually with the Write tool.** Always use this script.
 
-### Step 3: Run the Initial Review
-
-Use `prompt_path` and `output_path` from `write_prompt.py`'s JSON output.
+### Step 3: Run the Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --session <session-path> --prompt-file <prompt-path> --output-file <output-path> --cd <project-dir>
+python <skill-path>/scripts/run_review.py --session <session-path> --cd <project-dir>
 ```
 
-- Hardcodes `--sandbox read-only`
-- Captures the session ID immediately via stderr streaming, writing it to metadata before the review finishes — survives timeouts
-- Returns JSON with `session_id` and `output_file`
+Auto-detects initial vs follow-up based on session metadata:
+- No `codex_session_id` → initial review (`codex exec`), `--cd` required
+- Has `codex_session_id` → resume (`codex exec resume`), `--cd` optional
 
-**Always use `run_in_background: true`.** See "Handling Long-Running Reviews" below. Read only the output file with the Read tool — this is the only part of Codex's response you need.
+Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
-### Step 4: Resume for Follow-Up Rounds
+**Always use `run_in_background: true`.** See "Handling Long-Running Reviews" below. Read only the `output_file` with the Read tool.
 
-Use `prompt_path` and `output_path` from `write_prompt.py`'s JSON output for the new round.
-
-```bash
-python <skill-path>/scripts/resume_review.py --session <session-path> --prompt-file <prompt-path> --output-file <output-path> --round <N>
-```
-
-- Hardcodes `--sandbox read-only`
-- Reads session ID from metadata (rejects `--last` to prevent cross-project conflicts)
-
-**Always use `run_in_background: true`.** Read the output file with the Read tool when done.
-
-Always resume rather than starting a new session when continuing a review.
-
-### Step 5: Clean Up (User-Initiated Only)
+### Step 4: Clean Up (User-Initiated Only)
 
 ```bash
 python <skill-path>/scripts/cleanup_session.py --session <session-path>
@@ -110,11 +95,11 @@ All filters are combinable (e.g., `--project my-app --week`).
 
 Codex reviews can take 10-20+ minutes. The Bash tool has a max timeout of 10 minutes.
 
-**Always run `run_review.py` and `resume_review.py` with `run_in_background: true`.** This is mandatory, not optional. Do not run these scripts in the foreground.
+**Always run `run_review.py` with `run_in_background: true`.** This is mandatory, not optional. Do not run this script in the foreground.
 
 **After launching a background task, stop and wait.** You will be automatically notified when the task completes. Do NOT poll for completion by running `sleep` + `ls` loops, checking file existence, or any other polling mechanism. Simply tell the user the review is running in the background and wait for the system notification. If something triggers you before the notification arrives (e.g., the user sends a message), check the output file existence once to determine status — but do not loop.
 
-**If a review is interrupted**, the session is NOT lost — the session ID is already in the metadata file. Resume via `resume_review.py`.
+**If a review is interrupted**, the session is usually recoverable — the session ID is captured to metadata early in the process. Write the next prompt and run `run_review.py` again — it will auto-resume if the session ID was captured. If not, it starts a fresh review.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
@@ -242,13 +227,13 @@ Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber
 ### Workflow
 
 1. **Draft** your artifact
-2. **Init** — `init_session.py`. Store the `session` path.
-3. **Write prompt** — pipe content to `write_prompt.py --session <s> --round 1`. Returns `prompt_path` and `output_path`.
-4. **Run review** — `run_review.py` with `run_in_background: true`. Read output when done.
+2. **Init** — `init_session.py --project <name> --title <title>`. Store the `session` path — this is the only value you track.
+3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
+4. **Run review** — `run_review.py --session <s> --cd <dir>` with `run_in_background: true`. Read `output_file` when done.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 6. **Apply changes** — modify the actual files for accepted findings before contacting Codex again
-7. **Follow up** — pipe follow-up prompt to `write_prompt.py --round <N>`, then `resume_review.py`. Codex re-reviews the actual updated artifacts.
-8. **Iterate** — repeat steps 5-7 until both sides converge: Codex raises no new substantive findings, and all accepted changes are applied
+7. **Follow up** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated artifacts.
+8. **Iterate** — repeat steps 5-7 until both sides converge
 9. **Do NOT clean up** — never run cleanup unless the user explicitly asks
 
 ### Presenting Results to the User
