@@ -99,17 +99,18 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 
 1. Run `run_review.py` with `run_in_background: true`.
 2. The Bash tool immediately returns a confirmation like `"Running in the background (↓ to manage)"`. **This is NOT the result. The review has NOT completed.** Codex is still working.
-3. Tell the user the review is running and **stop generating entirely**. Do not take any further action related to this review. Do not read files, run commands, or attempt to check status.
-4. You will be **automatically notified** when the background task completes. The notification will contain the script's JSON output (`session_id`, `output_file`, etc.) or an error message.
+3. Tell the user the review is running and **end your turn**. Your response must contain zero tool calls after the message to the user. Do not call Bash, Read, or any other tool. Do not "wait" by polling. Simply stop.
+4. You will be **automatically notified** when the background task completes. The notification will contain the script's JSON output (`session_id`, `output_file`, etc.) or an error message. You do not need to do anything to receive this notification — it arrives on its own.
 5. **Only after receiving the completion notification**, read the `output_file` with the Read tool.
+
+**CRITICAL — do not run ANY Bash commands to monitor the review.** Patterns like `while ! test -s <output_file>; do sleep N; done`, `ls` on the output directory, `cat` on the output file, `tail -f`, or any other form of polling are strictly forbidden. The background notification system handles this automatically. Running poll loops wastes resources, can hit the Bash timeout, and produces truncated or partial results.
 
 **Never do any of the following while waiting for a review:**
 
-- Read the output file before the notification arrives — it does not exist yet
+- Run ANY Bash command related to the review — no polling, no checking, no reading, no monitoring
 - Interpret the "Running in the background" Bash confirmation as task completion — it is not
 - Run additional `run_review.py` calls for the same round — this spawns duplicate Codex processes that pile up
 - Run raw `codex exec` commands directly — always use the scripts
-- Poll, sleep-loop, or check file existence
 - Attempt to "debug" or re-run because you haven't seen a result yet — you simply haven't waited long enough
 
 **Interpreting background task results:**
