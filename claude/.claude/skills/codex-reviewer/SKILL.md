@@ -59,7 +59,7 @@ Auto-detects initial vs follow-up based on session metadata:
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
-**Always use `run_in_background: true`.** See "Handling Long-Running Reviews" below. Read only the `output_file` with the Read tool.
+**You MUST set `run_in_background: true` on the Bash tool call.** This is not optional. The script blocks for 10-20+ minutes while Codex works — running it in the foreground will time out. After launching, **stop and wait** for the background completion notification before doing anything else. See "Handling Long-Running Reviews" below for the full lifecycle.
 
 ### Step 4: Clean Up (User-Initiated Only)
 
@@ -93,13 +93,32 @@ All filters are combinable (e.g., `--project my-app --week`).
 
 ### Handling Long-Running Reviews
 
-Codex reviews can take 10-20+ minutes. The Bash tool has a max timeout of 10 minutes.
+Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally (`process.wait()`) until Codex finishes, then prints JSON with the results. **It produces zero output while Codex is working.** The Bash tool's 10-minute timeout is shorter than most reviews, so you must run in the background.
 
-**Always run `run_review.py` with `run_in_background: true`.** This is mandatory, not optional. Do not run this script in the foreground.
+**Mandatory workflow:**
 
-**After launching a background task, stop and wait.** You will be automatically notified when the task completes. Do NOT poll for completion by running `sleep` + `ls` loops, checking file existence, or any other polling mechanism. Simply tell the user the review is running in the background and wait for the system notification. If something triggers you before the notification arrives (e.g., the user sends a message), check the output file existence once to determine status — but do not loop.
+1. Run `run_review.py` with `run_in_background: true`.
+2. The Bash tool immediately returns a confirmation like `"Running in the background (↓ to manage)"`. **This is NOT the result. The review has NOT completed.** Codex is still working.
+3. Tell the user the review is running and **stop generating entirely**. Do not take any further action related to this review. Do not read files, run commands, or attempt to check status.
+4. You will be **automatically notified** when the background task completes. The notification will contain the script's JSON output (`session_id`, `output_file`, etc.) or an error message.
+5. **Only after receiving the completion notification**, read the `output_file` with the Read tool.
 
-**If a review is interrupted**, the session is usually recoverable — the session ID is captured to metadata early in the process. Write the next prompt and run `run_review.py` again — it will auto-resume if the session ID was captured. If not, it starts a fresh review.
+**Never do any of the following while waiting for a review:**
+
+- Read the output file before the notification arrives — it does not exist yet
+- Interpret the "Running in the background" Bash confirmation as task completion — it is not
+- Run additional `run_review.py` calls for the same round — this spawns duplicate Codex processes that pile up
+- Run raw `codex exec` commands directly — always use the scripts
+- Poll, sleep-loop, or check file existence
+- Attempt to "debug" or re-run because you haven't seen a result yet — you simply haven't waited long enough
+
+**Interpreting background task results:**
+
+- **JSON output with `session_id` and `output_file`** → success. Read the `output_file`.
+- **Exit code 143 (SIGTERM) or 144 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
+- **Non-zero exit code with an error message from the script** → genuine failure. Report the error to the user.
+
+**If a review is interrupted:** the session is usually recoverable — the session ID is captured to metadata early. Write the next prompt and run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
