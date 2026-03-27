@@ -254,6 +254,12 @@ Keep concise — one sentence per point.
 
 Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber-stamp agreement, not a real review. Codex needs to see actual code/artifacts to give meaningful feedback.
 
+### Re-Review Is Mandatory
+
+**Every time you apply changes based on Codex's findings, you MUST send those changes back to Codex for re-review.** Do not assume your implementation is correct just because you understood the finding. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent. Only Codex reviewing the actual result can confirm the fix is sound.
+
+A review is not complete until Codex has seen the final state of the code. If you accepted findings and made changes, the next step is always a follow-up round — never presenting results to the user.
+
 ### Workflow
 
 1. **Draft** your artifact
@@ -261,9 +267,9 @@ Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
 4. **Run review** — `run_review.py --session <s> --cd <dir>` with `run_in_background: true`. Read `output_file` when done.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
-6. **Apply changes** — modify the actual files for accepted findings before contacting Codex again
-7. **Follow up** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated artifacts.
-8. **Iterate** — repeat steps 5-7 until both sides converge
+6. **Apply changes** — modify the actual files for accepted findings
+7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated code. Do NOT skip this step.
+8. **Iterate** — repeat steps 5-7 until Codex confirms the changes are sound and no new issues are found
 9. **Do NOT clean up** — never run cleanup unless the user explicitly asks
 
 ### Presenting Results to the User
