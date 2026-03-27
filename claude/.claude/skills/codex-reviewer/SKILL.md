@@ -59,6 +59,16 @@ Auto-detects initial vs follow-up based on session metadata:
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
+**Choosing `--cd` — Codex file access:** The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree. Before running, audit every file path in your prompt:
+
+- **File is inside `--cd`** → Codex can read it. Tell it the path relative to `--cd`.
+- **File is outside `--cd`** → Codex cannot read it. You must either:
+  1. **Inline the content** directly in the prompt text (preferred for small-to-medium artifacts), or
+  2. **Copy it** into a gitignored directory within the project (e.g., `docs/temp/`) so Codex can access it. Clean up the copy after the review.
+- **Monorepos:** if Codex needs files at the repo root AND in a subdirectory app, use the repo root as `--cd`, not the subdirectory.
+
+Never tell Codex to "read the file at [path]" if that path is outside `--cd` — the review will fail silently.
+
 **You MUST set `run_in_background: true` on the Bash tool call.** This is not optional. The script blocks for 10-20+ minutes while Codex works — running it in the foreground will time out. After launching, **stop and wait** for the background completion notification before doing anything else. See "Handling Long-Running Reviews" below for the full lifecycle.
 
 ### Step 4: Clean Up (User-Initiated Only)
@@ -229,9 +239,9 @@ Keep concise — one sentence per point.
 
 ### Review-Type Tips
 
-- **PRD**: Include full PRD text. Use `--cd` so Codex can cross-reference the codebase.
+- **PRD**: Include full text or ensure the file is within `--cd`. Use `--cd` so Codex can cross-reference the codebase.
 - **Code**: Provide the diff or tell Codex which files to read. Use `--cd` for full codebase context.
-- **Plan/Architecture**: Include the plan. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
+- **Plan/Architecture**: Include the plan text or ensure the file is within `--cd`. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
 
 ## The Review Loop
 
