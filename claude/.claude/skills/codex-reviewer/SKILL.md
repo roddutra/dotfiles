@@ -38,19 +38,21 @@ Returns JSON with a single `session` path — **the only value you need to track
 Pipe prompt content via stdin using a heredoc:
 
 ```bash
-cat <<'PROMPT' | python <skill-path>/scripts/write_prompt.py --session <session-path>
+cat <<'PROMPT' | python <skill-path>/scripts/write_prompt.py --session <session-path> [--force]
 Your prompt content here...
 PROMPT
 ```
 
 Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`, and `round`. Rejects overwrites and empty content.
 
+**`--force`:** Skips the check requiring the previous round's output to exist. Use when the previous round was killed or timed out and produced no output file.
+
 **Do not create prompt files manually with the Write tool.** Always use this script.
 
 ### Step 3: Run the Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --session <session-path> --cd <project-dir>
+python <skill-path>/scripts/run_review.py --session <session-path> --cd <project-dir> [--timeout <seconds>]
 ```
 
 Auto-detects initial vs follow-up based on session metadata:
@@ -59,7 +61,11 @@ Auto-detects initial vs follow-up based on session metadata:
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
-**Choosing `--cd` — Codex file access:** The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree. Before running, audit every file path in your prompt:
+**Timeout (opt-in):** No timeout by default — Codex can take as long as it needs. If the user asks you to set a timeout, pass `--timeout <seconds>` (e.g. `--timeout 1200` for 20 min). On timeout, the process is killed and the script exits with code 2. The session ID is preserved — you can resume with `--force`.
+
+**Choosing `--cd` — Codex file access:** The `--cd` directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
+
+The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree. Before running, audit every file path in your prompt:
 
 - **File is inside `--cd`** → Codex can read it. Tell it the path relative to `--cd`.
 - **File is outside `--cd`** → Codex cannot read it. You must either:
@@ -126,10 +132,11 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 **Interpreting background task results:**
 
 - **JSON output with `session_id` and `output_file`** → success. Read the `output_file`.
+- **Exit code 2** → timeout. Codex hung and was killed after `--timeout` seconds. The session is recoverable.
 - **Exit code 143 (SIGTERM) or 144 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
 - **Non-zero exit code with an error message from the script** → genuine failure. Report the error to the user.
 
-**If a review is interrupted:** the session is usually recoverable — the session ID is captured to metadata early. Write the next prompt and run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
+**If a review is interrupted (timeout or kill):** the session is usually recoverable — the session ID is captured to metadata early. Use `write_prompt.py --force` to skip the missing-output check, then run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
@@ -155,6 +162,25 @@ Codex is a separate session with zero knowledge of your conversation with the us
 - Direction: prototype, MVP, production, learning exercise
 
 Skip context when the review is genuinely open-ended with no prior constraints.
+
+### File Access Audit (Mandatory)
+
+**Do this BEFORE writing every prompt.** Codex can ONLY read files inside the `--cd` directory. It has zero access to anything else — no `~/.claude/`, no `/tmp/`, no other projects, no home directory. If your prompt tells Codex to read a file outside `--cd`, Codex will silently skip it and review based on assumptions instead of the actual artifact. This produces unreliable reviews that waste time.
+
+**Checklist — run through this for every file reference in your prompt:**
+
+1. List every file you want Codex to read or that you reference by path
+2. For each file, answer: is this path physically inside the `--cd` directory?
+3. If YES → use the path relative to `--cd`
+4. If NO → you MUST either **inline the full content** in the prompt text, or **copy the file** into the project first
+
+**Common offenders that are NEVER inside `--cd`:**
+
+- **Claude Code plans** (`~/.claude/plans/`) — always inline or copy these
+- **Session/temp files** (`/tmp/codex-reviews/...`) — always inline
+- **Files from other projects** — always inline or copy
+
+**Never write "read the file at [path]" unless you have verified that path exists inside `--cd`.** If in doubt, inline it — inlining always works.
 
 ### Controlling Codex's Output
 

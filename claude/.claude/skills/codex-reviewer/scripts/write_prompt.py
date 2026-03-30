@@ -19,7 +19,7 @@ from pathlib import Path
 from generate_path import generate_paths
 
 
-def write_prompt(session_path: Path, content: str) -> dict:
+def write_prompt(session_path: Path, content: str, force: bool = False) -> dict:
     """Write prompt content to the correct file path.
 
     Auto-increments current_round in session metadata.
@@ -27,6 +27,8 @@ def write_prompt(session_path: Path, content: str) -> dict:
     Args:
         session_path: Path to the session metadata JSON file
         content: Prompt content to write
+        force: Skip the previous-round output check (use when the previous
+            round was killed or timed out)
 
     Returns:
         Dict with prompt_path, output_path, and round
@@ -49,13 +51,14 @@ def write_prompt(session_path: Path, content: str) -> dict:
 
     # Prevent orphaned rounds: block writing a new prompt if the previous
     # round's review has not been run yet (output file missing).
-    if current_round > 0:
+    if current_round > 0 and not force:
         prev_paths = generate_paths(session_path, current_round)
         prev_output = Path(prev_paths["output_path"])
         if not prev_output.exists():
             print(
                 f"Error: Round {current_round} output not found. "
-                f"Run the review before writing the next prompt.",
+                f"Run the review before writing the next prompt. "
+                f"Use --force if the previous round was killed/timed out.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -92,10 +95,14 @@ def main():
     parser.add_argument(
         "--session", required=True, help="Path to session metadata JSON file"
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Skip previous-round output check (use when prior round was killed/timed out)",
+    )
     args = parser.parse_args()
 
     content = sys.stdin.read()
-    result = write_prompt(Path(args.session), content)
+    result = write_prompt(Path(args.session), content, force=args.force)
     print(json.dumps(result))
 
 
