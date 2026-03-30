@@ -1,6 +1,6 @@
 ---
 name: codex-reviewer
-description: Invoke OpenAI Codex CLI as an independent reviewer to get a second opinion on your work. Use when you want Codex to review a PRD, implementation plan, code changes, architectural decisions, or any artifact you have drafted. Also use when the user asks you to "get Codex's opinion", "have Codex review this", "ask Codex", "check with Codex", or "bounce this off Codex".
+description: "MUST use this skill whenever Codex is involved in any way — reviewing, brainstorming, getting a second opinion, or any interaction with Codex. This skill runs the real OpenAI Codex CLI as an independent AI reviewer. NEVER simulate Codex by spawning a Claude subagent — that defeats the purpose of getting an independent opinion from a different model. Trigger phrases: 'get Codex to review', 'have Codex review', 'ask Codex', 'check with Codex', 'bounce this off Codex', 'Codex's opinion', 'second opinion', 'independent review'. Covers: PRDs, implementation plans, code changes, architectural decisions, or any artifact."
 ---
 
 # Codex Reviewer
