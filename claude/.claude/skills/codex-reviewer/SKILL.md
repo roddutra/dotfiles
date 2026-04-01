@@ -280,11 +280,13 @@ Keep concise — one sentence per point.
 
 Asking Codex "I plan to do X, Y, Z — does that sound right?" produces a rubber-stamp agreement, not a real review. Codex needs to see actual code/artifacts to give meaningful feedback.
 
-### Re-Review Is Mandatory
+### Re-Review Is Mandatory — No Exceptions
 
-**Every time you apply changes based on Codex's findings, you MUST send those changes back to Codex for re-review.** Do not assume your implementation is correct just because you understood the finding. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent. Only Codex reviewing the actual result can confirm the fix is sound.
+**Every time you apply changes based on Codex's findings, you MUST send those changes back to Codex for re-review.** This rule applies with equal force on round 1 and round 10. Do not assume your implementation is correct just because you understood the finding. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent. Only Codex reviewing the actual result can confirm the fix is sound.
 
-A review is not complete until Codex has seen the final state of the code. If you accepted findings and made changes, the next step is always a follow-up round — never presenting results to the user.
+**Watch for discipline erosion across rounds.** After several rounds of back-and-forth, it is tempting to think "these are minor changes, surely they're fine" and skip the re-review. This is the most common failure mode — do not fall into it. The size or apparent simplicity of a change does not exempt it from re-review. One line can introduce a bug.
+
+A review is not complete until Codex has reviewed the final state of the code and explicitly confirmed there are no remaining issues. If you accepted findings and made changes, the next step is **always** a follow-up round — never presenting results to the user.
 
 ### Workflow
 
@@ -295,7 +297,7 @@ A review is not complete until Codex has seen the final state of the code. If yo
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 6. **Apply changes** — modify the actual files for accepted findings
 7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated code. Do NOT skip this step.
-8. **Iterate** — repeat steps 5-7 until Codex confirms the changes are sound and no new issues are found
+8. **Iterate** — repeat steps 5-7 until Codex explicitly confirms no remaining issues. The exit condition is Codex's confirmation, not your own judgment that changes are minor or correct. If you made changes, Codex must see them — no exceptions regardless of round count
 9. **Do NOT clean up** — never run cleanup unless the user explicitly asks
 
 ### Presenting Results to the User
