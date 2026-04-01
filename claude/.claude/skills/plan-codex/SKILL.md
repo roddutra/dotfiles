@@ -7,6 +7,10 @@ description: "Plan a feature or task with Codex as co-planner, then execute as P
 
 End-to-end workflow: collaboratively plan with Codex as an independent co-planner, get user approval, then execute the plan as a project manager delegating to subagents.
 
+## Prerequisites
+
+**Ensure Plan Mode is active.** If you are not already in Plan Mode, enter it immediately using the EnterPlanMode tool before doing anything else.
+
 ## Phase 1: Understand the Requirements
 
 The user may provide input in one of two ways — handle both:
