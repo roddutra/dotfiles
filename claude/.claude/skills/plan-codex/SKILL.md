@@ -41,7 +41,10 @@ Then:
    >
    > 1. Research the codebase and thoroughly understand the plan, requirements, and any referenced docs/files. Once you have the necessary knowledge, convert the plan's tasks into tasks using the TaskCreate tool.
    > 2. The main agent acts as project manager — do not write code. Delegate each task to subagents via the Agent tool, providing rich context (relevant plan section, files to modify, architectural decisions, constraints, relationship to other tasks) so each subagent can make aligned decisions independently.
-   > 3. Review each subagent's output. Iterate until the work meets quality standards and aligns with the plan. Once all tasks are complete, delegate a subagent to review and update any relevant documentation.
+   > 3. Review each subagent's output. Iterate until the work meets quality standards and aligns with the plan. Once all tasks are complete, delegate documentation updates across three tiers:
+   >    - **Project documentation** (README.md, docs/, etc.): Update or create docs relevant to both human developers and AI coding agents — covering new features, functionality, architecture, usage, and any logic implemented during the plan.
+   >    - **Global agent instructions** (CLAUDE.md, AGENTS.md): Only update if something is critical for ALL future coding agent sessions to have in context every time. This is expensive (loaded into every agent's context window on every session), so keep it to information that is universally required regardless of what task an agent is working on.
+   >    - **Claude Skills** (.claude/skills/): Create or update topic-specific skill files for instructions that are only relevant to certain areas of work. Agents load skills on-demand based on the skill's description, so this is the token-efficient way to document specialized patterns, workflows, or conventions without bloating every session's context.
    > 4. Use the codex-reviewer skill to have Codex perform a code review of all changes. After applying any changes based on Codex's findings, you MUST send the updated code back to Codex for re-review — never assume your changes are correct. A review round is only complete when Codex has seen the final state. Iterate until Codex explicitly confirms no remaining issues.
 
 ## Phase 3: Codex Co-Planning — Iterate Until Consensus
