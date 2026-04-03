@@ -17,9 +17,9 @@ Use the OpenAI Codex CLI as an independent reviewer — a separate AI agent whos
 
 ## Safety: Read-Only Only
 
-This skill is strictly for **review only**. Codex must NEVER modify files or change state.
+The Codex process is strictly **read-only** — it must NEVER modify files or change state. The wrapper scripts enforce this via `--sandbox read-only` at the code level, which cannot be overridden. Never construct raw `codex exec` commands manually. Always include "do NOT modify any files" in prompts as an additional safeguard.
 
-**Always use the Python scripts** in `scripts/` — they hardcode `--sandbox read-only` at the code level, which cannot be overridden. Never construct raw `codex exec` commands manually. Always include "do NOT modify any files" in prompts as an additional safeguard.
+Note: the wrapper scripts themselves perform small local setup — creating session files in `/tmp`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Codex actions.
 
 ## Scripts
 
@@ -31,9 +31,9 @@ Located relative to this skill's directory. Determine the skill path at runtime.
 python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
 ```
 
-Returns JSON with `session` (the only value you need to track) and `project_dir` (the resolved git root, for reference).
+Returns JSON with `session` (the only value you need to track) and `project_dir` (informational).
 
-Both `init_session.py` and `run_review.py` automatically resolve the git repository root from cwd — no need to pass `--cd` in normal usage. The script creates `.tmp/` at the git root and ensures it's in `.gitignore`. Pass `--cd <dir>` only if you need to override the auto-detected directory.
+**How `project_dir` works:** `init_session.py` resolves the git root from cwd once and persists it in session metadata. All subsequent `run_review.py` calls read `project_dir` from that metadata — no need to pass `--cd`. The script also creates `.tmp/` at the git root and ensures it's in `.gitignore`. Pass `--cd <dir>` only to override the persisted value.
 
 ### Step 2: Write the Prompt File
 
@@ -58,14 +58,14 @@ python <skill-path>/scripts/run_review.py --session <session-path> [--cd <projec
 ```
 
 Auto-detects initial vs follow-up based on session metadata:
-- No `codex_session_id` → initial review (`codex exec`), `--cd` auto-detected from cwd if not provided
+- No `codex_session_id` → initial review (`codex exec`), `--cd` read from session metadata (set by `init_session.py`)
 - Has `codex_session_id` → resume (`codex exec resume`), uses persisted `--cd`
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
 **Timeout (opt-in):** No timeout by default — Codex can take as long as it needs. If the user asks you to set a timeout, pass `--timeout <seconds>` (e.g. `--timeout 1200` for 20 min). On timeout, the process is killed and the script exits with code 2. The session ID is preserved — you can resume with `--force`.
 
-**Choosing `--cd` — Codex file access:** The `--cd` directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
+**Project directory and Codex file access:** The project directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
 
 The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree.
 
@@ -140,7 +140,7 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 
 - **JSON output with `session_id` and `output_file`** → success. Read the `output_file`.
 - **Exit code 2** → timeout. Codex hung and was killed after `--timeout` seconds. The session is recoverable.
-- **Exit code 143 (SIGTERM) or 144 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
+- **Exit code 143 (SIGTERM) or 137 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
 - **Non-zero exit code with an error message from the script** → genuine failure. Report the error to the user.
 
 **If a review is interrupted (timeout or kill):** the session is usually recoverable — the session ID is captured to metadata early. Use `write_prompt.py --force` to skip the missing-output check, then run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
@@ -306,9 +306,9 @@ A review is not complete until Codex has reviewed the final state of the code an
 ### Workflow
 
 1. **Draft** your artifact
-2. **Init** — `init_session.py --project <name> --title <title>`. Store the returned `session` and `project_dir` values. The script auto-detects the git root from cwd, creates `.tmp/`, and gitignores it.
+2. **Init** — `init_session.py --project <name> --title <title>`. Store the returned `session` path. The script auto-detects the git root from cwd, persists it in session metadata, creates `.tmp/`, and gitignores it.
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
-4. **Run review** — `run_review.py --session <s>` with `run_in_background: true`. Read `output_file` when done. The script auto-detects `--cd` from cwd (resolves to git root); pass `--cd` only to override.
+4. **Run review** — `run_review.py --session <s>` with `run_in_background: true`. Read `output_file` when done. The script reads `project_dir` from session metadata; pass `--cd` only to override.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 6. **Apply changes** — modify the actual files for accepted findings
 7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated code. Do NOT skip this step.

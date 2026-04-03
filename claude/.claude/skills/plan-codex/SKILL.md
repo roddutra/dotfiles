@@ -49,11 +49,9 @@ Then:
 
 ## Phase 3: Codex Co-Planning — Iterate Until Consensus
 
-1. Use the `codex-reviewer` skill to have Codex review the draft plan. Provide Codex with:
-   - The plan file — plans live in `~/.claude/plans/` which is outside `--cd`, so copy the plan file into `.tmp/` within the project before running the review. Codex reads the copy from disk. **Never paste file content into the prompt** — always have Codex read from disk. If the plan changes between review rounds, recopy the updated file to `.tmp/` before the next round.
-   - The user's goals, constraints, and any decisions already made
-   - Relevant codebase context (tell Codex which files to read via `--cd`)
-   - **For PRDs, specs, or docs that exist inside the project**: do NOT inline these — tell Codex to read them from disk at their path relative to the project root. The scripts auto-detect the git root from cwd (see codex-reviewer skill for details).
+1. Use the `codex-reviewer` skill to have Codex review the draft plan. Follow the codex-reviewer skill's file access, session, and prompt rules — the only plan-specific addition is:
+   - **Plan files** live in `~/.claude/plans/` (outside the project), so copy the plan file into `.tmp/` before the review. If the plan changes between rounds, recopy the updated file before the next round.
+   - Provide the user's goals, constraints, decisions already made, and tell Codex which project files to read for codebase context.
    - Review focus: feasibility, ordering, missed dependencies, over-engineering, simpler alternatives, gaps, risks
 2. Critically assess Codex's findings. Accept, reject with reasoning, or flag for discussion.
 3. Update the plan based on accepted findings.
@@ -65,6 +63,8 @@ Then:
 
 **Do NOT present the plan to the user until you and Codex have reached consensus.**
 
+**Session recovery:** If the conversation is resumed in a new session and prior Codex review context is needed, use `list_sessions.py` (see codex-reviewer skill) to find and recover the prior review history rather than starting fresh.
+
 ## Phase 4: User Approval
 
 1. Present the finalized plan to the user with:
@@ -72,7 +72,7 @@ Then:
    - A summary of what Codex reviewed and any notable debates or trade-offs that were resolved
    - Any open questions that need the user's input
 2. Wait for explicit user approval before proceeding to execution.
-3. If the user requests changes, update the plan and re-run Codex review if the changes are substantial.
+3. If the user requests changes, update the plan and re-run Codex review for any non-editorial change (scope, ordering, architecture, risks). Skip re-review only for wording or formatting fixes.
 
 ## Phase 5: Execution
 
