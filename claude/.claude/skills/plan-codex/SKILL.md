@@ -50,9 +50,10 @@ Then:
 ## Phase 3: Codex Co-Planning — Iterate Until Consensus
 
 1. Use the `codex-reviewer` skill to have Codex review the draft plan. Provide Codex with:
-   - The full plan text (inlined in the prompt — plans live outside `--cd`)
+   - The plan file — plans live in `~/.claude/plans/` which is outside `--cd`, so copy the plan file into `.tmp/` within the project before running the review. Codex reads the copy from disk. **Never paste file content into the prompt** — always have Codex read from disk. If the plan changes between review rounds, recopy the updated file to `.tmp/` before the next round.
    - The user's goals, constraints, and any decisions already made
    - Relevant codebase context (tell Codex which files to read via `--cd`)
+   - **For PRDs, specs, or docs that exist inside the project**: do NOT inline these — tell Codex to read them from disk at their path relative to the project root. The scripts auto-detect the git root from cwd (see codex-reviewer skill for details).
    - Review focus: feasibility, ordering, missed dependencies, over-engineering, simpler alternatives, gaps, risks
 2. Critically assess Codex's findings. Accept, reject with reasoning, or flag for discussion.
 3. Update the plan based on accepted findings.

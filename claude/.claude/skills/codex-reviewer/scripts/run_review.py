@@ -3,7 +3,7 @@
 
 Auto-detects whether this is an initial review or a follow-up based on
 session metadata:
-- If codex_session_id is null → initial review (`codex exec`), requires --cd
+- If codex_session_id is null → initial review (`codex exec`), --cd auto-detected from cwd
 - If codex_session_id exists → resume (`codex exec resume`)
 
 Reads the current round from session metadata to locate the correct prompt
@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from generate_path import generate_paths
+from init_session import _resolve_git_root
 
 # Absolute-path prefixes that commonly appear in prompts and indicate
 # files outside the project directory.
@@ -59,7 +60,7 @@ def _warn_external_paths(prompt_file: Path, project_dir: Path) -> None:
             f"Warning: Prompt references paths outside --cd ({project_dir}):\n"
             f"{paths_str}\n"
             f"Codex cannot read files outside --cd. "
-            f"Inline the content or copy files into the project.",
+            f"Copy files into .tmp/ within the project.",
             file=sys.stderr,
         )
 
@@ -69,8 +70,8 @@ def run_review(session_path: Path, project_dir: Path | None = None, timeout: int
 
     Args:
         session_path: Path to the session metadata JSON file
-        project_dir: Working directory for codex (--cd). Required for
-            initial reviews, ignored for resumes.
+        project_dir: Working directory for codex (--cd). Auto-detected
+            from cwd if not provided. Ignored for resumes.
         timeout: Maximum seconds to wait for Codex to complete.
             Defaults to 0 (no timeout). Pass e.g. 1200 for 20 min.
 
@@ -94,20 +95,17 @@ def run_review(session_path: Path, project_dir: Path | None = None, timeout: int
         print("Error: No prompt written yet. Run write_prompt.py first.", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve project_dir: required on first run (and persisted), reused on resumes.
-    # On resume, always prefer the saved value — codex exec resume ignores --cd,
-    # so the warning must validate against the directory Codex is actually using.
-    if is_resume:
-        saved_dir = metadata.get("project_dir")
-        if saved_dir:
-            project_dir = Path(saved_dir)
+    # Resolve project_dir priority: explicit --cd > session metadata > cwd.
+    # Explicit --cd wins so callers can correct a bad persisted value.
+    if project_dir:
+        project_dir = _resolve_git_root(project_dir)
+    elif metadata.get("project_dir"):
+        project_dir = Path(metadata["project_dir"])
+    else:
+        project_dir = _resolve_git_root(Path.cwd())
 
-    if not is_resume and not project_dir:
-        print("Error: --cd is required for the initial review.", file=sys.stderr)
-        sys.exit(1)
-
-    # Persist project_dir so resume rounds can reuse it for path warnings.
-    if project_dir and "project_dir" not in metadata:
+    # Persist project_dir if not already in metadata (backwards compat with old sessions).
+    if "project_dir" not in metadata:
         metadata["project_dir"] = str(project_dir.resolve())
         session_path.write_text(json.dumps(metadata, indent=2))
 
@@ -226,7 +224,7 @@ def run_review(session_path: Path, project_dir: Path | None = None, timeout: int
 def main():
     parser = argparse.ArgumentParser(description="Run or resume a Codex review (read-only)")
     parser.add_argument("--session", required=True, help="Path to session metadata JSON file")
-    parser.add_argument("--cd", default=None, help="Project directory for Codex to read (required for initial review)")
+    parser.add_argument("--cd", default=None, help="Project directory override (default: auto-detect git root from cwd)")
     parser.add_argument("--timeout", type=int, default=0, help="Max seconds to wait for Codex (default 0 = no timeout, e.g. 1200 for 20 min)")
     args = parser.parse_args()
 

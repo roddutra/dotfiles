@@ -31,7 +31,9 @@ Located relative to this skill's directory. Determine the skill path at runtime.
 python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
 ```
 
-Returns JSON with a single `session` path — **the only value you need to track**. All other scripts take `--session` and read what they need from the metadata file.
+Returns JSON with `session` (the only value you need to track) and `project_dir` (the resolved git root, for reference).
+
+Both `init_session.py` and `run_review.py` automatically resolve the git repository root from cwd — no need to pass `--cd` in normal usage. The script creates `.tmp/` at the git root and ensures it's in `.gitignore`. Pass `--cd <dir>` only if you need to override the auto-detected directory.
 
 ### Step 2: Write the Prompt File
 
@@ -52,12 +54,12 @@ Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`
 ### Step 3: Run the Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --session <session-path> --cd <project-dir> [--timeout <seconds>]
+python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>]
 ```
 
 Auto-detects initial vs follow-up based on session metadata:
-- No `codex_session_id` → initial review (`codex exec`), `--cd` required
-- Has `codex_session_id` → resume (`codex exec resume`), `--cd` optional
+- No `codex_session_id` → initial review (`codex exec`), `--cd` auto-detected from cwd if not provided
+- Has `codex_session_id` → resume (`codex exec resume`), uses persisted `--cd`
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
@@ -65,13 +67,18 @@ Reads the current round from metadata to locate the correct files. Returns JSON 
 
 **Choosing `--cd` — Codex file access:** The `--cd` directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
 
-The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree. Before running, audit every file path in your prompt:
+The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree.
+
+**Always choose the broadest useful `--cd`** so Codex can access the most files:
+
+- **Monorepos:** Always use the **repository root** as `--cd`, not a subdirectory app. If the repo is at `/Users/you/project` and the app is at `apps/api/`, use `/Users/you/project` — this gives Codex access to PRDs in `apps/api/docs/`, shared configs at the root, and all other apps. Using `apps/api/` as `--cd` would cut off files outside that subtree.
+- **Standard repos:** Use the git repository root.
+- **Think about what Codex needs to read** — docs, specs, PRDs, source code, tests, configs. Pick the `--cd` that contains all of them. When in doubt, go broader (repo root), not narrower.
+
+Before running, audit every file path in your prompt:
 
 - **File is inside `--cd`** → Codex can read it. Tell it the path relative to `--cd`.
-- **File is outside `--cd`** → Codex cannot read it. You must either:
-  1. **Inline the content** directly in the prompt text (preferred for small-to-medium artifacts), or
-  2. **Copy it** into a gitignored directory within the project (e.g., `docs/temp/`) so Codex can access it. Clean up the copy after the review.
-- **Monorepos:** if Codex needs files at the repo root AND in a subdirectory app, use the repo root as `--cd`, not the subdirectory.
+- **File is outside `--cd`** → Codex cannot read it. **Copy it** into `.tmp/` within the project so Codex can read the original file from disk. The `init_session.py` script already created `.tmp/` and added it to `.gitignore`. **Do NOT inline the content into the prompt** — you will truncate or summarize large files, losing critical context.
 
 Never tell Codex to "read the file at [path]" if that path is outside `--cd` — the review will fail silently.
 
@@ -167,20 +174,28 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 
 **Do this BEFORE writing every prompt.** Codex can ONLY read files inside the `--cd` directory. It has zero access to anything else — no `~/.claude/`, no `/tmp/`, no other projects, no home directory. If your prompt tells Codex to read a file outside `--cd`, Codex will silently skip it and review based on assumptions instead of the actual artifact. This produces unreliable reviews that waste time.
 
+**Never inline file content into the prompt.** Always have Codex read files from disk. Inlining is harmful — you will inevitably truncate or summarize the content, losing critical context. Codex reading the actual file gets the full, unmodified content.
+
 **Checklist — run through this for every file reference in your prompt:**
 
 1. List every file you want Codex to read or that you reference by path
 2. For each file, answer: is this path physically inside the `--cd` directory?
-3. If YES → use the path relative to `--cd`
-4. If NO → you MUST either **inline the full content** in the prompt text, or **copy the file** into the project first
+3. If YES → tell Codex to read it at its path relative to `--cd`
+4. If NO → copy it into `.tmp/` within the project (see below), then tell Codex to read it from `.tmp/`
 
 **Common offenders that are NEVER inside `--cd`:**
 
-- **Claude Code plans** (`~/.claude/plans/`) — always inline or copy these
-- **Session/temp files** (`/tmp/codex-reviews/...`) — always inline
-- **Files from other projects** — always inline or copy
+- **Claude Code plans** (`~/.claude/plans/`) — copy into `.tmp/` within the project
+- **Session/temp files** (`/tmp/codex-reviews/...`) — copy into `.tmp/` within the project
+- **Files from other projects** — copy into `.tmp/` within the project
 
-**Never write "read the file at [path]" unless you have verified that path exists inside `--cd`.** If in doubt, inline it — inlining always works.
+**Files that ARE typically inside `--cd` — do NOT inline these:**
+
+- **PRDs, specs, and docs** in the project (e.g., `docs/`, `specs/`, `apps/*/docs/`) — tell Codex to read them from disk
+- **Source code, tests, configs** — always read from disk
+- **Any file committed to the repo** — always read from disk
+
+**Never write "read the file at [path]" unless you have verified that path exists inside `--cd`.** Never inline content into the prompt — always ensure Codex reads files from disk, copying them into `.tmp/` within the project if they originate outside `--cd`.
 
 ### Controlling Codex's Output
 
@@ -214,7 +229,7 @@ BACKGROUND AND GOALS:
 If open-ended: "No specific constraints — review freely."]
 
 ARTIFACT TO REVIEW:
-[Full text, or instruct Codex to read specific files]
+[Instruct Codex to read specific files from disk. For files originally outside --cd, tell Codex to read the copy in .tmp/. Never paste file contents here.]
 
 REVIEW FOCUS:
 [Specific areas to evaluate]
@@ -255,7 +270,7 @@ FINDINGS NEEDING DISCUSSION:
 - [Finding #N]: [What you're unsure about — ask a specific question]
 
 UPDATED ARTIFACT:
-[Updated text, or tell Codex which files to re-read]
+[Tell Codex which files to re-read from disk. Never paste file contents here.]
 
 For each rejection: accept my reasoning, or explain why it's flawed.
 Review changes for: adequacy, new issues, remaining concerns.
@@ -265,9 +280,9 @@ Keep concise — one sentence per point.
 
 ### Review-Type Tips
 
-- **PRD**: Include full text or ensure the file is within `--cd`. Use `--cd` so Codex can cross-reference the codebase.
-- **Code**: Provide the diff or tell Codex which files to read. Use `--cd` for full codebase context.
-- **Plan/Architecture**: Include the plan text or ensure the file is within `--cd`. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
+- **PRD/Specs/Docs in the project**: Tell Codex to read from disk — these files are inside `--cd`. Never paste project file contents into the prompt.
+- **Code**: Tell Codex which files to read. For diffs, save the diff to a file in `.tmp/` and tell Codex to read it. Use `--cd` for full codebase context.
+- **Plan/Architecture** (from `~/.claude/plans/`): These are outside `--cd` — copy the plan file into `.tmp/` within the project so Codex can read the original. If the plan changes between rounds, recopy the updated file before the next review. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
 
 ## The Review Loop
 
@@ -291,9 +306,9 @@ A review is not complete until Codex has reviewed the final state of the code an
 ### Workflow
 
 1. **Draft** your artifact
-2. **Init** — `init_session.py --project <name> --title <title>`. Store the `session` path — this is the only value you track.
+2. **Init** — `init_session.py --project <name> --title <title>`. Store the returned `session` and `project_dir` values. The script auto-detects the git root from cwd, creates `.tmp/`, and gitignores it.
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
-4. **Run review** — `run_review.py --session <s> --cd <dir>` with `run_in_background: true`. Read `output_file` when done.
+4. **Run review** — `run_review.py --session <s>` with `run_in_background: true`. Read `output_file` when done. The script auto-detects `--cd` from cwd (resolves to git root); pass `--cd` only to override.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 6. **Apply changes** — modify the actual files for accepted findings
 7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated code. Do NOT skip this step.

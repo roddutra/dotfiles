@@ -63,3 +63,4 @@ claude/.claude/*
 !claude/.claude/commands/
 !claude/.claude/hooks/
 !claude/.claude/skills/
+.tmp/
