@@ -1,6 +1,6 @@
 ---
 name: codex-reviewer
-description: "MUST use this skill whenever Codex is involved in any way — reviewing, brainstorming, getting a second opinion, or any interaction with Codex. This skill runs the real OpenAI Codex CLI as an independent AI reviewer. NEVER simulate Codex by spawning a Claude subagent — that defeats the purpose of getting an independent opinion from a different model. Trigger phrases: 'get Codex to review', 'have Codex review', 'ask Codex', 'check with Codex', 'bounce this off Codex', 'Codex's opinion', 'second opinion', 'independent review'. Covers: PRDs, implementation plans, code changes, architectural decisions, or any artifact."
+description: "Runs the OpenAI Codex CLI as an independent reviewer for PRDs, plans, code, architecture, or any artifact where a second opinion from a different model adds value. MUST load EVERY TIME the user wants Codex to act on something — review, brainstorm, sanity check, second opinion. Triggers on phrasing like 'have Codex review X', 'ask Codex', 'bounce this off Codex'. Bare mentions with no action intent ('Codex is slow') do not trigger."
 ---
 
 # Codex Reviewer
