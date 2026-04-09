@@ -49,19 +49,49 @@ def write_prompt(session_path: Path, content: str, force: bool = False) -> dict:
 
     current_round = metadata.get("current_round", 0)
 
-    # Prevent orphaned rounds: block writing a new prompt if the previous
-    # round's review has not been run yet (output file missing).
-    if current_round > 0 and not force:
+    if current_round > 0:
         prev_paths = generate_paths(session_path, current_round)
         prev_output = Path(prev_paths["output_path"])
-        if not prev_output.exists():
+
+        # Strong block: run_review.py wrote a marker confirming the previous
+        # round silently failed (clean Codex exit, no assistant tokens). The
+        # rollout-file signature is the proof, not raw file size — a killed
+        # or timed-out run can also leave a 0-byte `-o` file behind. This
+        # check is intentionally NOT --force-overridable: --force is for
+        # kill/timeout recovery, not for sessions Codex itself broke.
+        if metadata.get("last_round_silent_failure") == current_round:
             print(
-                f"Error: Round {current_round} output not found. "
-                f"Run the review before writing the next prompt. "
-                f"Use --force if the previous round was killed/timed out.",
+                f"Error: Round {current_round} silently failed (see "
+                f"SKILL.md → 'Silent Failures (Empty Output)'). This session "
+                f"is dead. Do NOT retry with --force. Start a fresh session "
+                f"via init_session.py and carry context forward manually in "
+                f"the new prompt.",
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        # Soft block (--force overridable): missing or empty previous output.
+        # Either condition usually means the previous round was killed or
+        # timed out before producing usable content. --force lets the caller
+        # explicitly acknowledge this and proceed with kill/timeout recovery.
+        if not force:
+            if not prev_output.exists():
+                print(
+                    f"Error: Round {current_round} output not found. "
+                    f"Run the review before writing the next prompt. "
+                    f"Use --force if the previous round was killed/timed out.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if prev_output.stat().st_size == 0:
+                print(
+                    f"Error: Round {current_round} output is empty. "
+                    f"Run the review before writing the next prompt. "
+                    f"Use --force if the previous round was killed/timed out "
+                    f"and left an empty output file behind.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     round_num = current_round + 1
 

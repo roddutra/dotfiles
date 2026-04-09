@@ -35,6 +35,72 @@ _EXTERNAL_PATH_RE = re.compile(
     r")"
 )
 
+# Codex CLI persists session rollouts here, partitioned by date:
+#   ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<session_id>.jsonl
+_CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
+
+
+def _find_rollout_file(session_id: str) -> Path | None:
+    """Locate the Codex rollout JSONL file for a given session id.
+
+    Best-effort: rglob and stat can raise OSError on permission issues
+    or races where a file disappears mid-walk. Since this lookup only
+    feeds supplemental diagnostics, never let it surface a traceback
+    in place of the intended error message.
+    """
+    if not session_id or not _CODEX_SESSIONS_ROOT.exists():
+        return None
+    try:
+        matches = list(_CODEX_SESSIONS_ROOT.rglob(f"rollout-*-{session_id}.jsonl"))
+        if not matches:
+            return None
+        return max(matches, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _diagnose_silent_failure(session_id: str) -> str | None:
+    """Check the rollout file for the known empty-output signature.
+
+    The signature is the last `task_complete` event having
+    `last_agent_message=null` — meaning Codex closed the turn without
+    producing any assistant tokens. Returns a diagnostic string if the
+    signature is present, otherwise None (best-effort: returns None on
+    any read/parse failure rather than masking the original error).
+    """
+    rollout = _find_rollout_file(session_id)
+    if rollout is None:
+        return None
+
+    last_task_complete: dict | None = None
+    try:
+        with rollout.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                # Cheap pre-filter: skip lines that obviously don't contain
+                # a task_complete payload before paying for json.loads.
+                if '"task_complete"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = event.get("payload", {})
+                if payload.get("type") == "task_complete":
+                    last_task_complete = payload
+    except OSError:
+        return None
+
+    if last_task_complete is None:
+        return None
+    if last_task_complete.get("last_agent_message") is None:
+        return (
+            "Codex rollout confirms the silent-failure signature: the last "
+            "`task_complete` event has `last_agent_message=null` (no assistant "
+            "tokens were produced for this turn).\n"
+            f"Rollout file: {rollout}"
+        )
+    return None
+
 
 def _warn_external_paths(prompt_file: Path, project_dir: Path) -> None:
     """Emit a warning if the prompt references absolute paths outside --cd.
@@ -202,15 +268,107 @@ def run_review(session_path: Path, project_dir: Path | None = None, timeout: int
         print(msg, file=sys.stderr)
         sys.exit(2)
 
-    if process.returncode != 0 and not output_file.exists():
+    # Failure classification:
+    #   1. Any non-zero return code is a real CLI error → exit 1.
+    #      Output state is reported as supplemental context only.
+    #   2. Clean exit (0) but missing or empty output is the silent-failure
+    #      mode → exit 3. Most commonly triggered by `exec resume` after a
+    #      previous turn that ended with a long final response — the model
+    #      emits a `task_complete` event with `last_agent_message=null`, no
+    #      assistant tokens produced, and Codex writes an empty `-o` file.
+    if process.returncode != 0:
         stderr_tail = "".join(stderr_lines).strip()
         msg = f"Error: Codex exited with code {process.returncode}"
+        if output_file.exists():
+            size = output_file.stat().st_size
+            if size == 0:
+                msg += " (output file is empty)"
+            else:
+                msg += f" (partial output written, {size} bytes — inspect: {output_file})"
+        else:
+            msg += " (no output file written)"
         if stderr_tail:
             msg += f"\n\nCodex stderr:\n{stderr_tail}"
         else:
             msg += " (no stderr output captured)"
         print(msg, file=sys.stderr)
         sys.exit(1)
+
+    # process.returncode == 0 below.
+    output_missing = not output_file.exists()
+    output_empty = output_file.exists() and output_file.stat().st_size == 0
+    if output_missing or output_empty:
+        stderr_tail = "".join(stderr_lines).strip()
+
+        # Compute the rollout diagnostic once — it's the strong signal that
+        # gates BOTH the action guidance below and the marker write further
+        # down. Best-effort: returns None if the rollout file cannot be
+        # located, parsed, or doesn't contain the signature.
+        rollout_diag: str | None = None
+        if is_resume or captured_session_id:
+            diag_id = captured_session_id or session_id
+            if diag_id:
+                rollout_diag = _diagnose_silent_failure(diag_id)
+
+        msg = (
+            "Error: Codex exited cleanly but produced no review content "
+            f"({'output file missing' if output_missing else 'output file is empty'}).\n\n"
+            "This is the Codex silent-failure mode — most commonly seen "
+            "with `exec resume` after a previous turn that ended with a "
+            "long final response. The model emits a `task_complete` event "
+            "with `last_agent_message=null`, producing no assistant tokens."
+        )
+        if rollout_diag is not None:
+            # Confirmed: rollout shows last_agent_message=null. The session
+            # is dead. write_prompt.py will block any further round below,
+            # including --force, because the marker write succeeds.
+            msg += (
+                "\n\nThe rollout file CONFIRMS this signature for the "
+                "current turn — the session is dead. Do NOT retry with "
+                "resume or `--force`. Start a fresh session via "
+                "init_session.py and carry context forward manually (see "
+                "SKILL.md → 'Silent Failures (Empty Output)')."
+                f"\n\n{rollout_diag}"
+            )
+        else:
+            # Unconfirmed: could be the same failure mode with a missing or
+            # archived rollout file, or a transient issue (sandbox error,
+            # permissions) masquerading as empty output. Don't overstate
+            # certainty — let the user decide whether to retry or recover.
+            msg += (
+                "\n\nHowever, the rollout signature could NOT be confirmed "
+                "for this turn (the rollout file is missing, archived, or "
+                "does not contain a matching `task_complete` event). The "
+                "empty output may instead be caused by a transient issue "
+                "such as a sandbox or permissions error.\n\n"
+                "If you can verify the rollout signature manually, follow "
+                "the fresh-session recovery in SKILL.md → 'Silent Failures "
+                "(Empty Output)'. Otherwise, you may retry the next round "
+                "with `write_prompt.py --force` — no silent-failure marker "
+                "was written, so `write_prompt.py` will allow it."
+            )
+
+        if stderr_tail:
+            msg += f"\n\nCodex stderr (last lines):\n{stderr_tail}"
+
+        # Persist `last_round_silent_failure` ONLY when the rollout signature
+        # is confirmed. Without confirmation, fall through to write_prompt.py's
+        # soft (--force overridable) block so users can recover from edge
+        # cases like missing rollout files or sandbox errors that masquerade
+        # as empty output. The write is atomic via temp file + replace so a
+        # mid-write failure cannot corrupt session.json — write_prompt.py
+        # would otherwise be unable to parse it.
+        if rollout_diag is not None:
+            try:
+                metadata["last_round_silent_failure"] = round_num
+                tmp_path = session_path.parent / f"{session_path.name}.tmp"
+                tmp_path.write_text(json.dumps(metadata, indent=2))
+                tmp_path.replace(session_path)
+            except OSError:
+                pass
+
+        print(msg, file=sys.stderr)
+        sys.exit(3)
 
     return {
         "session_id": captured_session_id,

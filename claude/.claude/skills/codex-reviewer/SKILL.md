@@ -140,10 +140,36 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 
 - **JSON output with `session_id` and `output_file`** → success. Read the `output_file`.
 - **Exit code 2** → timeout. Codex hung and was killed after `--timeout` seconds. The session is recoverable.
+- **Exit code 3** → silent failure: Codex completed cleanly but the output file is missing or empty. See "Silent Failures" below — **do not retry with resume**.
 - **Exit code 143 (SIGTERM) or 137 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
 - **Non-zero exit code with an error message from the script** → genuine failure. Report the error to the user.
 
 **If a review is interrupted (timeout or kill):** the session is usually recoverable — the session ID is captured to metadata early. Use `write_prompt.py --force` to skip the missing-output check, then run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
+
+### Silent Failures (Empty Output)
+
+Codex sometimes exits with code 0 but writes nothing to the output file. The most common trigger is `codex exec resume` after a previous turn that ended with a long, "final-feeling" assistant response: the model emits a `task_complete` event with `last_agent_message=null`, meaning it generated no assistant tokens for the new turn at all. The wrapper script (`run_review.py`) detects this, exits with code 3, and prints a diagnostic that includes the rollout-file signature when available (best-effort — absent if the rollout file cannot be located).
+
+**Scope: this procedure applies only after `run_review.py` actually exited 3.** Do not start a fresh session preemptively "to avoid the resume bug." The silent failure is intermittent, the script catches it, and `codex exec resume` is still the normal happy path for every follow-up round. The mandatory re-review workflow in step 7 — pipe a follow-up prompt to `write_prompt.py`, then `run_review.py` on the same session — does not change. Treat fresh-session recovery as the response to a confirmed exit 3, never as a general safety measure.
+
+`write_prompt.py` also enforces this via a strong signal. When `run_review.py` exits 3 AND has confirmed the silent-failure rollout signature, it atomically persists a `last_round_silent_failure: <round>` marker into `session.json` (via a temp file and `Path.replace`, so a mid-write failure cannot corrupt the metadata). On the next invocation, `write_prompt.py` reads that marker and refuses to write any further round against the same session, and `--force` does NOT override the marker check. If exit 3 fires WITHOUT a confirmed rollout signature (e.g. the rollout file is missing, archived, or unreadable), the marker is *not* written and `write_prompt.py` falls back to its soft block on missing-or-empty output, which `--force` *does* override. This split keeps confirmed silent failures from being retried while still letting genuine kill/timeout recoveries through.
+
+**Recovery — do NOT retry with resume.** The resumed session is effectively dead and will keep producing empty output. The only reliable path is a fresh session:
+
+1. **Leave the broken session in place.** Do not run `cleanup_session.py`. The broken session lives at `/tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/` and contains `r1-prompt.md`, `r1-output.md`, and the empty later rounds. Keep them for reference.
+2. **Init a fresh session** with `init_session.py` for the same project (a new timestamp distinguishes it from the broken one). Note the new `session` path and `project_dir`.
+3. **Copy the broken-session artifacts you want to carry forward into the new project's `.tmp/` using `cp`** — do NOT read them into your own context first. Codex in the fresh session has no memory of the broken one, so the only way it can see the original prompt and round-1 output is to read them from disk inside `--cd`. Example:
+   ```bash
+   cp /tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/r1-prompt.md \
+      <project_dir>/.tmp/prior-codex-r1-prompt.md
+   cp /tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/r1-output.md \
+      <project_dir>/.tmp/prior-codex-r1-output.md
+   ```
+   `cp` is the right tool here — reading the files with the Read tool just to inline a summary into the new prompt wastes context and loses fidelity.
+4. **Write a new initial-round prompt** with `write_prompt.py` against the fresh session. Tell Codex to read `.tmp/prior-codex-r1-prompt.md` and `.tmp/prior-codex-r1-output.md` from disk, then state the follow-up question and the specific guidance from your conversation that the broken round 2 was meant to convey. Do NOT inline any of those file contents into the prompt.
+5. **Run `run_review.py`** on the fresh session. Because there is no `codex_session_id` yet, this is an initial review (`codex exec` with `--cd`), not a resume.
+
+**Do not** "retry" with `--force`, "tighten the prompt", or rerun `run_review.py` on the original session. None of those address the failure mode — they just repeat it. The fresh-session path is the only reliable recovery.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
@@ -175,6 +201,8 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 **Do this BEFORE writing every prompt.** Codex can ONLY read files inside the `--cd` directory. It has zero access to anything else — no `~/.claude/`, no `/tmp/`, no other projects, no home directory. If your prompt tells Codex to read a file outside `--cd`, Codex will silently skip it and review based on assumptions instead of the actual artifact. This produces unreliable reviews that waste time.
 
 **Never inline file content into the prompt.** Always have Codex read files from disk. Inlining is harmful — you will inevitably truncate or summarize the content, losing critical context. Codex reading the actual file gets the full, unmodified content.
+
+**When you need to relocate a file into `.tmp/` so Codex can reach it, use shell commands (`cp`, `mv`) — do NOT use the Read tool first.** Reading a file into your own context just to write it back into a new location wastes tokens and risks subtle truncation or transformation. The Bash tool can copy the file in one step without it ever entering your context window. Common cases: copying a Claude Code plan from `~/.claude/plans/` into `.tmp/`, copying artifacts from a broken Codex session under `/tmp/codex-reviews/...` into `.tmp/`, or staging files from another project for review.
 
 **Checklist — run through this for every file reference in your prompt:**
 
