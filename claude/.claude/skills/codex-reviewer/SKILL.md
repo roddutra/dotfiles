@@ -54,7 +54,7 @@ Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`
 ### Step 3: Run the Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>]
+python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>] [--stall <seconds>]
 ```
 
 Auto-detects initial vs follow-up based on session metadata:
@@ -63,7 +63,9 @@ Auto-detects initial vs follow-up based on session metadata:
 
 Reads the current round from metadata to locate the correct files. Returns JSON with `session_id`, `prompt_file`, `output_file`, `round`, and `mode`.
 
-**Timeout (opt-in):** No timeout by default — Codex can take as long as it needs. If the user asks you to set a timeout, pass `--timeout <seconds>` (e.g. `--timeout 1200` for 20 min). On timeout, the process is killed and the script exits with code 2. The session ID is preserved — you can resume with `--force`.
+**Wall-clock timeout (default 1800s / 30 min):** Caps how long a single turn can run. Well above observed healthy durations (~5-10 min), so it rarely fires on real reviews. On timeout, Codex is killed and the script exits with code 2 (the error message contains retry instructions). Override with `--timeout <seconds>` for a legitimately slow review; pass `--timeout 0` to disable.
+
+**Stall watchdog (default 300s / 5 min):** Kills Codex if stderr stays silent for too long. Catches the network-drop hang mode that a wall-clock timeout cannot: a healthy CLI emits progress frequently, so 5 min of silence almost always means the HTTP stream to the model closed mid-turn and the CLI deadlocked. On stall, the script exits with code 4. Override with `--stall <seconds>` or pass `--stall 0` to disable.
 
 **Project directory and Codex file access:** The project directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
 
@@ -139,12 +141,16 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 **Interpreting background task results:**
 
 - **JSON output with `session_id` and `output_file`** → success. Read the `output_file`.
-- **Exit code 2** → timeout. Codex hung and was killed after `--timeout` seconds. The session is recoverable.
-- **Exit code 3** → silent failure: Codex completed cleanly but the output file is missing or empty. See "Silent Failures" below — **do not retry with resume**.
+- **Exit code 1** → genuine CLI error (non-zero exit from Codex). The stderr tail is in the error message. Retry if the cause looks transient.
+- **Exit code 2** → wall-clock timeout. Codex ran longer than `--timeout` (default 30 min) and was killed. The session is recoverable — **re-run `run_review.py` with the same `--session`**; do NOT call `write_prompt.py` again. If timeouts keep happening, the review scope is probably too large — split it into smaller rounds.
+- **Exit code 3** → silent failure: Codex exited cleanly but the output is missing or empty. The error message branches on the rollout diagnostic:
+  - **Confirmed silent failure** (rollout shows `task_complete` with `last_agent_message=null`) → the resume session is dead. Do NOT retry with resume or `--force`; follow "Silent Failures" below.
+  - **Network-drop hang signature** (rollout ends mid-turn on a non-terminal event) → re-run `run_review.py` with the same `--session`; resume should still work.
+  - **Unconfirmed** → re-run `run_review.py` with the same `--session` first (the existing prompt and round are reused). Only if that also fails with no new info, pipe a fresh prompt to `write_prompt.py --force` to advance the round — this is NOT a retry of the broken round; it increments `current_round` from N to N+1 and writes a new prompt.
+- **Exit code 4** → stall: Codex stderr stayed silent for longer than `--stall` (default 5 min) and was killed. Almost always the network-drop hang mode — **re-run `run_review.py` with the same `--session`**; do NOT call `write_prompt.py` again.
 - **Exit code 143 (SIGTERM) or 137 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
-- **Non-zero exit code with an error message from the script** → genuine failure. Report the error to the user.
 
-**If a review is interrupted (timeout or kill):** the session is usually recoverable — the session ID is captured to metadata early. Use `write_prompt.py --force` to skip the missing-output check, then run `run_review.py` again — it auto-resumes if the session ID was captured. If not, it starts a fresh review.
+**Retry mechanics in one rule:** when the error says "the round N prompt file is still on disk", you do NOT re-run `write_prompt.py` — the round and prompt are already set. Just re-run `run_review.py` with the same `--session`. Only call `write_prompt.py --force` when the error explicitly says so (the unconfirmed silent-failure branch of exit 3).
 
 ### Silent Failures (Empty Output)
 
