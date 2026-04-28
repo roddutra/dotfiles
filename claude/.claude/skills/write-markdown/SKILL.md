@@ -1,6 +1,6 @@
 ---
 name: write-markdown
-description: MUST use when writing or editing any markdown (.md) file.
+description: MUST use when writing or editing any markdown content — including .md files, skill SKILL.md files, CLAUDE.md, AGENTS.md, READMEs, PRDs, plans, docs, and any other markdown.
 ---
 
 # Writing Markdown Files
