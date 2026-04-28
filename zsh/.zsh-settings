@@ -61,6 +61,7 @@ alias pip='pip3'
 alias lg='lazygit'
 alias cc='claude'
 alias ccd='claude --dangerously-skip-permissions'
+alias cca='claude --enable-auto-mode'
 
 # Custom Functions
 # Brew bundle dump without VSCode extensions
