@@ -1,10 +1,10 @@
 ---
-name: plan-codex
+name: codex-plan
 description: "Plan a feature or task with Codex as co-planner, then execute as PM delegating to subagents. Full workflow: gather requirements, draft plan, iterate with Codex review until consensus, present for user approval, then execute via task delegation with a final Codex code review. Use when user wants to plan and build something end-to-end with Codex collaboration."
 disable-model-invocation: true
 ---
 
-# Plan-Codex: Plan with Codex, Execute as PM
+# Codex-Plan: Plan with Codex, Execute as PM
 
 End-to-end workflow: collaboratively plan with Codex as an independent co-planner, get user approval, then execute the plan as a project manager delegating to subagents.
 
