@@ -184,7 +184,7 @@ def _warn_external_paths(prompt_file: Path, project_dir: Path) -> None:
     """Emit a warning if the prompt references absolute paths outside --cd.
 
     This catches the common mistake of telling Codex to read files it cannot
-    access (e.g. ~/.claude/plans/, /tmp/, files from other projects).
+    access (e.g. ~/.claude/plans/, ~/.codex-reviews/, files from other projects).
     The warning is non-blocking — it prints to stderr and returns.
     """
     text = prompt_file.read_text()

@@ -4,7 +4,7 @@
 Creates a nested directory structure and writes a session.json metadata
 file. The directory hierarchy encodes project, date, and session identity:
 
-  /tmp/codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
+  ~/.codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
 """
 
 import argparse

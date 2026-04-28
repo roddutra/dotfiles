@@ -5,7 +5,7 @@ Files live in the session directory alongside session.json, with simple
 names: r1-prompt.md, r1-output.md, r2-prompt.md, etc.
 
 Directory structure:
-  /tmp/codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/
+  ~/.codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/
     session.json
     r1-prompt.md
     r1-output.md
@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-REVIEWS_DIR = Path("/tmp/codex-reviews")
+REVIEWS_DIR = Path.home() / ".codex-reviews"
 
 
 def to_kebab_case(text: str) -> str:

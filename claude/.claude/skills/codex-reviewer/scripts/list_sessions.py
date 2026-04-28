@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """List and filter past Codex review sessions.
 
-Walks the directory tree under /tmp/codex-reviews/ looking for session.json
+Walks the directory tree under ~/.codex-reviews/ looking for session.json
 files. Supports filtering by project, date, date range, week, and month.
 
 Directory structure:
-  /tmp/codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
+  ~/.codex-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/session.json
 """
 
 import argparse

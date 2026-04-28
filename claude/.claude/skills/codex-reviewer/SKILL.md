@@ -19,7 +19,7 @@ Use the OpenAI Codex CLI as an independent reviewer — a separate AI agent whos
 
 The Codex process is strictly **read-only** — it must NEVER modify files or change state. The wrapper scripts enforce this via `--sandbox read-only` at the code level, which cannot be overridden. Never construct raw `codex exec` commands manually. Always include "do NOT modify any files" in prompts as an additional safeguard.
 
-Note: the wrapper scripts themselves perform small local setup — creating session files in `/tmp`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Codex actions.
+Note: the wrapper scripts themselves perform small local setup — creating session files in `~/.codex-reviews/`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Codex actions.
 
 ## Scripts
 
@@ -104,7 +104,7 @@ python <skill-path>/scripts/cleanup_session.py --session <session-path>
 
 Deletes all prompt, output, and metadata files for the session, removes the session directory, and prunes empty parent directories.
 
-**Never clean up unless the user explicitly asks you to.** Session files live in `/tmp` and are harmless to keep. Do not clean up after reaching consensus with Codex, after committing, after pushing, or after merging. The user may need to reference these files in a future conversation. Only run this script when the user directly instructs you to clean up.
+**Never clean up unless the user explicitly asks you to.** Session files live in `~/.codex-reviews/` and are harmless to keep. Do not clean up after reaching consensus with Codex, after committing, after pushing, or after merging. The user may need to reference these files in a future conversation. Only run this script when the user directly instructs you to clean up.
 
 ### Discovering Past Sessions
 
@@ -172,13 +172,13 @@ Codex sometimes exits with code 0 but writes nothing to the output file. The mos
 
 **Recovery — do NOT retry with resume.** The resumed session is effectively dead and will keep producing empty output. The only reliable path is a fresh session:
 
-1. **Leave the broken session in place.** Do not run `cleanup_session.py`. The broken session lives at `/tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/` and contains `r1-prompt.md`, `r1-output.md`, and the empty later rounds. Keep them for reference.
+1. **Leave the broken session in place.** Do not run `cleanup_session.py`. The broken session lives at `~/.codex-reviews/<project>/<date>/<HHMMSS-title>/` and contains `r1-prompt.md`, `r1-output.md`, and the empty later rounds. Keep them for reference.
 2. **Init a fresh session** with `init_session.py` for the same project (a new timestamp distinguishes it from the broken one). Note the new `session` path and `project_dir`.
 3. **Copy the broken-session artifacts you want to carry forward into the new project's `.tmp/` using `cp`** — do NOT read them into your own context first. Codex in the fresh session has no memory of the broken one, so the only way it can see the original prompt and round-1 output is to read them from disk inside `--cd`. Example:
    ```bash
-   cp /tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/r1-prompt.md \
+   cp ~/.codex-reviews/<project>/<date>/<HHMMSS-title>/r1-prompt.md \
       <project_dir>/.tmp/prior-codex-r1-prompt.md
-   cp /tmp/codex-reviews/<project>/<date>/<HHMMSS-title>/r1-output.md \
+   cp ~/.codex-reviews/<project>/<date>/<HHMMSS-title>/r1-output.md \
       <project_dir>/.tmp/prior-codex-r1-output.md
    ```
    `cp` is the right tool here — reading the files with the Read tool just to inline a summary into the new prompt wastes context and loses fidelity.
@@ -218,7 +218,7 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 
 **Never inline file content into the prompt.** Always have Codex read files from disk. Inlining is harmful — you will inevitably truncate or summarize the content, losing critical context. Codex reading the actual file gets the full, unmodified content.
 
-**When you need to relocate a file into `.tmp/` so Codex can reach it, use shell commands (`cp`, `mv`) — do NOT use the Read tool first.** Reading a file into your own context just to write it back into a new location wastes tokens and risks subtle truncation or transformation. The Bash tool can copy the file in one step without it ever entering your context window. Common cases: copying a Claude Code plan from `~/.claude/plans/` into `.tmp/`, copying artifacts from a broken Codex session under `/tmp/codex-reviews/...` into `.tmp/`, or staging files from another project for review.
+**When you need to relocate a file into `.tmp/` so Codex can reach it, use shell commands (`cp`, `mv`) — do NOT use the Read tool first.** Reading a file into your own context just to write it back into a new location wastes tokens and risks subtle truncation or transformation. The Bash tool can copy the file in one step without it ever entering your context window. Common cases: copying a Claude Code plan from `~/.claude/plans/` into `.tmp/`, copying artifacts from a broken Codex session under `~/.codex-reviews/...` into `.tmp/`, or staging files from another project for review.
 
 **Checklist — run through this for every file reference in your prompt:**
 
@@ -230,7 +230,7 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 **Common offenders that are NEVER inside `--cd`:**
 
 - **Claude Code plans** (`~/.claude/plans/`) — copy into `.tmp/` within the project
-- **Session/temp files** (`/tmp/codex-reviews/...`) — copy into `.tmp/` within the project
+- **Session files** (`~/.codex-reviews/...`) — copy into `.tmp/` within the project
 - **Files from other projects** — copy into `.tmp/` within the project
 
 **Files that ARE typically inside `--cd` — do NOT inline these:**
