@@ -28,12 +28,18 @@ Located relative to this skill's directory. Determine the skill path at runtime.
 ### Step 1: Initialize a Session
 
 ```bash
-python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title>
+python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title> [--model <name>] [--reasoning-effort <level>]
 ```
 
 Returns JSON with `session` (the only value you need to track) and `project_dir` (informational).
 
 **How `project_dir` works:** `init_session.py` resolves the git root from cwd once and persists it in session metadata. All subsequent `run_review.py` calls read `project_dir` from that metadata — no need to pass `--cd`. The script also creates `.tmp/` at the git root and ensures it's in `.gitignore`. Pass `--cd <dir>` only to override the persisted value.
+
+**Model is set once, here, and locked — but only if you actually pass `--model`.** With `--model <name>` (e.g. `--model gpt-5.5`), the value is persisted into session metadata and used on every round; there is no way to change it later (start a fresh session to use a different model). If you omit `--model`, nothing is persisted and each round picks up whatever the local Codex CLI is configured with at run time — so if `~/.codex/config.toml` changes between rounds, the model can effectively change too. To pin a model end-to-end across the session, pass it explicitly here.
+
+**Reasoning effort is seeded here and may be adjusted per round.** Pass `--reasoning-effort <level>` (e.g. `--reasoning-effort high`) to set the initial reasoning effort. The value is persisted; subsequent `run_review.py` calls reuse it automatically. To change it on a later round, pass `--reasoning-effort` to `run_review.py` — the new value is then persisted and inherited going forward (see Step 3).
+
+If neither flag is passed, Codex uses whatever the local CLI is configured with (typically `model` and `model_reasoning_effort` in `~/.codex/config.toml`).
 
 ### Step 2: Write the Prompt File
 
@@ -54,7 +60,7 @@ Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`
 ### Step 3: Run the Review
 
 ```bash
-python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>] [--stall <seconds>]
+python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>] [--stall <seconds>] [--reasoning-effort <level>]
 ```
 
 Auto-detects initial vs follow-up based on session metadata:
@@ -66,6 +72,10 @@ Reads the current round from metadata to locate the correct files. Returns JSON 
 **Wall-clock timeout (default 1800s / 30 min):** Caps how long a single turn can run. Well above observed healthy durations (~5-10 min), so it rarely fires on real reviews. On timeout, Codex is killed and the script exits with code 2 (the error message contains retry instructions). Override with `--timeout <seconds>` for a legitimately slow review; pass `--timeout 0` to disable.
 
 **Stall watchdog (default 300s / 5 min):** Kills Codex if stderr stays silent for too long. Catches the network-drop hang mode that a wall-clock timeout cannot: a healthy CLI emits progress frequently, so 5 min of silence almost always means the HTTP stream to the model closed mid-turn and the CLI deadlocked. On stall, the script exits with code 4. Override with `--stall <seconds>` or pass `--stall 0` to disable.
+
+**Reasoning-effort override (optional):** If a model was pinned at `init_session.py` time via `--model`, it is not overridable here; otherwise each round uses whatever the local Codex CLI default is at run time. Reasoning effort, by contrast, can be changed per round: pass `--reasoning-effort <level>` to use that value for the run, and on a successful run the value is persisted back into session metadata so the next round inherits it without re-passing the flag (failed runs do not persist, so a typo or invalid value won't get stuck). Omit the flag to use the value already persisted in session metadata (set by `init_session.py` or a prior successful round). If neither is set, Codex falls back to its locally-configured default. Forwarded as `-c model_reasoning_effort=<value>` on the underlying `codex exec` call.
+
+**When NOT to change `--reasoning-effort`:** Do not change it on your own initiative. Leave it to whatever the user set at init time (or whatever the local CLI default is). The two legitimate triggers for adjusting it are: (a) the user explicitly tells you to, or (b) Codex's output quality on a round looks materially poor and you suspect more reasoning would help — in that case, surface the suggestion to the user and ask permission before passing the flag. Bumping reasoning effort costs latency and tokens, so don't do it speculatively.
 
 **Project directory and Codex file access:** The project directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
 

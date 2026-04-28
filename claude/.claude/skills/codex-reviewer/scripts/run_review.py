@@ -214,6 +214,7 @@ def run_review(
     project_dir: Path | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
     stall: int = _DEFAULT_STALL,
+    reasoning_effort: str | None = None,
 ) -> dict:
     """Run or resume a codex review.
 
@@ -227,6 +228,18 @@ def run_review(
         stall: Seconds of stderr silence that triggers a stall kill.
             Default 300. Pass 0 to disable. Exceeding it kills the
             process and exits code 4 (network-drop hang signature).
+        reasoning_effort: Optional reasoning-effort override for this
+            run (passed as `-c model_reasoning_effort=<value>`). When
+            provided, the value is also persisted into session metadata
+            so subsequent rounds inherit it without the caller having
+            to re-pass the flag. When omitted, the persisted value (if
+            any) is used; otherwise Codex falls back to its locally-
+            configured default.
+
+            Model is intentionally NOT overridable here — it is locked
+            at session-init time. Changing models mid-session can
+            materially change Codex's outputs across rounds; start a
+            fresh session to switch models.
 
     Returns:
         Dict with session_id, prompt_file, output_file, round, and mode
@@ -257,10 +270,25 @@ def run_review(
     else:
         project_dir = _resolve_git_root(Path.cwd())
 
-    # Persist project_dir if not already in metadata (backwards compat with old sessions).
+    # Backfill project_dir for older sessions that predate the field.
+    # Persist immediately because the resume path depends on a valid
+    # value and reads metadata back from disk on subsequent invocations.
     if "project_dir" not in metadata:
         metadata["project_dir"] = str(project_dir.resolve())
         session_path.write_text(json.dumps(metadata, indent=2))
+
+    # Model is read-only here — locked at init_session.py time. Missing
+    # key (old sessions) means "no override", same as a None value.
+    session_model = metadata.get("model")
+
+    # Reasoning-effort: caller's value (if any) overrides for this run.
+    # Otherwise fall back to whatever the session has persisted.
+    # We deliberately do NOT persist the override here — see the deferred
+    # write at the success path below.
+    if reasoning_effort is not None:
+        session_reasoning_effort = reasoning_effort
+    else:
+        session_reasoning_effort = metadata.get("reasoning_effort")
 
     paths = generate_paths(session_path, round_num)
     prompt_file = Path(paths["prompt_path"])
@@ -277,10 +305,22 @@ def run_review(
     if project_dir:
         _warn_external_paths(prompt_file, project_dir)
 
+    # Optional model / reasoning-effort overrides resolved from session
+    # metadata above. When neither is set, Codex falls back to whatever
+    # the local CLI is configured with (typically ~/.codex/config.toml).
+    # Flags must come before the `resume` subcommand on resume
+    # invocations.
+    override_flags: list[str] = []
+    if session_model:
+        override_flags += ["--model", session_model]
+    if session_reasoning_effort:
+        override_flags += ["-c", f"model_reasoning_effort={session_reasoning_effort}"]
+
     if is_resume:
         cmd = [
             "codex", "exec",
             "--sandbox", "read-only",
+            *override_flags,
             "-o", str(output_file),
             "resume", session_id,
             "-",
@@ -289,6 +329,7 @@ def run_review(
         cmd = [
             "codex", "exec",
             "--sandbox", "read-only",
+            *override_flags,
             "--cd", str(project_dir),
             "-o", str(output_file),
             "-",
@@ -625,6 +666,19 @@ def run_review(
         print(msg, file=sys.stderr)
         sys.exit(3)
 
+    # Deferred persistence: only now do we know Codex accepted the
+    # `--reasoning-effort` value (clean exit + non-empty output). Writing
+    # eagerly would make a typo or invalid value sticky for future
+    # rounds. _capture_session_id may have written metadata mid-run, so
+    # the in-memory dict is already current — just patch the one field
+    # and rewrite.
+    if (
+        reasoning_effort is not None
+        and metadata.get("reasoning_effort") != reasoning_effort
+    ):
+        metadata["reasoning_effort"] = reasoning_effort
+        session_path.write_text(json.dumps(metadata, indent=2))
+
     return {
         "session_id": captured_session_id,
         "prompt_file": str(prompt_file),
@@ -673,6 +727,18 @@ def main():
             f"code 4 (network-drop hang signature)."
         ),
     )
+    parser.add_argument(
+        "--reasoning-effort", default=None,
+        help=(
+            "Optional reasoning-effort override for this run (e.g. low, "
+            "medium, high). When provided, the value is also persisted "
+            "into session metadata so subsequent rounds inherit it. When "
+            "omitted, the persisted value (set by init_session.py or a "
+            "prior run) is used; if none, Codex falls back to its "
+            "locally-configured default. Model is intentionally NOT "
+            "overridable here — it is locked at session-init time."
+        ),
+    )
     args = parser.parse_args()
 
     result = run_review(
@@ -680,6 +746,7 @@ def main():
         project_dir=Path(args.cd) if args.cd else None,
         timeout=args.timeout,
         stall=args.stall,
+        reasoning_effort=args.reasoning_effort,
     )
     print(json.dumps(result, indent=2))
 

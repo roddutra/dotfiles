@@ -65,10 +65,25 @@ def _ensure_tmp_gitignored(project_dir: Path) -> None:
         gitignore.write_text(pattern + "\n")
 
 
-def init_session(project: str, title: str, project_dir: Path | None = None) -> dict:
+def init_session(
+    project: str,
+    title: str,
+    project_dir: Path | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> dict:
     """Create the session directory and return session metadata path.
 
     If project_dir is None, auto-detects from cwd via git rev-parse.
+
+    `model` is locked for the lifetime of the session — `run_review.py`
+    cannot override it, since changing models mid-session can materially
+    change Codex's outputs across rounds. To use a different model, start
+    a fresh session.
+
+    `reasoning_effort` seeds the initial value. `run_review.py` may update
+    it on a later round (per-round overrides are persisted back into
+    session metadata), so this is just the starting setting.
     """
     REVIEWS_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     REVIEWS_DIR.chmod(0o700)
@@ -105,6 +120,8 @@ def init_session(project: str, title: str, project_dir: Path | None = None) -> d
         "current_round": 0,
         "codex_session_id": None,
         "project_dir": str(resolved_root),
+        "model": model,
+        "reasoning_effort": reasoning_effort,
     }
 
     metadata_path = session_dir / "session.json"
@@ -123,9 +140,35 @@ def main():
     parser.add_argument("--project", required=True, help="Project name")
     parser.add_argument("--title", required=True, help="Review title (e.g., prd-review)")
     parser.add_argument("--cd", default=None, help="Project directory override (default: auto-detect git root from cwd)")
+    parser.add_argument(
+        "--model", default=None,
+        help=(
+            "Optional Codex model for the entire session (e.g. gpt-5.5). "
+            "Persisted into session metadata and used for every round. "
+            "Cannot be changed after init — start a fresh session to use "
+            "a different model. If omitted, Codex uses its locally-"
+            "configured default."
+        ),
+    )
+    parser.add_argument(
+        "--reasoning-effort", default=None,
+        help=(
+            "Optional initial reasoning effort (e.g. low, medium, high). "
+            "Persisted into session metadata. May be overridden on a "
+            "per-round basis via run_review.py --reasoning-effort, which "
+            "also updates the persisted value. If omitted, Codex uses "
+            "its locally-configured default."
+        ),
+    )
     args = parser.parse_args()
 
-    result = init_session(args.project, args.title, project_dir=Path(args.cd) if args.cd else None)
+    result = init_session(
+        args.project,
+        args.title,
+        project_dir=Path(args.cd) if args.cd else None,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
+    )
     print(json.dumps(result))
 
 
