@@ -1,6 +1,6 @@
 ---
-name: write-markdown
-description: MUST use when writing or editing any markdown content — including .md files, skill SKILL.md files, CLAUDE.md, AGENTS.md, READMEs, PRDs, plans, docs, and any other markdown.
+name: concise-markdown
+description: MUST load at the start of ANY markdown work: drafting docs, editing docs, or tightening verbose markdown. Applies to all markdown, not just listed examples: PRDs, READMEs, plans, ADRs, design docs, skill SKILL.md files and referenced docs, CLAUDE.md, AGENTS.md. Prevents rationale recaps, generic concept explanations aimed at LLM readers, narrative openers, redundant closing summaries.
 ---
 
 # Writing Markdown Files
