@@ -83,5 +83,9 @@ zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
 
 # Shell integrations
+# Suppress zoxide's "init should be last" warning: .zshrc is gitignored and
+# tools like nvm/pnpm/herd auto-append below this, so keeping zoxide strictly
+# last isn't practical. The chpwd hook still works correctly in practice.
+export _ZO_DOCTOR=0
 source <(fzf --zsh)
 eval "$(zoxide init --cmd cd zsh)"
