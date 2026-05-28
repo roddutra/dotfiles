@@ -1,0 +1,14 @@
+# Snapshot of the pnpm global config keys this repo recommends.
+# Actual file lives at: ~/Library/Preferences/pnpm/rc
+#
+# To apply on a fresh machine, run:
+#   pnpm config set minimumReleaseAge 10080 --global
+#   pnpm config set dangerouslyAllowAllBuilds false --global
+#   pnpm config set blockExoticSubdeps true --global
+#
+# Do NOT stow this file directly - the real rc file also stores the npm
+# auth token, which must never be committed.
+
+minimum-release-age=10080
+dangerously-allow-all-builds=false
+block-exotic-subdeps=true

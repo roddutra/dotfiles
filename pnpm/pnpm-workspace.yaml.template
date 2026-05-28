@@ -1,0 +1,25 @@
+# Supply-chain security settings for pnpm v10+
+# Drop these keys into the project's pnpm-workspace.yaml (or merge with
+# existing content). See ./README.md for what each setting does and why.
+
+# Wait 7 days (10080 minutes) before installing a newly published version.
+# Buys time for the ecosystem to detect and pull compromised packages.
+minimumReleaseAge: 10080
+
+# Packages excluded from the release-age delay. Add packages you trust to
+# publish frequently and need immediately. Keep this list short and reviewed.
+minimumReleaseAgeExclude: []
+
+# Block all postinstall / prepare / install scripts in dependencies by default.
+# This is the pnpm v10+ default; restated here so it can't be flipped silently.
+dangerouslyAllowAllBuilds: false
+
+# Explicit allowlist of dependencies whose build scripts may run. Add only
+# packages that genuinely need a native build step (e.g. esbuild, sharp,
+# better-sqlite3). Run `pnpm approve-builds` to populate this interactively.
+onlyBuiltDependencies: []
+
+# Reject transitive dependencies pulled from git repos, tarball URLs, or
+# other non-registry sources. Forces every sub-dep through the registry,
+# where signatures, provenance, and takedowns apply.
+blockExoticSubdeps: true

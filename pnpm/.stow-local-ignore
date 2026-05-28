@@ -1,0 +1,10 @@
+# Stow local ignore file
+# Files and patterns listed here will NOT be symlinked when running `stow pnpm`
+#
+# Nothing in this directory belongs in $HOME. The pnpm/ folder is reference
+# material: docs and a template that gets copied into project repos manually.
+# Global pnpm config is applied via `pnpm config set ... --global`, not stow.
+
+README\.md
+pnpm-workspace\.yaml\.template
+global-rc\.example
