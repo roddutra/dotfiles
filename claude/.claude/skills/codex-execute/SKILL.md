@@ -8,8 +8,6 @@ disable-model-invocation: true
 
 End-to-end execution workflow: digest an already-defined task, requirement, plan, or PRD, set up tasks and dependencies, execute as a project manager delegating to subagents, and pull in Codex (via the `codex-reviewer` skill) to code-review or brainstorm at the appropriate points.
 
-This skill assumes the *what* is already settled (a task description, requirements, an approved plan, or a PRD). It covers only execution. To plan something from scratch with Codex as co-planner first, use `codex-plan`.
-
 ## Phase 1: Understand the Work
 
 The user provides the work in one of two ways - handle both:
