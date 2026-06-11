@@ -62,6 +62,7 @@ alias lg='lazygit'
 alias cc='claude'
 alias ccd='claude --dangerously-skip-permissions'
 alias cca='claude --enable-auto-mode'
+alias cc-viewer='npx @kimuson/claude-code-viewer@latest --port 3400'
 
 # Custom Functions
 # Brew bundle dump without VSCode extensions
