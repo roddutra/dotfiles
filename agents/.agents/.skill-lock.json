@@ -1,0 +1,153 @@
+{
+  "version": 3,
+  "skills": {
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills.git",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "skillFolderHash": "343db72180d05814949fef7d46be96b5c6ee86b3",
+      "installedAt": "2026-03-16T00:19:10.913Z",
+      "updatedAt": "2026-05-20T04:07:25.082Z"
+    },
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "grill-me/SKILL.md",
+      "skillFolderHash": "5a116da73f4e186f2ad9ce29aae23f5fdaa41017",
+      "installedAt": "2026-03-19T02:45:31.827Z",
+      "updatedAt": "2026-03-19T02:45:31.827Z"
+    },
+    "tdd": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "tdd/SKILL.md",
+      "skillFolderHash": "28d7822c112f22cf499099881856fdec07bc83a8",
+      "installedAt": "2026-03-19T02:47:10.766Z",
+      "updatedAt": "2026-03-19T02:47:10.766Z"
+    },
+    "improve-codebase-architecture": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "improve-codebase-architecture/SKILL.md",
+      "skillFolderHash": "78b2029cbf4a74fa798c97ea27bc02bdeb2e3237",
+      "installedAt": "2026-03-19T02:47:58.234Z",
+      "updatedAt": "2026-03-19T02:47:58.234Z"
+    },
+    "ubiquitous-language": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "skillPath": "ubiquitous-language/SKILL.md",
+      "skillFolderHash": "07a5a654ab4276bd7404b7f1b5f196b15c9fca33",
+      "installedAt": "2026-03-19T02:48:23.432Z",
+      "updatedAt": "2026-03-19T02:48:23.432Z"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/anthropics/skills.git",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "skillFolderHash": "928950704df8a8b885c03de5da626331e6f29cf8",
+      "pluginName": "example-skills",
+      "installedAt": "2026-04-22T07:43:40.747Z",
+      "updatedAt": "2026-04-22T07:43:40.747Z"
+    },
+    "computer-use": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/computer-use/SKILL.md",
+      "skillFolderHash": "ac1f6e3de0cbd9b488c5cfb1d4c5c076e17afea0",
+      "installedAt": "2026-05-20T00:36:09.823Z",
+      "updatedAt": "2026-05-20T00:36:09.823Z"
+    },
+    "orca-cli": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/orca-cli/SKILL.md",
+      "skillFolderHash": "b545ca22a27b8cfff80fd2d33c77db8b03efd7ed",
+      "installedAt": "2026-05-20T00:36:09.826Z",
+      "updatedAt": "2026-05-20T04:07:29.259Z"
+    },
+    "orchestration": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/stablyai/orca.git",
+      "skillPath": "skills/orchestration/SKILL.md",
+      "skillFolderHash": "a75a8a7124054ebfa2898c13a399e8fb6578bbb0",
+      "installedAt": "2026-05-20T00:36:09.827Z",
+      "updatedAt": "2026-05-20T00:36:09.827Z"
+    },
+    "llm-wiki": {
+      "source": "lewislulu/llm-wiki-skill",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/lewislulu/llm-wiki-skill.git",
+      "ref": "main",
+      "skillPath": "llm-wiki/SKILL.md",
+      "skillFolderHash": "e56f26ee38ae439789cc01b1934f3cbce9a9a602",
+      "installedAt": "2026-05-20T04:03:56.029Z",
+      "updatedAt": "2026-05-20T04:04:59.757Z"
+    },
+    "hindsight-self-hosted": {
+      "source": "vectorize-io/hindsight",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vectorize-io/hindsight.git",
+      "skillPath": "skills/hindsight-self-hosted/SKILL.md",
+      "skillFolderHash": "38a67f1634dc12aa545d1cd0ac1e0f83c1c828d7",
+      "installedAt": "2026-05-25T03:28:22.380Z",
+      "updatedAt": "2026-05-25T03:28:22.380Z"
+    },
+    "herdr": {
+      "source": "ogulcancelik/herdr",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/ogulcancelik/herdr.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "3366121ac343afea5af7fe4c36a0bc7077d0198d",
+      "installedAt": "2026-06-21T23:59:46.807Z",
+      "updatedAt": "2026-06-22T00:01:21.556Z"
+    },
+    "tmux": {
+      "source": "steipete/clawdis",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/steipete/clawdis.git",
+      "skillPath": "skills/tmux/SKILL.md",
+      "skillFolderHash": "7fb2804ed74ca281a89eb2898b252368c7a2f6ff",
+      "installedAt": "2026-06-22T00:14:37.312Z",
+      "updatedAt": "2026-06-22T00:14:37.312Z"
+    },
+    "make-interfaces-feel-better": {
+      "source": "jakubkrehel/make-interfaces-feel-better",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/jakubkrehel/make-interfaces-feel-better.git",
+      "skillPath": "skills/make-interfaces-feel-better/SKILL.md",
+      "skillFolderHash": "320672d06e899682d8923286d864efe3719d9c77",
+      "installedAt": "2026-06-22T02:56:13.882Z",
+      "updatedAt": "2026-06-22T02:56:13.882Z"
+    }
+  },
+  "dismissed": {
+    "findSkillsPrompt": true
+  },
+  "lastSelectedAgents": [
+    "amp",
+    "antigravity",
+    "antigravity-cli",
+    "cline",
+    "codex",
+    "cursor",
+    "deepagents",
+    "gemini-cli",
+    "github-copilot",
+    "kimi-code-cli",
+    "opencode",
+    "warp",
+    "zed",
+    "claude-code",
+    "pi"
+  ]
+}

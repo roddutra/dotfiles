@@ -67,6 +67,10 @@ Each top-level directory in this repo represents an application's configuration:
 
 ```
 dotfiles/
+├── agents/
+│   └── .agents/            # Will be symlinked to ~/.agents/
+│       ├── .skill-lock.json
+│       └── skills/         # Agent skills used by Codex, Pi, etc.
 ├── tmux/                   # The "package" name for stow
 │   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
 │   └── .config/
@@ -212,6 +216,7 @@ stow -D nvim
 - `stow zsh` will symlink `.zshrc`, `.zsh-settings`, and `.zsh-secrets` to the home directory (the `.zshrc.template` is excluded via `.stow-local-ignore`)
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
+- `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
 - `stow */` will symlink ALL application configs at once
 
 ### Setting up sensitive environment variables on a new machine:
