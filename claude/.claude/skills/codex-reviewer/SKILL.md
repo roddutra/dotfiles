@@ -28,12 +28,22 @@ Located relative to this skill's directory. Determine the skill path at runtime.
 ### Step 1: Initialize a Session
 
 ```bash
-python <skill-path>/scripts/init_session.py --project <project-name> --title <review-title> [--model <name>] [--reasoning-effort <level>]
+python <skill-path>/scripts/init_session.py --title <review-title> [--project <name>] [--force-project <name>] [--model <name>] [--reasoning-effort <level>]
 ```
 
 Returns JSON with `session` (the only value you need to track) and `project_dir` (informational).
 
-**How `project_dir` works:** `init_session.py` resolves the git root from cwd once and persists it in session metadata. All subsequent `run_review.py` calls read `project_dir` from that metadata — no need to pass `--cd`. The script also creates `.tmp/` at the git root and ensures it's in `.gitignore`. Pass `--cd <dir>` only to override the persisted value.
+**Normal path: inside a git repo, run only `init_session.py --title <title>`.** You name the session (`--title`); the project name is derived automatically from the repository, so **omit `--project`**.
+
+**How the project name is derived (and why worktrees stay unified):** The name is the **main working tree's** directory basename (the first entry of `git worktree list`). Because every linked worktree of a repo shares one main working tree, a review started from a worktree (e.g. `tomobroker-prd025/`) resolves to the **same** project as the main repo (`tomobroker`) instead of the worktree's folder name. Submodules resolve to the submodule's own name. All reviews for a codebase therefore group under one project directory.
+
+**`--project` vs `--force-project`:**
+
+- **`--project <name>`** is **ignored inside a git work tree** when a name can be derived (the script prints a note pointing you to `--force-project`). It is **required only when running in a non-git directory** (not a repo at all), where no name can be derived. A **bare repository is always rejected** regardless of `--project`/`--force-project` (it has no working tree for Codex to read).
+- **`--force-project <name>`** overrides the git-derived name **anywhere** (main repo, worktree, or non-git). Use it **only** for deliberate custom grouping, e.g. splitting one repo into several logical review buckets (`tomobroker-frontend`, `tomobroker-backend`). Reach for it intentionally; it is named distinctly so it is not a reflex.
+- If both are supplied, **`--force-project` wins**.
+
+**Project name vs `project_dir`/`--cd` (they are deliberately separate):** The project name affects **only** the session-grouping path `~/.codex-reviews/<project>/`. It does **not** change where Codex reads files. `init_session.py` separately resolves `project_dir` from the **worktree's own** root (`git rev-parse --show-toplevel`) and persists it; all subsequent `run_review.py` calls read `project_dir` from that metadata (no need to pass `--cd`), so Codex reviews the files in the checkout you launched from. The script creates `.tmp/` at that root and ensures it's in `.gitignore`. A **bare repository is rejected** (no working tree for Codex to read). Pass `--cd <dir>` only to override the persisted value.
 
 **Model is set once, here, and locked — but only if you actually pass `--model`.** With `--model <name>` (e.g. `--model gpt-5.5`), the value is persisted into session metadata and used on every round; there is no way to change it later (start a fresh session to use a different model). If you omit `--model`, nothing is persisted and each round picks up whatever the local Codex CLI is configured with at run time — so if `~/.codex/config.toml` changes between rounds, the model can effectively change too. To pin a model end-to-end across the session, pass it explicitly here.
 
@@ -350,7 +360,7 @@ A review is not complete until Codex has reviewed the final state of the code an
 ### Workflow
 
 1. **Draft** your artifact
-2. **Init** — `init_session.py --project <name> --title <title>`. Store the returned `session` path. The script auto-detects the git root from cwd, persists it in session metadata, creates `.tmp/`, and gitignores it.
+2. **Init** - `init_session.py --title <title>`. Inside a git repo, omit `--project` (the name is derived from the repo and shared across worktrees; a passed `--project` is ignored there). In a non-git directory, pass `--project <name>` (bare repos are always rejected). Use `--force-project <name>` only for an intentional override (e.g. splitting one repo into logical buckets). Store the returned `session` path. The script auto-detects the git root from cwd, persists it in session metadata, creates `.tmp/`, and gitignores it.
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
 4. **Run review** — `run_review.py --session <s>` with `run_in_background: true`. Read `output_file` when done. The script reads `project_dir` from session metadata; pass `--cd` only to override.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
