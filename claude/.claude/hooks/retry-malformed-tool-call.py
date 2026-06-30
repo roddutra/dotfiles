@@ -258,6 +258,7 @@ def run():
 
     # Provably safe: leaked <invoke> text never executes, so nothing ran.
     reason = (
+        "[malformed-tool-call hook] "
         "Your previous reply was emitted as PLAIN TEXT, not as a real tool call: "
         "an un-wrapped `<invoke name=\"...\">` block (often preceded by a stray "
         "token such as `court`/`count`/`call`). Leaked tool-call text never "
