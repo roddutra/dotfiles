@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stop hook: catch malformed text-format tool calls and force a retry.
+"""Stop hook: catch leaked text-format tool calls and force a retry.
 
 Background
 ----------
@@ -12,23 +12,31 @@ recognise it, returns it as a text content block, nothing executes, and the turn
 ends. The session then silently stalls until the user re-prompts.
 
 The stray sentinel token varies between sessions/users: "court", "count",
-"call", "core" have all been observed (see anthropics/claude-code#67307). A
-sibling regression (#64235) drops the tool_use block ENTIRELY on a
-`stop_reason == "tool_use"` turn with no `<invoke>` text leaked at all.
+"call", "core" have all been observed (see anthropics/claude-code#67307).
 
 What this hook does
 -------------------
 Fires on Stop. Reads the tail of the transcript, finds the last main-agent
-assistant message, and applies two independent triggers. If either fires it
+assistant message, and detects a leaked text-format tool call. If one is found it
 returns {"decision": "block"} with a corrective instruction so Claude re-issues
 the call as a real tool call instead of stalling. A bounded per-session counter
 prevents infinite loops, and the last-handled message id is remembered so the
 same message can never be counted twice.
 
-Trigger A - text-format leak. A real leak always ENDS with `</invoke>` (the
-leaked call is the last thing emitted). On top of that we require one of two
-shapes, so prose/docs that merely discuss or fence-quote the pattern do not
-match:
+The leaked-text trigger is the ONLY action this hook takes, and it is provably
+safe: leaked `<invoke>` text never executes, so re-issuing it can never cause a
+double action. (An earlier draft also acted on a `stop_reason == "tool_use"`
+turn that carried no tool_use block - the text-free #64235 variant - but that
+state is ambiguous: an aborted/interrupted turn or a teammate handoff can leave
+it AFTER the tool already ran. Under an auto-execute setup a retry there could
+double-run a side-effecting action, so it was dropped. That variant now simply
+stalls and the user re-prompts, which is safe.)
+
+Detection
+---------
+A real leak always ENDS with `</invoke>` (the leaked call is the last thing
+emitted). On top of that we require one of two shapes, so prose/docs that merely
+discuss or fence-quote the pattern do not match:
   * WHOLE: the message is essentially just the invoke block (optionally after a
     single lone-sentinel line); or
   * SENTINEL: a lone short token line (the stray sentinel) immediately precedes a
@@ -36,10 +44,15 @@ match:
 A fenced example ends with a ``` fence (not `</invoke>`), and ordinary prose has
 neither shape, so both are excluded.
 
-Trigger B - dropped tool_use block. The API reports `stop_reason == "tool_use"`
-but the message carries zero `tool_use` content blocks. At Stop time that is a
-contradiction (a real tool_use turn would have executed and not stopped), so it
-catches the #64235 variant where the call vanishes with no text to match.
+Scope - model gate
+------------------
+The glitch is exclusive to claude-opus-4-8 (it never occurred on 4.7). The hook
+reads the model off the last assistant message and no-ops on any other model, so
+Sonnet/Haiku/Fable and teammate turns are never touched. The match is
+case-insensitive and separator-tolerant (so `Claude-Opus-4-8`, `claude-opus-4.8`,
+and dated variants like `claude-opus-4-8-20260101` all match). If the transcript
+omits the model field, the hook falls through rather than silently disabling
+itself - safe to do, since the only action is the provably-safe leak retry.
 
 Fail-safe
 ---------
@@ -61,19 +74,29 @@ MAX_RETRIES = 3
 # (court/count/call/core/...). It is the ONLY lead-in allowed before a
 # whole-message leak, and the marker for a prose-trailing leak.
 _SENTINEL = r"[A-Za-z][\w-]{0,19}"
-# Trigger A, shape WHOLE: the whole message is a single invoke block, optionally
-# after one lone-sentinel line.
+# Shape WHOLE: the whole message is a single invoke block, optionally after one
+# lone-sentinel line.
 WHOLE_INVOKE_RE = re.compile(
     rf'^\s*(?:{_SENTINEL}[ \t]*\r?\n)?\s*<invoke\s+name="[^"]*".*?</invoke>\s*$',
     re.IGNORECASE | re.DOTALL,
 )
-# Trigger A, shape SENTINEL: a lone-sentinel line immediately precedes a
-# line-start invoke that runs to the end of the message (the leak may be
-# preceded by ordinary prose above the sentinel line).
+# Shape SENTINEL: a lone-sentinel line immediately precedes a line-start invoke
+# that runs to the end of the message (the leak may be preceded by ordinary prose
+# above the sentinel line).
 SENTINEL_INVOKE_RE = re.compile(
     rf'(?:\A|\n)[ \t]*{_SENTINEL}[ \t]*\r?\n[ \t]*<invoke\s+name="[^"]*".*?</invoke>\s*$',
     re.IGNORECASE | re.DOTALL,
 )
+
+# Case/separator-insensitive marker for the only affected model.
+_MODEL_SEP_RE = re.compile(r"[._]")
+
+
+def is_opus_4_8(model):
+    """True if the model string denotes claude-opus-4-8 (any case/separator/suffix)."""
+    if not isinstance(model, str) or not model:
+        return False
+    return "opus-4-8" in _MODEL_SEP_RE.sub("-", model.lower())
 
 
 def read_tail(path, max_bytes=1048576):
@@ -94,8 +117,8 @@ def read_tail(path, max_bytes=1048576):
 
 
 def last_assistant_message(transcript_path):
-    """Return (text, stop_reason, block_types, message_id) for the last
-    non-sidechain assistant message, or None if there isn't one."""
+    """Return (text, message_id, model) for the last non-sidechain assistant
+    message, or None if there isn't one."""
     try:
         text = read_tail(transcript_path)
     except OSError:
@@ -117,38 +140,31 @@ def last_assistant_message(transcript_path):
             continue
         content = msg.get("content")
         parts = []
-        types = []
         if isinstance(content, str):
             parts.append(content)
-            types.append("text")
         elif isinstance(content, list):
             for block in content:
-                if not isinstance(block, dict):
-                    continue
-                types.append(block.get("type"))
-                if block.get("type") == "text":
+                if isinstance(block, dict) and block.get("type") == "text":
                     value = block.get("text")
                     if isinstance(value, str):
                         parts.append(value)
-        mid = msg.get("id")
-        return "\n".join(parts), msg.get("stop_reason"), types, mid
+        return "\n".join(parts), msg.get("id"), msg.get("model")
     return None
 
 
-def is_malformed_tool_call(text, stop_reason, block_types):
-    """True if the last assistant turn is a stalled/malformed tool call."""
-    # Trigger A: text-format <invoke> leak (any sentinel token, or none). A leak
-    # always ends with </invoke> - cheap precheck before the regexes.
-    if isinstance(text, str) and text:
-        stripped = text.strip()
-        if stripped.lower().endswith("</invoke>") and (
-            WHOLE_INVOKE_RE.match(stripped) or SENTINEL_INVOKE_RE.search(stripped)
-        ):
-            return True
-    # Trigger B: API said tool_use but no tool_use block was emitted (#64235).
-    if stop_reason == "tool_use" and "tool_use" not in (block_types or []):
-        return True
-    return False
+def is_text_format_leak(text):
+    """True if the last assistant turn is a leaked text-format tool call.
+
+    A leak always ends with </invoke> (cheap precheck before the regexes) and
+    matches the WHOLE or SENTINEL shape. Prose/docs that merely discuss the
+    pattern do not match - a fenced example ends with ``` , not </invoke>.
+    """
+    if not isinstance(text, str) or not text:
+        return False
+    stripped = text.strip()
+    if not stripped.lower().endswith("</invoke>"):
+        return False
+    return bool(WHOLE_INVOKE_RE.match(stripped) or SENTINEL_INVOKE_RE.search(stripped))
 
 
 def state_path(session_id):
@@ -196,8 +212,16 @@ def run():
         clear_state(spath)
         sys.exit(0)
 
-    text, stop_reason, block_types, mid = result
-    if not is_malformed_tool_call(text, stop_reason, block_types):
+    text, mid, model = result
+
+    # Model gate: the glitch is exclusive to claude-opus-4-8. No-op on any other
+    # model so Sonnet/Haiku/Fable and teammate turns are never touched. A missing
+    # model field (unexpected format) falls through rather than silently disabling
+    # the protection - safe, since the only action is the provably-safe leak retry.
+    if isinstance(model, str) and model and not is_opus_4_8(model):
+        sys.exit(0)
+
+    if not is_text_format_leak(text):
         clear_state(spath)  # clean stop, reset the retry budget
         sys.exit(0)
 
@@ -219,15 +243,15 @@ def run():
 
     write_state(spath, count + 1, mid)
 
+    # Provably safe: leaked <invoke> text never executes, so nothing ran.
     reason = (
-        "Your previous response was NOT executed: the tool call did not run, so the "
-        "turn stalled. Either it was emitted as plain text (an un-wrapped "
-        "`<invoke name=\"...\">` block, often preceded by a stray token such as "
-        "`court`/`count`/`call`), or the API reported a tool call but no tool_use "
-        "block was actually produced. This is a known claude-opus-4-8 serialisation "
-        "glitch in long sessions. Re-issue the EXACT same tool call now as a proper "
-        "native tool call. Do not print the `<invoke>` text again; actually invoke "
-        f"the tool. (auto-retry {count + 1}/{MAX_RETRIES})"
+        "Your previous reply was emitted as PLAIN TEXT, not as a real tool call: "
+        "an un-wrapped `<invoke name=\"...\">` block (often preceded by a stray "
+        "token such as `court`/`count`/`call`). Leaked tool-call text never "
+        "executes, so NOTHING ran and no action was taken. This is a known "
+        "claude-opus-4-8 serialisation glitch in long sessions. Re-issue the same "
+        "call now as a proper native tool call - do not print the `<invoke>` text "
+        f"again, actually invoke the tool. (auto-retry {count + 1}/{MAX_RETRIES})"
     )
     print(json.dumps({"decision": "block", "reason": reason}))
     sys.exit(0)
