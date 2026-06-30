@@ -18,10 +18,23 @@ What this hook does
 -------------------
 Fires on Stop. Reads the tail of the transcript, finds the last main-agent
 assistant message, and detects a leaked text-format tool call. If one is found it
-returns {"decision": "block"} with a corrective instruction so Claude re-issues
-the call as a real tool call instead of stalling. A bounded per-session counter
-prevents infinite loops, and the last-handled message id is remembered so the
-same message can never be counted twice.
+forces a retry (see "Blocking mechanism" below) with a corrective instruction so
+Claude re-issues the call as a real tool call instead of stalling. A bounded
+per-session counter prevents infinite loops, and the last-handled message id is
+remembered so the same message can never be counted twice.
+
+Blocking mechanism - EXIT CODE 2, not stdout JSON
+-------------------------------------------------
+A Stop hook blocks (forces continuation) by exiting 2 with the corrective message
+on STDERR. This is what Claude Code's interactive REPL actually honors: its Stop
+handler triggers a block ONLY on `exitCode === 2` and feeds stderr (falling back
+to stdout) back to the model. The widely-documented `{"decision": "block"}` JSON
+on stdout is recognised only by the non-REPL/SDK hook executor - on the REPL Stop
+path that JSON is parsed solely for `metrics`/`rewakeSummary`, so a hook that
+prints it and exits 0 is silently ignored and the session stalls (observed on
+claude-opus-4-8 in anthropics/claude-code#67307). Exit 2 is honoured by BOTH the
+REPL and non-REPL executors (`status === 2 || decision === "block"`), so it is
+the correct, portable choice. A normal (non-blocking) stop is exit 0.
 
 The leaked-text trigger is the ONLY action this hook takes, and it is provably
 safe: leaked `<invoke>` text never executes, so re-issuing it can never cause a
@@ -253,8 +266,11 @@ def run():
         "call now as a proper native tool call - do not print the `<invoke>` text "
         f"again, actually invoke the tool. (auto-retry {count + 1}/{MAX_RETRIES})"
     )
-    print(json.dumps({"decision": "block", "reason": reason}))
-    sys.exit(0)
+    # Block via exit code 2 + stderr - the ONLY signal the interactive REPL Stop
+    # handler honours (stdout JSON `decision:block` is ignored there). See the
+    # "Blocking mechanism" note in the module docstring.
+    print(reason, file=sys.stderr)
+    sys.exit(2)
 
 
 def main():
