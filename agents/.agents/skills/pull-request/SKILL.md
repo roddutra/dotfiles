@@ -1,6 +1,6 @@
 ---
 name: pull-request
-description: Compose and open GitHub pull requests that a reviewer can approve without checking out the branch. MUST load BEFORE opening any pull request - before running `gh pr create`, before pushing a branch for review, or before invoking any PR-creation tool - for both Claude Code and Codex. Beyond the usual summary of what was done, it adds a plain-language "What changed and why it matters" section (technical AND practical impact for the reader) and, when the change warrants it, visual proof: Mermaid diagrams for logic/flow changes, before/after screenshots for UI/UX changes, and a short screen recording for complex or interactive changes. All media is hosted headlessly via GitHub release assets and embedded by URL - no browser login required. Triggers whenever the user asks to "open a PR", "create a pull request", "raise/submit a PR", "gh pr create", "ship this for review", or otherwise prepare a change for review. Do not open the PR before consulting this skill.
+description: 'Compose and open GitHub pull requests with reviewer-friendly descriptions - a plain-language explanation of what changed and why it matters, plus diagrams, screenshots, or a short screen recording when the change warrants visual proof. For Claude Code and Codex. MUST load BEFORE opening any pull request: before `gh pr create`, before pushing a branch for review, or before invoking any PR-creation tool. Triggers when the user asks to open, create, raise, or submit a PR, or otherwise prepare a change for review.'
 ---
 
 # Pull Request
@@ -9,7 +9,7 @@ Open GitHub pull requests whose description does the reviewer's homework for the
 
 This skill assumes the branch is already committed and pushed. It does not commit or push. It covers everything from "the branch is ready" through `gh pr create` with a rich body.
 
-Works the same for Claude Code and Codex, and the whole flow is **headless** - no GitHub browser session anywhere. Companion skills named below (`agent-browser`, `mermaid-diagrams`, `video-inspector`) are loaded through whatever mechanism your harness uses; if one isn't installed, fall back to the inline guidance here.
+Works the same for Claude Code and Codex, and the whole flow is **headless** - no GitHub browser session anywhere. It leans on companion skills where handy (`agent-browser` for capture, `mermaid-diagrams`, `video-inspector`), but none are required - each is a recommended option with a plain fallback noted inline. Load them through whatever mechanism your harness uses.
 
 ## Why this skill exists
 
@@ -35,7 +35,7 @@ This skill runs across different machines and CI, so check for tools before usin
 
 - **`gh` (authenticated)** - required to open the PR and host assets. Needed by every PR. The bundled scripts check for it and print install + `gh auth login` guidance if it's missing.
 - **`ffmpeg`** - required *only* when converting a recording to a GIF/WebP. Text-only, Mermaid-only, and screenshot-only PRs don't need it. `scripts/webm-to-gif.sh` checks for ffmpeg first and, if absent, prints per-OS install instructions and exits without installing.
-- **`agent-browser`** - required only when capturing screenshots or recordings.
+- **A browser-automation / screen-capture tool** - only when capturing screenshots or recordings. `agent-browser` is the recommended option (see step 3), but any equivalent works - Playwright/Puppeteer, a headless-browser script, a native screen recorder, or OS screenshot tools. It's a convenience, not a dependency.
 
 When a required tool is missing, surface the printed guidance to the user and **ask permission before installing** (e.g. `brew install ffmpeg` on macOS, `sudo apt-get install -y ffmpeg` on Debian/Ubuntu, `winget install Gyan.FFmpeg` on Windows). If the user declines or you can't install, degrade gracefully: drop the visual that needed it (a recording becomes before/after screenshots, or a plain link to the clip) rather than blocking the PR.
 
@@ -74,15 +74,15 @@ Only the ones step 1 flagged.
 
 **Mermaid diagrams (logic/flow).** Embed directly as a ```` ```mermaid ```` fenced block - GitHub renders it natively, nothing to host. If the `mermaid-diagrams` skill is available, load it first; it catches syntax errors that only surface at render time. Prefer a small, readable diagram of the flow that changed; if the logic was *replaced*, a before/after pair communicates it better than one.
 
-**Screenshots (UI/UX).** Use the `agent-browser` skill to drive the app locally and capture them - this only automates *your* app, so no GitHub login is involved. Load its usage guide for version-current commands:
+**Screenshots (UI/UX).** Drive the app locally and capture the changed screens with whatever browser-automation or screen-capture tool you have - this only automates *your* app, so no GitHub login is involved. The `agent-browser` skill is the recommended option (fast, works for both Claude Code and Codex); load its usage guide for version-current commands if it's available:
 
 ```bash
 agent-browser skills get core            # screenshots + video recording workflows
 ```
 
-Capture **before and after** the same screen at the same viewport when feasible - the contrast is what makes the change legible. After-only is fine for a net-new screen. Save into `.pr-media/` (next step) with descriptive names (`login-before.png`, `login-after.png`).
+Any equivalent works just as well - Playwright/Puppeteer, a headless-browser script, or an OS screenshot tool. agent-browser is a convenience, not a requirement. Capture **before and after** the same screen at the same viewport when feasible - the contrast is what makes the change legible. After-only is fine for a net-new screen. Save into `.pr-media/` (next step) with descriptive names (`login-before.png`, `login-after.png`).
 
-**Recordings (complex changes).** Record the one flow the PR changes with agent-browser (`record start/stop`, WebM out) - keep it short and purposeful, not a tour. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Then convert it to a compact inline asset:
+**Recordings (complex changes).** Record the one flow the PR changes with any screen-recorder - keep it short and purposeful, not a tour. agent-browser (`record start/stop`, WebM out) is the recommended option, but a native screen recorder or any tool that emits a video file works too. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Then convert it to a compact inline asset:
 
 ```bash
 bash <this-skill>/scripts/webm-to-gif.sh .pr-media/checkout-flow.webm .pr-media/checkout-flow.webp
