@@ -138,6 +138,19 @@ Read the frame images in `frames` order (you can read several in one turn). The 
 
 **Mind the budget as you go.** If you find yourself about to read more than ~10–12 full frames, stop and ask whether a contact sheet would answer the question instead. Reserve full-frame reads for moments where you genuinely need to see fine detail (small text, exact motion between two instants).
 
+## Running This in a Subagent (to protect the orchestrator's context)
+
+Reading frames and contact sheets is image-heavy: a sheet plus a few frames is easily tens of thousands of vision tokens. When inspection is a *subtask* of a larger job, those images should not live in the orchestrating agent's context, where they are re-sent (and re-billed) on every later turn and crowd out its real work. Have a **subagent** run this skill, absorb all the image tokens, and return only what the orchestrator needs. The saving is not the one-time read (the subagent still pays that); it is that the heavy payload never enters the long-lived context that gets re-billed each turn.
+
+**Delegate when** inspection is one step inside a bigger task, the clip is long or frame-heavy, or you only need the verdict. **Do it inline when** the inspection *is* the task (no larger context to protect, so a subagent is pure overhead and a briefing round-trip), when the user wants your own eyes on it, or during tight frame-by-frame iteration you are actively steering.
+
+**What the subagent must return** (the contract that makes this safe rather than lossy):
+
+1. The **distilled findings** in text: the assessment, timings, verdicts, what changes and when. This is the payload.
+2. The **session locators**, so the orchestrator can inspect the raw outputs itself if the findings alone are not enough: the `session` path, plus the paths to the contact sheet(s), extraction frame directories, and manifests. Return the paths, not the images.
+
+The second point is the important part. A subagent that returns only a verbal summary is a black box the orchestrator cannot verify. Because every artifact persists on disk under `~/.video-inspector`, the subagent hands back exact paths and the orchestrator reads *zero* images by default, yet can `Read` the one contact sheet or frame that matters on demand (or re-run `list_sessions.py` to rediscover everything). That is the whole point: keep the noise out of the orchestrator's context while preserving its ability to see the raw outputs for itself.
+
 ## Discovering Past Sessions
 
 ```bash
@@ -159,4 +172,5 @@ Deletes the whole session directory (all frames, copied videos, manifests) and p
 - **This skill is agent-agnostic.** The scripts are plain Python + ffmpeg with no dependency on any specific coding agent; Codex or another agent can invoke them the same way. Only this SKILL.md is Claude-facing.
 - **Resolve `<skill-path>` at runtime** — it's this skill's own directory. The scripts import sibling modules, so run them by path (`python3 <skill-path>/scripts/<name>.py`); the script's directory is placed on `sys.path` automatically.
 - **Mind the context budget.** Each full frame is an image the model must read, so many frames is a large token cost. Prefer the **contact-sheet overview first**, then targeted full-resolution drill-ins, over reading a big pile of frames. A whole 30s timeline fits in one sheet; you rarely need more than a handful of full frames after that.
+- **Delegate when inspection is a subtask.** To keep image tokens out of a long-running orchestrator's context, run this skill in a subagent that returns distilled findings *plus* the session locators (path, sheets, manifests, frame dirs) so the orchestrator can still inspect the raw outputs on demand. See "Running This in a Subagent" above.
 - For how videos get recorded in the first place (browser automation, screen capture, Playwright, etc.), see `references/recording-tools.md`.
