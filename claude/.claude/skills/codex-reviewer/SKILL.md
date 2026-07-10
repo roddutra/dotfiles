@@ -197,6 +197,32 @@ Codex sometimes exits with code 0 but writes nothing to the output file. The mos
 
 **Do not** "retry" with `--force`, "tighten the prompt", or rerun `run_review.py` on the original session. None of those address the failure mode — they just repeat it. The fresh-session path is the only reliable recovery.
 
+### Environment Failure: Codex Cannot Read Files (`codex-code-mode-host` missing)
+
+Distinct from silent failure: `run_review.py` exits 0 and the output file is NON-empty, but contains only a short refusal like "the read-only workspace tool cannot start (`codex-code-mode-host` is missing) ... I cannot read the PRD or code". Codex ran; its file-access tooling did not. **Never treat that output as a review, and never let Codex "review from memory".**
+
+**Cause:** Codex CLI >= 0.144 routes exec/file reads through a sidecar binary `codex-code-mode-host`, expected in the same bin directory as `codex`. Some distributions omit it — the Homebrew cask shipped 0.144.0 with only the main binary (openai/codex#31906; fixed upstream in 0.144.1, which also adds an in-process fallback). Retrying, resuming, or fresh sessions all fail identically until the environment is fixed.
+
+**What does NOT work (verified on 0.144.0):** disabling the feature via `~/.codex/config.toml` (`[features]` with `code_mode = false` and `code_mode_only = false`) — `codex exec` still requires the host for file reads. If you do touch `config.toml`, note it likely already HAS a `[features]` table; appending a second one is a TOML `duplicate key` error that breaks Codex entirely.
+
+**Verified fix — install the version-matched host binary from the GitHub release:**
+
+```bash
+codex --version                      # e.g. 0.144.0 → release tag rust-v0.144.0
+gh release download rust-v0.144.0 -R openai/codex \
+  -p 'codex-code-mode-host-aarch64-apple-darwin.tar.gz' -D /tmp/codex-host
+tar -xzf /tmp/codex-host/codex-code-mode-host-aarch64-apple-darwin.tar.gz -C /tmp/codex-host
+install -m 755 /tmp/codex-host/codex-code-mode-host-aarch64-apple-darwin \
+  "$(dirname "$(which codex)")/codex-code-mode-host"
+xattr -d com.apple.quarantine "$(dirname "$(which codex)")/codex-code-mode-host" 2>/dev/null || true
+```
+
+The host version MUST match `codex --version` exactly (the handshake rejects stale generations); pick the asset for the platform (`aarch64-apple-darwin`, `x86_64-apple-darwin`, ...).
+
+**After fixing:** start a FRESH session for the real review. Rounds produced while broken are junk (but non-empty, so `write_prompt.py`'s silent-failure guards don't trigger — you can simply write the next round or re-init).
+
+**Caveat for later upgrades:** once the CLI is upgraded (e.g. the cask ships >= 0.144.1), the manually installed host is version-mismatched — delete it (`rm "$(dirname "$(which codex)")/codex-code-mode-host"`) and let the new distribution provide its own.
+
 ## Critical Thinking — Do Not Follow Codex Blindly
 
 Critically evaluate each finding before acting on it:
