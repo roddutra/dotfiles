@@ -197,15 +197,25 @@ Codex sometimes exits with code 0 but writes nothing to the output file. The mos
 
 **Do not** "retry" with `--force`, "tighten the prompt", or rerun `run_review.py` on the original session. None of those address the failure mode — they just repeat it. The fresh-session path is the only reliable recovery.
 
-### Environment Failure: Codex Cannot Read Files (`codex-code-mode-host` missing)
+### Environment Failure: Codex Cannot Read Files (`codex-code-mode-host` missing) - fixed upstream in 0.144.1
 
 Distinct from silent failure: `run_review.py` exits 0 and the output file is NON-empty, but contains only a short refusal like "the read-only workspace tool cannot start (`codex-code-mode-host` is missing) ... I cannot read the PRD or code". Codex ran; its file-access tooling did not. **Never treat that output as a review, and never let Codex "review from memory".**
 
-**Cause:** Codex CLI >= 0.144 routes exec/file reads through a sidecar binary `codex-code-mode-host`, expected in the same bin directory as `codex`. Some distributions omit it — the Homebrew cask shipped 0.144.0 with only the main binary (openai/codex#31906; fixed upstream in 0.144.1, which also adds an in-process fallback). Retrying, resuming, or fresh sessions all fail identically until the environment is fixed.
+**Cause (CLI 0.144.0 only):** Codex CLI 0.144.x routes exec/file reads through a sidecar binary `codex-code-mode-host`, expected in the same bin directory as `codex`. The Homebrew cask shipped 0.144.0 with only the main binary and no fallback, so code mode hard-failed (openai/codex#31906).
 
-**What does NOT work (verified on 0.144.0):** disabling the feature via `~/.codex/config.toml` (`[features]` with `code_mode = false` and `code_mode_only = false`) — `codex exec` still requires the host for file reads. If you do touch `config.toml`, note it likely already HAS a `[features]` table; appending a second one is a TOML `duplicate key` error that breaks Codex entirely.
+**Status: resolved in 0.144.1** (release notes, `rust-v0.144.1`, PR #31913): *"Kept code mode working when the companion host binary is unavailable by falling back to the embedded runtime."* On CLI >= 0.144.1, a missing host binary no longer breaks file access - Codex falls back in-process automatically. **If you're on >= 0.144.1 and still see this refusal, it's a different bug - don't apply the 0.144.0 workaround below; investigate fresh.**
 
-**Verified fix — install the version-matched host binary from the GitHub release:**
+**Note on the Homebrew cask specifically:** 0.144.1's release notes also claim "macOS package installs expose the code-mode host alongside the codex executable," but as of 0.144.1 the [Homebrew cask source](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/c/codex.rb) still only downloads `codex-<arch>-apple-darwin.tar.gz` - it does not ship `codex-code-mode-host`. That packaging fix apparently targets other install paths (installer script, npm, dmg). Brew users are protected by the embedded-runtime fallback, not by the host actually being present - which is fine, since the fallback is what matters.
+
+**If a stale host binary is present from the manual fix below, delete it after upgrading to >= 0.144.1:** `rm "$(dirname "$(which codex)")/codex-code-mode-host"`. A version-mismatched host can still fail its handshake; removing it lets the embedded fallback take over cleanly. Check first with `ls "$(dirname "$(which codex)")" | grep codex-code-mode-host`.
+
+---
+
+**Historical workaround (CLI 0.144.0 only - do not use on >= 0.144.1):**
+
+**What does NOT work (verified on 0.144.0):** disabling the feature via `~/.codex/config.toml` (`[features]` with `code_mode = false` and `code_mode_only = false`) - `codex exec` still requires the host for file reads. If you do touch `config.toml`, note it likely already HAS a `[features]` table; appending a second one is a TOML `duplicate key` error that breaks Codex entirely.
+
+**Fix - install the version-matched host binary from the GitHub release:**
 
 ```bash
 codex --version                      # e.g. 0.144.0 → release tag rust-v0.144.0
@@ -219,9 +229,9 @@ xattr -d com.apple.quarantine "$(dirname "$(which codex)")/codex-code-mode-host"
 
 The host version MUST match `codex --version` exactly (the handshake rejects stale generations); pick the asset for the platform (`aarch64-apple-darwin`, `x86_64-apple-darwin`, ...).
 
-**After fixing:** start a FRESH session for the real review. Rounds produced while broken are junk (but non-empty, so `write_prompt.py`'s silent-failure guards don't trigger — you can simply write the next round or re-init).
+**After fixing:** start a FRESH session for the real review. Rounds produced while broken are junk (but non-empty, so `write_prompt.py`'s silent-failure guards don't trigger - you can simply write the next round or re-init).
 
-**Caveat for later upgrades:** once the CLI is upgraded (e.g. the cask ships >= 0.144.1), the manually installed host is version-mismatched — delete it (`rm "$(dirname "$(which codex)")/codex-code-mode-host"`) and let the new distribution provide its own.
+**Once upgraded to >= 0.144.1, this workaround is obsolete** - see "Status: resolved in 0.144.1" above.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
