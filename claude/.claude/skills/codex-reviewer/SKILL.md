@@ -197,41 +197,9 @@ Codex sometimes exits with code 0 but writes nothing to the output file. The mos
 
 **Do not** "retry" with `--force`, "tighten the prompt", or rerun `run_review.py` on the original session. None of those address the failure mode — they just repeat it. The fresh-session path is the only reliable recovery.
 
-### Environment Failure: Codex Cannot Read Files (`codex-code-mode-host` missing) - fixed upstream in 0.144.1
+### Environment Failure: Codex Cannot Read Files (`codex-code-mode-host` missing)
 
-Distinct from silent failure: `run_review.py` exits 0 and the output file is NON-empty, but contains only a short refusal like "the read-only workspace tool cannot start (`codex-code-mode-host` is missing) ... I cannot read the PRD or code". Codex ran; its file-access tooling did not. **Never treat that output as a review, and never let Codex "review from memory".**
-
-**Cause (CLI 0.144.0 only):** Codex CLI 0.144.x routes exec/file reads through a sidecar binary `codex-code-mode-host`, expected in the same bin directory as `codex`. The Homebrew cask shipped 0.144.0 with only the main binary and no fallback, so code mode hard-failed (openai/codex#31906).
-
-**Status: resolved in 0.144.1** (release notes, `rust-v0.144.1`, PR #31913): *"Kept code mode working when the companion host binary is unavailable by falling back to the embedded runtime."* On CLI >= 0.144.1, a missing host binary no longer breaks file access - Codex falls back in-process automatically. **If you're on >= 0.144.1 and still see this refusal, it's a different bug - don't apply the 0.144.0 workaround below; investigate fresh.**
-
-**Note on the Homebrew cask specifically:** 0.144.1's release notes also claim "macOS package installs expose the code-mode host alongside the codex executable," but as of 0.144.1 the [Homebrew cask source](https://github.com/Homebrew/homebrew-cask/blob/HEAD/Casks/c/codex.rb) still only downloads `codex-<arch>-apple-darwin.tar.gz` - it does not ship `codex-code-mode-host`. That packaging fix apparently targets other install paths (installer script, npm, dmg). Brew users are protected by the embedded-runtime fallback, not by the host actually being present - which is fine, since the fallback is what matters.
-
-**If a stale host binary is present from the manual fix below, delete it after upgrading to >= 0.144.1:** `rm "$(dirname "$(which codex)")/codex-code-mode-host"`. A version-mismatched host can still fail its handshake; removing it lets the embedded fallback take over cleanly. Check first with `ls "$(dirname "$(which codex)")" | grep codex-code-mode-host`.
-
----
-
-**Historical workaround (CLI 0.144.0 only - do not use on >= 0.144.1):**
-
-**What does NOT work (verified on 0.144.0):** disabling the feature via `~/.codex/config.toml` (`[features]` with `code_mode = false` and `code_mode_only = false`) - `codex exec` still requires the host for file reads. If you do touch `config.toml`, note it likely already HAS a `[features]` table; appending a second one is a TOML `duplicate key` error that breaks Codex entirely.
-
-**Fix - install the version-matched host binary from the GitHub release:**
-
-```bash
-codex --version                      # e.g. 0.144.0 → release tag rust-v0.144.0
-gh release download rust-v0.144.0 -R openai/codex \
-  -p 'codex-code-mode-host-aarch64-apple-darwin.tar.gz' -D /tmp/codex-host
-tar -xzf /tmp/codex-host/codex-code-mode-host-aarch64-apple-darwin.tar.gz -C /tmp/codex-host
-install -m 755 /tmp/codex-host/codex-code-mode-host-aarch64-apple-darwin \
-  "$(dirname "$(which codex)")/codex-code-mode-host"
-xattr -d com.apple.quarantine "$(dirname "$(which codex)")/codex-code-mode-host" 2>/dev/null || true
-```
-
-The host version MUST match `codex --version` exactly (the handshake rejects stale generations); pick the asset for the platform (`aarch64-apple-darwin`, `x86_64-apple-darwin`, ...).
-
-**After fixing:** start a FRESH session for the real review. Rounds produced while broken are junk (but non-empty, so `write_prompt.py`'s silent-failure guards don't trigger - you can simply write the next round or re-init).
-
-**Once upgraded to >= 0.144.1, this workaround is obsolete** - see "Status: resolved in 0.144.1" above.
+Fixed in Codex CLI 0.144.1 (PR #31913): the CLI now falls back to an embedded runtime when the `codex-code-mode-host` sidecar is absent. Only 0.144.0 is affected. If `run_review.py` exits 0 but the output is only a refusal like "the read-only workspace tool cannot start (`codex-code-mode-host` is missing) ... I cannot read the PRD or code", **do not treat it as a review** - Codex ran without file access. Upgrade the CLI to >= 0.144.1 (`brew upgrade codex`), delete any manually-installed sidecar that may now be version-mismatched (`rm "$(dirname "$(which codex)")/codex-code-mode-host"`), then run a FRESH session.
 
 ## Critical Thinking — Do Not Follow Codex Blindly
 
