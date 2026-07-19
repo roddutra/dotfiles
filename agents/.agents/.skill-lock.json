@@ -156,7 +156,6 @@
     "opencode",
     "warp",
     "zed",
-    "claude-code",
-    "pi"
+    "claude-code"
   ]
 }
