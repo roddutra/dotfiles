@@ -169,8 +169,17 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
   - **Unconfirmed** → re-run `run_review.py` with the same `--session` first (the existing prompt and round are reused). Only if that also fails with no new info, pipe a fresh prompt to `write_prompt.py --force` to advance the round — this is NOT a retry of the broken round; it increments `current_round` from N to N+1 and writes a new prompt.
 - **Exit code 4** → stall: Codex stderr stayed silent for longer than `--stall` (default 5 min) and was killed. Almost always the network-drop hang mode — **re-run `run_review.py` with the same `--session`**; do NOT call `write_prompt.py` again.
 - **Exit code 143 (SIGTERM) or 137 (SIGKILL)** → the process was killed externally (e.g., by the user or system), not a Codex failure. Check with the user before retrying.
+- **`<status>killed</status>` with an empty output file and no exit code** → the harness killed the task; see "Externally Killed Tasks" below.
 
 **Retry mechanics in one rule:** when the error says "the round N prompt file is still on disk", you do NOT re-run `write_prompt.py` — the round and prompt are already set. Just re-run `run_review.py` with the same `--session`. Only call `write_prompt.py --force` when the error explicitly says so (the unconfirmed silent-failure branch of exit 3).
+
+### Externally Killed Tasks (Memory-Pressure Reap)
+
+A task notification of `<status>killed</status>` with a completely empty output file is not a Codex failure and not a script failure. Every `run_review.py` failure path prints a diagnostic and a non-zero exit code, so zero output means the wrapper was killed before it could report.
+
+The usual cause is Claude Code's own background-shell reaper: it kills backgrounded Bash tasks when the OS emits a memory-pressure event, but only while the main loop is idle, no other agent tasks are running, and the user has not interacted for 30+ minutes. A long Codex review sits in exactly that state, so it is the first thing reaped. Setting `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in `~/.claude/settings.json` (`env` block) disables it.
+
+**Recovery:** re-run `run_review.py` with the same `--session`. Do NOT call `write_prompt.py` - the round and prompt are already on disk, and the Codex session is untouched because Codex never got to produce a turn. Kills arrive in bursts, so a second kill on the retry is expected and the third attempt usually succeeds. Do not treat this as the silent-failure mode below and do not start a fresh session.
 
 ### Silent Failures (Empty Output)
 
