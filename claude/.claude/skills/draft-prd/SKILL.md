@@ -1,7 +1,6 @@
 ---
 name: draft-prd
 description: "Draft a new PRD from the user's requirements. Full workflow: deeply interrogate the problem and the why behind it, challenge weak or unconsidered areas, brainstorm solutions (with Codex when the problem is complex or unclear), present options with pros/cons and a recommendation, then draft the PRD and iterate with a fresh Codex review until no findings remain. On user approval, set the PRD status to Ready. Use when the user wants to create a PRD."
-disable-model-invocation: true
 ---
 
 # Draft-PRD: Think It Through, Then Write It
@@ -29,7 +28,7 @@ Do not be a passive scribe. Help the user reach clarity before any implementatio
 
 ## Phase 3: Solutions and Recommendation
 
-1. **If the best solution is complex or unclear, brainstorm with Codex first.** Load the `codex-reviewer` skill and use it to brainstorm approaches before presenting options to the user — follow its file access, session, and prompt rules, and give Codex the problem, the why, constraints, and which project files to read for context. For straightforward problems with an obvious approach, skip this.
+1. **If the best solution is complex or unclear, brainstorm with Codex first.** Load the `codex-reviewer` skill (if available) and use it to brainstorm approaches before presenting options to the user — follow its file access, session, and prompt rules, and give Codex the problem, the why, constraints, and which project files to read for context. For straightforward problems with an obvious approach, skip this.
 2. Present the viable solution options to the user, each with its pros and cons, and give a clear recommendation with reasoning.
 3. If a decision is needed, wait for the user to choose. If the path is unambiguous, confirm the recommendation with the user before drafting.
 
@@ -41,7 +40,7 @@ Do not be a passive scribe. Help the user reach clarity before any implementatio
 
 ## Phase 5: Codex Review — Iterate Until Clean
 
-1. Start a **fresh** Codex review session and use the `codex-reviewer` skill to review the drafted PRD. Tell Codex which project files to read for codebase context, and provide the problem, the why, constraints, and decisions already made. Review focus: completeness, internal consistency, feasibility, missed edge cases, gaps, risks, over-engineering.
+1. Start a **fresh** Codex review session and use the `codex-reviewer` skill (if available) to review the drafted PRD. Tell Codex which project files to read for codebase context, and provide the problem, the why, constraints, and decisions already made. Review focus: completeness, internal consistency, feasibility, missed edge cases, gaps, risks, over-engineering.
 2. Critically assess Codex's findings — accept, reject with reasoning, or flag for discussion.
 3. Update the PRD based on accepted findings, then send the updated PRD back to Codex for re-review (mandatory — never assume your edits are correct; a round is complete only when Codex has seen the final state).
 4. Repeat until Codex reports no remaining findings.
