@@ -204,7 +204,9 @@ The script never edits your files. Its exit codes drive what to do next:
 
 - `0` all diagrams rendered - done.
 - `1` a diagram failed - fix the reported parse error and re-run.
-- `2` `mmdc` is not installed - **ask the user before installing**, then
+- `2` `mmdc` is not installed - get it available following your own
+  environment's rules for installing software: if your harness authorises you
+  to install packages, do so; otherwise ask the user. Use
   `npm install -g @mermaid-js/mermaid-cli` (persistent) or run one-off with
   `npx -y @mermaid-js/mermaid-cli -i <file>`.
 - `3` no browser for the renderer - `npx puppeteer browsers install chrome-headless-shell`

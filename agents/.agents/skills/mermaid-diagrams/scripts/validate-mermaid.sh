@@ -29,10 +29,11 @@ if ! command -v mmdc >/dev/null 2>&1; then
   cat >&2 <<'EOF'
 mmdc (mermaid-cli) is not installed, so diagrams cannot be validated.
 
-Do not silently skip validation. Ask the user whether to install it, then:
+Don't silently skip validation. Get it available per your own environment's
+rules for installing software - if your harness authorises you to install
+packages, do so; otherwise ask the user. Options:
   npm install -g @mermaid-js/mermaid-cli      # persistent
-or run a one-off without installing:
-  npx -y @mermaid-js/mermaid-cli -i <file>    # downloads on first use
+  npx -y @mermaid-js/mermaid-cli -i <file>    # one-off, downloads on first use
 EOF
   exit 2
 fi
