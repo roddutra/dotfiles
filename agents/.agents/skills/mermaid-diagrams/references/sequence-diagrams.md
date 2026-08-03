@@ -8,7 +8,7 @@ sequenceDiagram
 
 ## Participants & Actors
 
-```mermaid
+```
 participant A as Alice        %% rectangle
 actor B as Bob                %% stick figure
 ```
@@ -19,7 +19,7 @@ Additional types available via JSON config (v11+): `boundary`, `control`, `entit
 
 ### Grouping (Boxes)
 
-```mermaid
+```
 box Aqua Group Name
     participant A
     participant B
@@ -43,14 +43,14 @@ Supports colours: `box rgb(33,66,99)`, `box rgba(33,66,99,0.5)`, `box transparen
 | `-)` | Solid with open arrow (async) |
 | `--)` | Dotted with open arrow (async) |
 
-```mermaid
+```
 Alice->>Bob: Hello
 Bob-->>Alice: Hi back
 ```
 
 ## Activations
 
-```mermaid
+```
 activate Alice
 Alice->>Bob: Request
 deactivate Alice
@@ -60,7 +60,7 @@ Shorthand: `Alice->>+Bob: Request` (activate), `Bob-->>-Alice: Response` (deacti
 
 ## Notes
 
-```mermaid
+```
 Note right of Alice: Text
 Note left of Bob: Text
 Note over Alice,Bob: Spanning note
@@ -72,7 +72,7 @@ Line breaks: use `<br/>` in note text.
 
 ### Loop
 
-```mermaid
+```
 loop Every minute
     Alice->>Bob: Ping
 end
@@ -80,7 +80,7 @@ end
 
 ### Alt / Else / Opt
 
-```mermaid
+```
 alt Condition A
     Alice->>Bob: Path A
 else Condition B
@@ -94,7 +94,7 @@ end
 
 ### Parallel
 
-```mermaid
+```
 par Action 1
     Alice->>Bob: Message 1
 and Action 2
@@ -104,7 +104,7 @@ end
 
 ### Critical / Option
 
-```mermaid
+```
 critical Establish connection
     Service->>DB: Connect
 option Network timeout
@@ -116,7 +116,7 @@ end
 
 ### Break
 
-```mermaid
+```
 break When error occurs
     Service->>Client: Error response
 end
@@ -124,7 +124,7 @@ end
 
 ## Background Highlighting
 
-```mermaid
+```
 rect rgb(200, 220, 255)
     Alice->>Bob: Inside highlight
 end
@@ -132,7 +132,7 @@ end
 
 ## Actor Creation & Destruction (v10.3.0+)
 
-```mermaid
+```
 create participant C as Charlie
 Alice->>C: Hello new actor
 destroy C
@@ -157,7 +157,7 @@ Or inline: `autonumber` at the start of the diagram.
 
 ## Comments
 
-```mermaid
+```
 %% This is a comment
 ```
 
