@@ -185,6 +185,33 @@ Rule of thumb: when in doubt, quote.
 5. **No return statements in click callbacks**: Click events require `securityLevel='loose'`.
 6. **Line breaks in node labels**: Use `<br/>` not `\n`. The `\n` escape is inconsistently supported across renderers (e.g. VS Code Mermaid extension shows literal `\n`). `<br/>` works universally.
 
+## Validate Before Finishing
+
+Syntax errors in a `mermaid` fence render fine as text but break in the Markdown
+preview, and the failure is invisible until someone opens it. Do not call a
+diagram done until it renders. Validate every file you touched with
+`scripts/validate-mermaid.sh`, which renders each `mermaid` fence through the
+real Mermaid engine (`mermaid-cli` / `mmdc`) and reports per-file pass/fail:
+
+```
+scripts/validate-mermaid.sh path/to/doc.md [more files...]
+```
+
+It only renders fences tagged `mermaid`, so keep non-diagram snippets in bare
+```` ``` ```` fences (see Output Format) - they are skipped, not flagged.
+
+The script never edits your files. Its exit codes drive what to do next:
+
+- `0` all diagrams rendered - done.
+- `1` a diagram failed - fix the reported parse error and re-run.
+- `2` `mmdc` is not installed - **ask the user before installing**, then
+  `npm install -g @mermaid-js/mermaid-cli` (persistent) or run one-off with
+  `npx -y @mermaid-js/mermaid-cli -i <file>`.
+- `3` no browser for the renderer - `npx puppeteer browsers install chrome-headless-shell`
+  or set `PUPPETEER_EXECUTABLE_PATH` to an existing Chrome.
+
+No local `mmdc`? https://mermaid.live is the manual fallback.
+
 ## Best Practices
 
 1. **Use descriptive node IDs**: `webhookTrigger` not `A`. Aids readability in source.
@@ -192,7 +219,7 @@ Rule of thumb: when in doubt, quote.
 3. **Label all decision edges**: Always label Yes/No or condition paths from diamond nodes.
 4. **Consistent direction**: Don't mix directions unless using subgraphs with explicit `direction`.
 5. **Group related nodes**: Use subgraphs to visually cluster related steps.
-6. **Test rendering**: Validate at https://mermaid.live before committing.
+6. **Validate rendering**: Run `scripts/validate-mermaid.sh` (above) before committing.
 7. **Line length**: Keep lines under 80 chars where possible for readability in source.
 
 ## Workflow Automation Diagrams (n8n / Windmill)
