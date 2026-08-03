@@ -70,7 +70,7 @@ Hard rules:
 
 ### Node Shapes
 
-```mermaid
+```
 A                     %% rectangle (default)
 B[Text]               %% rectangle with text
 C(Rounded)            %% rounded rectangle
@@ -88,7 +88,7 @@ M[\Trapezoid alt/]
 
 **v11.3.0+ expanded shape syntax** (use when semantic meaning matters):
 
-```mermaid
+```
 N@{ shape: doc, label: "Document" }
 O@{ shape: cyl, label: "Database" }
 P@{ shape: diam, label: "Decision" }
@@ -99,7 +99,7 @@ S@{ shape: flag, label: "Paper Tape" }
 
 ### Edges (Links)
 
-```mermaid
+```
 A --> B                %% arrow
 A --- B                %% line (no arrow)
 A -.- B                %% dotted line
@@ -116,7 +116,7 @@ A <--> B               %% bidirectional
 
 ### Subgraphs
 
-```mermaid
+```
 subgraph title [Display Name]
     direction LR
     A --> B
@@ -127,7 +127,7 @@ Subgraphs can be nested and linked to/from: `subgraphId --> NodeId`.
 
 ### Styling
 
-```mermaid
+```
 %% Inline style
 style A fill:#f9f,stroke:#333,stroke-width:2px
 
@@ -148,7 +148,7 @@ linkStyle default stroke:#999
 
 ### Comments
 
-```mermaid
+```
 %% This is a comment
 ```
 
