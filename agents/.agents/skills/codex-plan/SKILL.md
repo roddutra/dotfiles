@@ -10,7 +10,7 @@ End-to-end workflow: collaboratively plan with Codex as an independent co-planne
 
 ## Prerequisites
 
-**Ensure Plan Mode is active.** If you are not already in Plan Mode, enter it immediately using the EnterPlanMode tool before doing anything else.
+**Work in planning mode.** If your harness has a plan mode (e.g. Claude Code's `EnterPlanMode`), enter it before doing anything else. Otherwise, do not modify project files until Phase 5 — write the plan to a markdown file (see Phase 2) and treat that file as the plan.
 
 ## Phase 1: Understand the Requirements
 
@@ -26,7 +26,7 @@ Then:
 
 ## Phase 2: Draft the Plan
 
-1. Enter Plan Mode using the EnterPlanMode tool.
+1. Decide where the plan file lives: your harness's plan location if it has one (e.g. `~/.claude/plans/` in Claude Code), otherwise `.tmp/plans/<slug>.md` inside the project (create `.tmp/` and gitignore it if needed).
 2. Draft a comprehensive implementation plan covering:
    - Problem statement and goals
    - Scope and out-of-scope items
@@ -40,18 +40,18 @@ Then:
 
    > **Execution Instructions**
    >
-   > 1. Research the codebase and thoroughly understand the plan, requirements, and any referenced docs/files. Once you have the necessary knowledge, convert the plan's tasks into tasks using the TaskCreate tool.
-   > 2. The main agent acts as project manager — do not write code. Delegate each task to subagents via the Agent tool, providing rich context (relevant plan section, files to modify, architectural decisions, constraints, relationship to other tasks) so each subagent can make aligned decisions independently.
+   > 1. Research the codebase and thoroughly understand the plan, requirements, and any referenced docs/files. Once you have the necessary knowledge, convert the plan's tasks into tasks using your harness's task/todo tool (or an ordered checklist in the plan file if it has none).
+   > 2. The main agent acts as project manager — do not write code. Delegate each task to subagents via your harness's subagent mechanism, providing rich context (relevant plan section, files to modify, architectural decisions, constraints, relationship to other tasks) so each subagent can make aligned decisions independently.
    > 3. Review each subagent's output. Iterate until the work meets quality standards and aligns with the plan. Once all tasks are complete, delegate documentation updates across three tiers:
    >    - **Project documentation** (README.md, docs/, etc.): Update or create docs relevant to both human developers and AI coding agents — covering new features, functionality, architecture, usage, and any logic implemented during the plan.
    >    - **Global agent instructions** (CLAUDE.md, AGENTS.md): Only update if something is critical for ALL future coding agent sessions to have in context every time. This is expensive (loaded into every agent's context window on every session), so keep it to information that is universally required regardless of what task an agent is working on.
-   >    - **Claude Skills** (.claude/skills/): Create or update topic-specific skill files for instructions that are only relevant to certain areas of work. Agents load skills on-demand based on the skill's description, so this is the token-efficient way to document specialized patterns, workflows, or conventions without bloating every session's context.
+   >    - **Agent skills** (the project's skills directory — e.g. `.agents/skills/`, `.claude/skills/`, `.grok/skills/`, whichever the project uses): Create or update topic-specific skill files for instructions that are only relevant to certain areas of work. Agents load skills on-demand based on the skill's description, so this is the token-efficient way to document specialized patterns, workflows, or conventions without bloating every session's context.
    > 4. **Codex code review — iterative for large plans.** If the plan has multiple milestones or phases, do NOT wait until all milestones are complete to run a single massive Codex review. Instead, run a partial Codex review after completing each milestone/phase (using the codex-reviewer skill). This keeps each review focused on a narrow set of changes, avoids overwhelming Codex's context window, and catches issues early so that subsequent milestones build on reviewed and corrected code. Only move on to the next milestone once all Critical/Major findings from the current review have been addressed and Codex has confirmed them resolved. For small plans with a single phase or a handful of changes, a single final review is fine — use judgment based on the scope. Regardless of strategy (iterative or final), after applying any changes based on Codex's findings, you MUST send the updated code back to Codex for re-review — never assume your changes are correct. A review round is only complete when Codex has seen the final state. Iterate until Codex explicitly confirms no remaining issues.
 
 ## Phase 3: Codex Co-Planning — Iterate Until Consensus
 
 1. Use the `codex-reviewer` skill to have Codex review the draft plan. Follow the codex-reviewer skill's file access, session, and prompt rules — the only plan-specific addition is:
-   - **Plan files** live in `~/.claude/plans/` (outside the project), so copy the plan file into `.tmp/` before the review. If the plan changes between rounds, recopy the updated file before the next round.
+   - **Plan files** that live outside the project (e.g. `~/.claude/plans/`) must be copied into `.tmp/` before the review, since Codex can only read inside the project. If the plan changes between rounds, recopy the updated file before the next round. A plan already written to `.tmp/plans/` needs no copying.
    - Provide the user's goals, constraints, decisions already made, and tell Codex which project files to read for codebase context.
    - Review focus: feasibility, ordering, missed dependencies, over-engineering, simpler alternatives, gaps, risks
 2. Critically assess Codex's findings. Accept, reject with reasoning, or flag for discussion.
@@ -79,7 +79,7 @@ Then:
 
 Once the plan is approved:
 
-1. Exit Plan Mode using the ExitPlanMode tool.
+1. Leave plan mode if your harness has one (e.g. Claude Code's `ExitPlanMode`).
 2. Re-read the plan file from disk and follow the **Execution Instructions** section written in the plan. The plan file is the source of truth — it contains all the context needed to execute.
 3. **Iterative Codex reviews for large plans:** When the plan spans multiple milestones or phases, treat Codex reviews as milestone gates — complete a milestone, run a focused Codex review scoped to that milestone's changes, address all Critical/Major findings, then proceed to the next milestone. This prevents a massive end-of-project review where Codex must digest dozens of files at once, and ensures code written in later phases builds on a reviewed foundation. Use a single Codex session across milestones (resume, don't re-init) so Codex accumulates context. For each milestone review, tell Codex which files changed in that milestone and what the milestone's goals were. For small plans (single phase or few files), skip milestone gates and do one final review.
 4. When execution is complete, present a final summary to the user: what was implemented, any deviations from the plan and why, Codex's review verdicts (per-milestone if iterative), and any remaining items or follow-ups.

@@ -89,7 +89,7 @@ Reads the current round from metadata to locate the correct files. Returns JSON 
 
 **Project directory and Codex file access:** The project directory **must be inside an initialized git repository** — Codex refuses to run otherwise. If the project directory is not a git repo, initialize one before running the review (`git init && git add -A && git commit -m "Initial commit"`).
 
-The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to `~/.claude/`, `/tmp/`, your home directory, or any path outside the `--cd` tree.
+The `--cd` directory is Codex's filesystem root — it cannot read anything outside it. This means Codex has NO access to your harness's config directory (`~/.claude/`, `~/.grok/`, `~/.codex/`), `/tmp/`, your home directory, or any path outside the `--cd` tree.
 
 **Always choose the broadest useful `--cd`** so Codex can access the most files:
 
@@ -104,7 +104,7 @@ Before running, audit every file path in your prompt:
 
 Never tell Codex to "read the file at [path]" if that path is outside `--cd` — the review will fail silently.
 
-**You MUST set `run_in_background: true` on the Bash tool call.** This is not optional. The script blocks for 10-20+ minutes while Codex works — running it in the foreground will time out. After launching, **stop and wait** for the background completion notification before doing anything else. See "Handling Long-Running Reviews" below for the full lifecycle.
+**You MUST run this as a background task** using your harness's background mechanism (e.g. `run_in_background: true` on the Bash tool in Claude Code; the background-task feature in Grok or Codex). This is not optional. The script blocks for 10-20+ minutes while Codex works — running it in the foreground will hit the shell tool's timeout. If your harness truly has no background mechanism, run it in the foreground with the shell timeout raised to at least 40 minutes. After launching, **stop and wait** for the background completion notification before doing anything else. See "Handling Long-Running Reviews" below for the full lifecycle.
 
 ### Step 4: Clean Up (User-Initiated Only)
 
@@ -138,22 +138,22 @@ All filters are combinable (e.g., `--project my-app --week`).
 
 ### Handling Long-Running Reviews
 
-Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally (`process.wait()`) until Codex finishes, then prints JSON with the results. **It produces zero output while Codex is working.** The Bash tool's 10-minute timeout is shorter than most reviews, so you must run in the background.
+Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally (`process.wait()`) until Codex finishes, then prints JSON with the results. **It produces zero output while Codex is working.** Shell-tool timeouts (typically 2-10 minutes) are shorter than most reviews, so you must run in the background.
 
 **Mandatory workflow:**
 
-1. Run `run_review.py` with `run_in_background: true`.
-2. The Bash tool immediately returns a confirmation like `"Running in the background (↓ to manage)"`. **This is NOT the result. The review has NOT completed.** Codex is still working.
-3. Tell the user the review is running and **end your turn**. Your response must contain zero tool calls after the message to the user. Do not call Bash, Read, or any other tool. Do not "wait" by polling. Simply stop.
+1. Run `run_review.py` as a background task.
+2. The shell tool immediately returns a confirmation that the task is running in the background. **This is NOT the result. The review has NOT completed.** Codex is still working.
+3. Tell the user the review is running and **end your turn**. Your response must contain zero tool calls after the message to the user. Do not call the shell, file-read, or any other tool. Do not "wait" by polling. Simply stop.
 4. You will be **automatically notified** when the background task completes. The notification will contain the script's JSON output (`session_id`, `output_file`, etc.) or an error message. You do not need to do anything to receive this notification — it arrives on its own.
-5. **Only after receiving the completion notification**, read the `output_file` with the Read tool.
+5. **Only after receiving the completion notification**, read the `output_file`.
 
-**CRITICAL — do not run ANY Bash commands to monitor the review.** Patterns like `while ! test -s <output_file>; do sleep N; done`, `ls` on the output directory, `cat` on the output file, `tail -f`, or any other form of polling are strictly forbidden. The background notification system handles this automatically. Running poll loops wastes resources, can hit the Bash timeout, and produces truncated or partial results.
+**CRITICAL — do not run ANY shell commands to monitor the review.** Patterns like `while ! test -s <output_file>; do sleep N; done`, `ls` on the output directory, `cat` on the output file, `tail -f`, or any other form of polling are strictly forbidden. The background notification system handles this automatically. Running poll loops wastes resources, can hit the shell timeout, and produces truncated or partial results.
 
 **Never do any of the following while waiting for a review:**
 
-- Run ANY Bash command related to the review — no polling, no checking, no reading, no monitoring
-- Interpret the "Running in the background" Bash confirmation as task completion — it is not
+- Run ANY shell command related to the review — no polling, no checking, no reading, no monitoring
+- Interpret the "running in the background" confirmation as task completion — it is not
 - Run additional `run_review.py` calls for the same round — this spawns duplicate Codex processes that pile up
 - Run raw `codex exec` commands directly — always use the scripts
 - Attempt to "debug" or re-run because you haven't seen a result yet — you simply haven't waited long enough
@@ -173,11 +173,11 @@ Codex reviews take 10-20+ minutes. The `run_review.py` script blocks internally 
 
 **Retry mechanics in one rule:** when the error says "the round N prompt file is still on disk", you do NOT re-run `write_prompt.py` — the round and prompt are already set. Just re-run `run_review.py` with the same `--session`. Only call `write_prompt.py --force` when the error explicitly says so (the unconfirmed silent-failure branch of exit 3).
 
-### Externally Killed Tasks (Memory-Pressure Reap)
+### Externally Killed Tasks
 
 A task notification of `<status>killed</status>` with a completely empty output file is not a Codex failure and not a script failure. Every `run_review.py` failure path prints a diagnostic and a non-zero exit code, so zero output means the wrapper was killed before it could report.
 
-The usual cause is Claude Code's own background-shell reaper: it kills backgrounded Bash tasks when the OS emits a memory-pressure event, but only while the main loop is idle, no other agent tasks are running, and the user has not interacted for 30+ minutes. A long Codex review sits in exactly that state, so it is the first thing reaped. Setting `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in `~/.claude/settings.json` (`env` block) disables it.
+The usual cause is the harness reaping idle background tasks — typically under memory pressure while the session has been idle for a long time, which is exactly the state a long Codex review sits in. (In Claude Code this is the background-shell reaper; `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in the `env` block of `~/.claude/settings.json` disables it. Other harnesses may have an equivalent setting.)
 
 **Recovery:** re-run `run_review.py` with the same `--session`. Do NOT call `write_prompt.py` - the round and prompt are already on disk, and the Codex session is untouched because Codex never got to produce a turn. Kills arrive in bursts, so a second kill on the retry is expected and the third attempt usually succeeds. Do not treat this as the silent-failure mode below and do not start a fresh session.
 
@@ -200,7 +200,7 @@ Codex sometimes exits with code 0 but writes nothing to the output file. The mos
    cp ~/.codex-reviews/<project>/<date>/<HHMMSS-title>/r1-output.md \
       <project_dir>/.tmp/prior-codex-r1-output.md
    ```
-   `cp` is the right tool here — reading the files with the Read tool just to inline a summary into the new prompt wastes context and loses fidelity.
+   `cp` is the right tool here — reading the files into your context just to inline a summary into the new prompt wastes context and loses fidelity.
 4. **Write a new initial-round prompt** with `write_prompt.py` against the fresh session. Tell Codex to read `.tmp/prior-codex-r1-prompt.md` and `.tmp/prior-codex-r1-output.md` from disk, then state the follow-up question and the specific guidance from your conversation that the broken round 2 was meant to convey. Do NOT inline any of those file contents into the prompt.
 5. **Run `run_review.py`** on the fresh session. Because there is no `codex_session_id` yet, this is an initial review (`codex exec` with `--cd`), not a resume.
 
@@ -237,11 +237,11 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 
 ### File Access Audit (Mandatory)
 
-**Do this BEFORE writing every prompt.** Codex can ONLY read files inside the `--cd` directory. It has zero access to anything else — no `~/.claude/`, no `/tmp/`, no other projects, no home directory. If your prompt tells Codex to read a file outside `--cd`, Codex will silently skip it and review based on assumptions instead of the actual artifact. This produces unreliable reviews that waste time.
+**Do this BEFORE writing every prompt.** Codex can ONLY read files inside the `--cd` directory. It has zero access to anything else — no harness config directory (`~/.claude/`, `~/.grok/`, `~/.codex/`), no `/tmp/`, no other projects, no home directory. If your prompt tells Codex to read a file outside `--cd`, Codex will silently skip it and review based on assumptions instead of the actual artifact. This produces unreliable reviews that waste time.
 
 **Never inline file content into the prompt.** Always have Codex read files from disk. Inlining is harmful — you will inevitably truncate or summarize the content, losing critical context. Codex reading the actual file gets the full, unmodified content.
 
-**When you need to relocate a file into `.tmp/` so Codex can reach it, use shell commands (`cp`, `mv`) — do NOT use the Read tool first.** Reading a file into your own context just to write it back into a new location wastes tokens and risks subtle truncation or transformation. The Bash tool can copy the file in one step without it ever entering your context window. Common cases: copying a Claude Code plan from `~/.claude/plans/` into `.tmp/`, copying artifacts from a broken Codex session under `~/.codex-reviews/...` into `.tmp/`, or staging files from another project for review.
+**When you need to relocate a file into `.tmp/` so Codex can reach it, use shell commands (`cp`, `mv`) — do NOT read the file first.** Reading a file into your own context just to write it back into a new location wastes tokens and risks subtle truncation or transformation. A shell command copies the file in one step without it ever entering your context window. Common cases: copying a plan file from outside the project (e.g. `~/.claude/plans/`) into `.tmp/`, copying artifacts from a broken Codex session under `~/.codex-reviews/...` into `.tmp/`, or staging files from another project for review.
 
 **Checklist — run through this for every file reference in your prompt:**
 
@@ -252,7 +252,7 @@ Skip context when the review is genuinely open-ended with no prior constraints.
 
 **Common offenders that are NEVER inside `--cd`:**
 
-- **Claude Code plans** (`~/.claude/plans/`) — copy into `.tmp/` within the project
+- **Plan files stored outside the project** (e.g. `~/.claude/plans/`) — copy into `.tmp/` within the project
 - **Session files** (`~/.codex-reviews/...`) — copy into `.tmp/` within the project
 - **Files from other projects** — copy into `.tmp/` within the project
 
@@ -349,7 +349,7 @@ Keep concise — one sentence per point.
 
 - **PRD/Specs/Docs in the project**: Tell Codex to read from disk — these files are inside `--cd`. Never paste project file contents into the prompt.
 - **Code**: Tell Codex which files to read. For diffs, save the diff to a file in `.tmp/` and tell Codex to read it. Use `--cd` for full codebase context.
-- **Plan/Architecture** (from `~/.claude/plans/`): These are outside `--cd` — copy the plan file into `.tmp/` within the project so Codex can read the original. If the plan changes between rounds, recopy the updated file before the next review. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
+- **Plan/Architecture** (plan files stored outside the project, e.g. `~/.claude/plans/`): These are outside `--cd` — copy the plan file into `.tmp/` within the project so Codex can read the original. If the plan changes between rounds, recopy the updated file before the next review. Focus Codex on ordering, dependencies, risks, and simpler alternatives.
 
 ## The Review Loop
 
@@ -375,7 +375,7 @@ A review is not complete until Codex has reviewed the final state of the code an
 1. **Draft** your artifact
 2. **Init** - `init_session.py --title <title>`. Inside a git repo, omit `--project` (the name is derived from the repo and shared across worktrees; a passed `--project` is ignored there). In a non-git directory, pass `--project <name>` (bare repos are always rejected). Use `--force-project <name>` only for an intentional override (e.g. splitting one repo into logical buckets). Store the returned `session` path. The script auto-detects the git root from cwd, persists it in session metadata, creates `.tmp/`, and gitignores it.
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
-4. **Run review** — `run_review.py --session <s>` with `run_in_background: true`. Read `output_file` when done. The script reads `project_dir` from session metadata; pass `--cd` only to override.
+4. **Run review** — `run_review.py --session <s>` as a background task. Read `output_file` when done. The script reads `project_dir` from session metadata; pass `--cd` only to override.
 5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
 6. **Apply changes** — modify the actual files for accepted findings
 7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes). Codex re-reviews the actual updated code. Do NOT skip this step.

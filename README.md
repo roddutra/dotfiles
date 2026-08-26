@@ -224,7 +224,7 @@ stow -D nvim
 
 ### Agent skills: one source of truth
 
-Every skill that more than one agent uses lives **once**, in `agents/.agents/skills/`. Claude Code sees a shared skill through a *relative* symlink in `claude/.claude/skills/` (e.g. `frontend-design -> ../../../agents/.agents/skills/frontend-design`). Git tracks these symlinks and stow links to them as files, so the chain resolves inside the repo no matter where the repo is cloned; `stow claude` works even if `stow agents` was never run. Skills that only make sense for Claude Code (e.g. the `codex-*` skills that tell Claude how to drive Codex) are real directories in `claude/.claude/skills/` and nowhere else.
+Every skill that more than one agent uses lives **once**, in `agents/.agents/skills/`. Claude Code sees a shared skill through a *relative* symlink in `claude/.claude/skills/` (e.g. `frontend-design -> ../../../agents/.agents/skills/frontend-design`). Git tracks these symlinks and stow links to them as files, so the chain resolves inside the repo no matter where the repo is cloned; `stow claude` works even if `stow agents` was never run. Shared skills are written harness-agnostically ("your harness's subagent mechanism", "run as a background task") with Claude Code specifics only as parenthetical examples, so Codex, Grok, Pi, etc. can follow them unchanged. Skills that only make sense for Claude Code are real directories in `claude/.claude/skills/` and nowhere else.
 
 - Add a shared skill: put it in `agents/.agents/skills/<name>/` and, if Claude should see it, `ln -s ../../../agents/.agents/skills/<name> claude/.claude/skills/<name>`.
 - Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
