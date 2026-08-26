@@ -77,7 +77,8 @@ dotfiles/
 ├── grok/
 │   └── .grok/              # Will be symlinked to ~/.grok/
 │       ├── config.toml     # Grok CLI config (points skills at ~/.agents/skills)
-│       └── hooks/
+│       ├── hooks/
+│       └── skills/         # Grok-only skills (shared ones live in agents/)
 ├── tmux/                   # The "package" name for stow
 │   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
 │   └── .config/
@@ -233,6 +234,7 @@ Every skill that more than one agent uses lives **once**, in `agents/.agents/ski
 
 - Add a shared skill: put it in `agents/.agents/skills/<name>/` and, if Claude should see it, `ln -s ../../../agents/.agents/skills/<name> claude/.claude/skills/<name>`.
 - Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
+- Add a Grok-only skill: create `grok/.grok/skills/<name>/` directly (same idea for any other agent package).
 - Never copy a skill into both packages; the copies drift.
 - On a machine where `~/.claude/skills` already exists, stow links each skill individually, so skills installed by other tools (e.g. `npx skills add`) coexist with the stowed ones.
 

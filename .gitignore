@@ -69,3 +69,5 @@ claude/.claude/*
 grok/.grok/*
 !grok/.grok/config.toml
 !grok/.grok/hooks/
+!grok/.grok/skills/
+!grok/.grok/agents/
