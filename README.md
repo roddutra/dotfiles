@@ -74,6 +74,10 @@ dotfiles/
 ├── claude/
 │   └── .claude/            # Will be symlinked to ~/.claude/
 │       └── skills/         # Claude-only skills as real dirs + relative symlinks into ../agents/.agents/skills/
+├── grok/
+│   └── .grok/              # Will be symlinked to ~/.grok/
+│       ├── config.toml     # Grok CLI config (points skills at ~/.agents/skills)
+│       └── hooks/
 ├── tmux/                   # The "package" name for stow
 │   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
 │   └── .config/
@@ -220,6 +224,7 @@ stow -D nvim
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
+- `stow grok` will symlink `config.toml` and `hooks/` into `~/.grok/` (create `~/.grok/hooks` first so stow doesn't fold the whole directory)
 - `stow */` will symlink ALL application configs at once
 
 ### Agent skills: one source of truth

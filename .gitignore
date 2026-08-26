@@ -64,3 +64,8 @@ claude/.claude/*
 !claude/.claude/hooks/
 !claude/.claude/skills/
 .tmp/
+
+# Grok CLI - ignore everything except version-controlled config
+grok/.grok/*
+!grok/.grok/config.toml
+!grok/.grok/hooks/
