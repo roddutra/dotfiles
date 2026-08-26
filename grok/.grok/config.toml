@@ -12,6 +12,7 @@ fork_secondary_model = "grok-4.6"
 yolo = false
 compact_mode = false
 permission_mode = "auto"
+theme = "rosepine-moon"
 
 [privacy]
 privacy_banner_acked = "2026-08-26T22:26:39Z"
@@ -19,3 +20,6 @@ privacy_banner_acked = "2026-08-26T22:26:39Z"
 [skills]
 paths = ["~/.agents/skills"]
 ignore = ["~/.claude/skills"]
+disabled = []
+server_skill_dirs = []
+bundled_skill_dirs = []

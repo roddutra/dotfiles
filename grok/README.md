@@ -15,5 +15,16 @@ Everything else in `~/.grok/` (`auth.json`, `sessions/`, caches, `bundled/`, `ve
 
 ```shell
 mkdir -p ~/.grok/hooks ~/.grok/skills   # so stow links files individually rather than folding whole dirs
+cd ~/dotfiles
 stow agents grok
+```
+
+## After changing Grok settings
+
+Grok saves `config.toml` by writing a new file over the path, which replaces the stow symlink with a plain file (confirmed on Linux). Pull the change back into the repo and relink with:
+
+```shell
+cd ~/dotfiles
+stow --adopt grok
+git diff grok/.grok/config.toml   # review, then commit
 ```

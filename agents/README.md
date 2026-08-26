@@ -12,9 +12,8 @@ This file holds maintenance notes for humans. It is excluded from stow via `agen
 
 ### Updating after `herdr update`
 
-Run from the root of this repo:
-
 ```shell
+cd ~/dotfiles
 herdr --version                                   # note the new version
 herdr --skill > agents/.agents/skills/herdr/SKILL.md
 git diff --stat agents/.agents/skills/herdr       # sanity-check the change

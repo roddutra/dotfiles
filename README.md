@@ -101,9 +101,11 @@ dotfiles/
 
 When you run `stow tmux`, it creates symlinks in your home directory that mirror the structure inside the `tmux/` folder.
 
-### Never hard-code the repo location
+### The repo lives at `~/dotfiles`
 
-This repo is cloned to different paths on different machines (`~/dotfiles` on macOS, elsewhere on Linux). Docs, scripts and config in this repo must never contain an absolute path to it or to a home directory (`/Users/...`, `/home/...`). Write paths relative to the repo root, use `~` or `$HOME`, or rely on stow's relative symlinks. When the repo is not at `~/dotfiles`, pass the target explicitly: `stow -t ~ <package>`.
+Clone this repo to `~/dotfiles` on every machine. All commands in this repo assume that location, so they can be copy-pasted without edits, and `.stowrc` pins `--target=~` so `stow <package>` always links into your home directory no matter which directory you run it from.
+
+Even so, never write an absolute path to the repo or to a home directory (`/Users/...`, `/home/...`) into docs, scripts or config here: use `~/dotfiles`, `~`, `$HOME`, or paths relative to the repo root, and let stow's relative symlinks do the rest.
 
 ## Backing up config files to this repo
 
@@ -195,9 +197,10 @@ The `.zsh-secrets` file lives in your `dotfiles/zsh/` directory, gets symlinked 
 
 ## Importing config files from this repo
 
-To setup the symlinks for each app in a new machine, make sure you have [GNU Stow installed](#to-install-gnu-stow-only) and run the following command from this project's root directory:
+To setup the symlinks for each app in a new machine, make sure you have [GNU Stow installed](#to-install-gnu-stow-only) and run the following from `~/dotfiles`:
 
 ```shell
+cd ~/dotfiles
 stow {app_folder_name} # Eg. `stow nvim`
 ```
 
@@ -229,7 +232,7 @@ stow -D nvim
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
-- `stow grok` will symlink `config.toml` and `hooks/` into `~/.grok/` (create `~/.grok/hooks` first so stow doesn't fold the whole directory)
+- `stow grok` will symlink `config.toml` and `hooks/` into `~/.grok/` (create `~/.grok/hooks` first so stow doesn't fold the whole directory). Grok rewrites `config.toml` in place when you change settings, which turns the symlink back into a plain file — run `cd ~/dotfiles && stow --adopt grok` afterwards to pull the change into the repo and relink.
 - `stow */` will symlink ALL application configs at once
 
 ### Agent skills: one source of truth
