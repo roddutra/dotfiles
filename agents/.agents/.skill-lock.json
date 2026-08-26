@@ -93,15 +93,6 @@
       "installedAt": "2026-06-21T23:59:46.807Z",
       "updatedAt": "2026-06-22T00:01:21.556Z"
     },
-    "tmux": {
-      "source": "steipete/clawdis",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/steipete/clawdis.git",
-      "skillPath": "skills/tmux/SKILL.md",
-      "skillFolderHash": "7fb2804ed74ca281a89eb2898b252368c7a2f6ff",
-      "installedAt": "2026-06-22T00:14:37.312Z",
-      "updatedAt": "2026-06-22T00:14:37.312Z"
-    },
     "make-interfaces-feel-better": {
       "source": "jakubkrehel/make-interfaces-feel-better",
       "sourceType": "github",
