@@ -101,6 +101,10 @@ dotfiles/
 
 When you run `stow tmux`, it creates symlinks in your home directory that mirror the structure inside the `tmux/` folder.
 
+### Never hard-code the repo location
+
+This repo is cloned to different paths on different machines (`~/dotfiles` on macOS, elsewhere on Linux). Docs, scripts and config in this repo must never contain an absolute path to it or to a home directory (`/Users/...`, `/home/...`). Write paths relative to the repo root, use `~` or `$HOME`, or rely on stow's relative symlinks. When the repo is not at `~/dotfiles`, pass the target explicitly: `stow -t ~ <package>`.
+
 ## Backing up config files to this repo
 
 To add a new application's configuration:
@@ -236,6 +240,7 @@ Every skill that more than one agent uses lives **once**, in `agents/.agents/ski
 - Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
 - Add a Grok-only skill: create `grok/.grok/skills/<name>/` directly (same idea for any other agent package).
 - Never copy a skill into both packages; the copies drift.
+- Maintenance notes for humans (e.g. how `herdr/SKILL.md` is refreshed from `herdr --skill`) go in `agents/README.md`, never inside a skill directory: stow folds each skill into one directory symlink, so anything inside it is visible to agents. `agents/README.md` is excluded from stow via `agents/.stow-local-ignore`.
 - On a machine where `~/.claude/skills` already exists, stow links each skill individually, so skills installed by other tools (e.g. `npx skills add`) coexist with the stowed ones.
 
 ### Setting up sensitive environment variables on a new machine:
