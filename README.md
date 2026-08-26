@@ -70,7 +70,10 @@ dotfiles/
 ├── agents/
 │   └── .agents/            # Will be symlinked to ~/.agents/
 │       ├── .skill-lock.json
-│       └── skills/         # Agent skills used by Codex, Pi, etc.
+│       └── skills/         # Canonical copy of every shared agent skill (Codex, Pi, Claude Code, etc.)
+├── claude/
+│   └── .claude/            # Will be symlinked to ~/.claude/
+│       └── skills/         # Claude-only skills as real dirs + relative symlinks into ../agents/.agents/skills/
 ├── tmux/                   # The "package" name for stow
 │   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
 │   └── .config/
@@ -218,6 +221,15 @@ stow -D nvim
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
 - `stow */` will symlink ALL application configs at once
+
+### Agent skills: one source of truth
+
+Every skill that more than one agent uses lives **once**, in `agents/.agents/skills/`. Claude Code sees a shared skill through a *relative* symlink in `claude/.claude/skills/` (e.g. `frontend-design -> ../../../agents/.agents/skills/frontend-design`). Git tracks these symlinks and stow links to them as files, so the chain resolves inside the repo no matter where the repo is cloned; `stow claude` works even if `stow agents` was never run. Skills that only make sense for Claude Code (e.g. the `codex-*` skills that tell Claude how to drive Codex) are real directories in `claude/.claude/skills/` and nowhere else.
+
+- Add a shared skill: put it in `agents/.agents/skills/<name>/` and, if Claude should see it, `ln -s ../../../agents/.agents/skills/<name> claude/.claude/skills/<name>`.
+- Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
+- Never copy a skill into both packages; the copies drift.
+- On a machine where `~/.claude/skills` already exists, stow links each skill individually, so skills installed by other tools (e.g. `npx skills add`) coexist with the stowed ones.
 
 ### Setting up sensitive environment variables on a new machine:
 

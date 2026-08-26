@@ -10,7 +10,7 @@ claude/
 │   ├── agents/                # Custom agents (version controlled)
 │   ├── commands/              # Slash commands (version controlled)
 │   ├── hooks/                 # Event hooks (version controlled)
-│   └── skills/                # Custom skills (version controlled)
+│   └── skills/                # Claude-only skills + symlinks to shared skills in ../../agents/.agents/skills/
 ├── .mcp.json                  # MCP server configurations (version controlled)
 ├── .stow-local-ignore         # Files to exclude from symlinking
 └── README.md                  # This file
@@ -22,7 +22,7 @@ claude/
 - `.claude/agents/` - Custom agent definitions
 - `.claude/commands/` - Custom slash commands
 - `.claude/hooks/` - Event hooks (e.g., pre-commit, user-prompt-submit)
-- `.claude/skills/` - Custom skills and workflows
+- `.claude/skills/` - Claude-only skills (real directories) and relative symlinks to shared skills in `agents/.agents/skills/`. See [Agent skills: one source of truth](../README.md#agent-skills-one-source-of-truth).
 - `.mcp.json` - MCP server configurations (uses environment variable expansion)
 - `README.md` - Documentation
 
