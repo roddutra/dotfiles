@@ -84,15 +84,6 @@
       "installedAt": "2026-05-20T04:03:56.029Z",
       "updatedAt": "2026-05-20T04:04:59.757Z"
     },
-    "hindsight-self-hosted": {
-      "source": "vectorize-io/hindsight",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vectorize-io/hindsight.git",
-      "skillPath": "skills/hindsight-self-hosted/SKILL.md",
-      "skillFolderHash": "38a67f1634dc12aa545d1cd0ac1e0f83c1c828d7",
-      "installedAt": "2026-05-25T03:28:22.380Z",
-      "updatedAt": "2026-05-25T03:28:22.380Z"
-    },
     "herdr": {
       "source": "ogulcancelik/herdr",
       "sourceType": "github",
