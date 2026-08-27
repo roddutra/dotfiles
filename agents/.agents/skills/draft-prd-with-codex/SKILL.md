@@ -1,6 +1,6 @@
 ---
-name: draft-prd
-description: "Draft a new PRD from the user's requirements. Full workflow: deeply interrogate the problem and the why behind it, challenge weak or unconsidered areas, brainstorm solutions (with Codex when the problem is complex or unclear), present options with pros/cons and a recommendation, then draft the PRD and iterate with a fresh Codex review until no findings remain. On user approval, set the PRD status to Ready. Use when the user wants to create a PRD."
+name: draft-prd-with-codex
+description: "Draft a new PRD from the user's requirements. Full workflow: deeply interrogate the problem and the why behind it, challenge weak or unconsidered areas, brainstorm solutions (with Codex when the problem is complex or unclear), present options with pros/cons and a recommendation, then draft the PRD and iterate with a fresh Codex review until no findings remain. On user approval, set the PRD status to Ready. Use when the user wants to create a PRD with Codex as the brainstorming partner and reviewer."
 ---
 
 # Draft-PRD: Think It Through, Then Write It

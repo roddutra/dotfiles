@@ -1,0 +1,331 @@
+---
+name: grok-reviewer
+description: "Runs the xAI Grok CLI as an independent reviewer for PRDs, plans, code, architecture, or any artifact where a second opinion from a different model adds value. MUST load EVERY TIME the user wants Grok to act on something — review, brainstorm, sanity check, second opinion. Triggers on phrasing like 'have Grok review X', 'ask Grok', 'bounce this off Grok'. Bare mentions with no action intent ('Grok is slow') do not trigger."
+---
+
+# Grok Reviewer
+
+Use the xAI Grok CLI (`grok`) as an independent reviewer — a separate AI agent whose feedback is genuinely independent from yours.
+
+## When to Use
+
+- **PRD** — gaps, ambiguity, missing edge cases, flawed assumptions
+- **Implementation plan** — feasibility, ordering, missed dependencies, over-engineering
+- **Code changes** — bugs, security, performance, design concerns
+- **Architecture decisions** — trade-offs, missed alternatives
+- **Any artifact** where a second perspective adds value
+
+## Safety: Read-Only Only
+
+The Grok process must NEVER modify files or change state. The wrapper hardcodes the following and none of it can be overridden:
+
+- `--disallowed-tools` + `--no-subagents` — strips every built-in tool except shell, `read_file`, `list_dir`, `grep` (no edit tools, schedulers, image/video generation, workflows, or subagents).
+- `--deny Edit --deny Write --deny MCPTool` — denies the edit class (Grok's shell classifier maps `touch`, `rm`, `cp`, `mv`, `mkdir`, `sed -i`, `tee`, and `> file` redirects to it) and all MCP tool calls.
+- A `--deny Bash(...)` list covering git mutators, `ssh`/`scp`/`rsync`, package managers, interpreters (`python -c "open(..., 'w')"` bypasses the classifier), and process/filesystem mutators. Read-only git (`log`, `diff`, `status`, `show`, `blame`) still works.
+- `--permission-mode auto` — a blocked call fails and is reported to Grok so the turn continues (`dontAsk` cancels the whole turn on the first non-read-only shell command).
+- `--sandbox read-only` (kernel-enforced writes) whenever it can start. Grok refuses the profile when `~/.grok/hooks/` contains symlinks (stow-managed dotfiles), so the script checks first and persists the decision per session. `GROK_REVIEWER_SANDBOX=0|1` forces it off/on.
+- A `--rules` guardrail and `GROK_MEMORY=0` (no cross-session memory). Web search/fetch stay available so Grok can research while reviewing; shell `curl`/`wget` also work unless the kernel sandbox is active (it blocks child-process network on Linux).
+
+Without the kernel sandbox this is policy-level enforcement, so always include "do NOT modify any files" in prompts as an additional safeguard. Never construct raw `grok` commands manually. A non-zero `denied_tool_calls` in the result means Grok tried something the policy blocked — the review is still valid.
+
+**Reads are not restricted.** Unlike Codex's `--cd` jail, Grok can read any file on the machine regardless of `--cwd` or the `read-only` sandbox. The `.tmp/` copying convention below keeps review inputs alongside the project and matches the Codex skills; it is not a technical requirement.
+
+Note: the wrapper scripts themselves perform small local setup — creating session files in `~/.grok-reviewer/`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Grok actions.
+
+## Scripts
+
+Located relative to this skill's directory. Determine the skill path at runtime.
+
+### Step 1: Initialize a Session
+
+```bash
+python <skill-path>/scripts/init_session.py --title <review-title> [--project <name>] [--force-project <name>] [--model <name>] [--reasoning-effort <level>]
+```
+
+Returns JSON with `session` (the only value you need to track) and `project_dir` (informational).
+
+**Normal path: inside a git repo, run only `init_session.py --title <title>`.** The project name is derived automatically from the repository, so **omit `--project`**.
+
+**How the project name is derived (and why worktrees stay unified):** The name is the **main working tree's** directory basename (first entry of `git worktree list`), so a review started from a linked worktree (e.g. `tomobroker-prd025/`) groups under the main repo (`tomobroker`). Submodules resolve to the submodule's own name.
+
+**`--project` vs `--force-project`:**
+
+- **`--project <name>`** is **ignored inside a git work tree** (the script prints a note). It is **required only in a non-git directory**. A **bare repository is always rejected**.
+- **`--force-project <name>`** overrides the git-derived name **anywhere**. Use it **only** for deliberate custom grouping (e.g. `tomobroker-frontend` / `tomobroker-backend`).
+- If both are supplied, **`--force-project` wins**.
+
+**Project name vs `project_dir`/`--cd`:** The project name affects **only** the grouping path `~/.grok-reviewer/<project>/`. `project_dir` is resolved separately from the worktree's own root (`git rev-parse --show-toplevel`), persisted, and used as Grok's `--cwd` on every round (no need to pass `--cd`). The script creates `.tmp/` there and gitignores it. Pass `--cd <dir>` only to override.
+
+**Model is set once, here, and locked — only if you pass `--model`.** With `--model <name>` (see `grok models`), the value is persisted and used on every round; start a fresh session to change it. Without it, each round uses whatever the local Grok CLI defaults to (`~/.grok/config.toml`).
+
+**Reasoning effort is seeded here and may be adjusted per round.** `--reasoning-effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`, ...; a model only accepts the levels it advertises) is persisted; `run_review.py --reasoning-effort` changes it later (see Step 3).
+
+### Step 2: Write the Prompt File
+
+Pipe prompt content via stdin using a heredoc:
+
+```bash
+cat <<'PROMPT' | python <skill-path>/scripts/write_prompt.py --session <session-path> [--force]
+Your prompt content here...
+PROMPT
+```
+
+Auto-increments the round number. Returns JSON with `prompt_path`, `output_path`, and `round`. Rejects overwrites and empty content.
+
+**`--force`:** Skips the check requiring the previous round's output to exist. Use when the previous round was killed, timed out, or produced no output.
+
+**Do not create prompt files manually with the Write tool.** Always use this script.
+
+### Step 3: Run the Review
+
+```bash
+python <skill-path>/scripts/run_review.py --session <session-path> [--cd <project-dir>] [--timeout <seconds>] [--stall <seconds>] [--reasoning-effort <level>] [--keep-stream]
+```
+
+Auto-detects initial vs follow-up from session metadata:
+- No `grok_session_id` → initial review: the script generates a UUID, persists it, and starts Grok with `--session-id`, so a killed round 1 resumes correctly (if Grok never created the session, the retry starts it fresh with the same id)
+- Has `grok_session_id` → resume (`grok --resume <id>`), Grok keeps the prior rounds' context
+
+Returns JSON with `session_id`, `prompt_file`, `output_file`, `stream_file` (raw `streaming-json` events — `null` on success unless `--keep-stream`/`GROK_REVIEWER_KEEP_STREAM=1`; kept automatically when a round fails, since it is the diagnostic for timeouts/stalls and ~100x the output size), `round`, `mode`, `stop_reason`, `denied_tool_calls`, and `sandbox` (whether the kernel sandbox was active). Success requires an `end` event with `stop_reason: end_turn`; anything else exits 3 (a `max_tokens` truncation keeps the partial output on disk).
+
+**Wall-clock timeout (default 1800s / 30 min):** On timeout Grok is killed and the script exits 2. Override with `--timeout <seconds>`; `--timeout 0` disables.
+
+**Stall watchdog (default 300s / 5 min):** Grok streams thought/text/tool events on stdout continuously, so 5 min of stdout silence (stderr does not count) means the model stream dropped. On stall the script exits 4. Override with `--stall <seconds>`; `--stall 0` disables.
+
+**Reasoning-effort override (optional):** Pass `--reasoning-effort <level>` to use that value for the run; on success it is persisted so later rounds inherit it (failed runs do not persist). Omit to use the persisted value; if none, Grok uses its local default. The model is locked at init and not overridable here.
+
+**When NOT to change `--reasoning-effort`:** Do not change it on your own initiative. Only when (a) the user tells you to, or (b) a round's output quality looks materially poor — then surface the suggestion and ask before passing the flag.
+
+**Project directory:** `--cwd` is Grok's working directory (persisted at init as `project_dir`), used for relative paths and project discovery (AGENTS.md, skills, git). Prefer the repository root so relative paths in prompts are unambiguous. `init_session.py` derives the project name from git; outside a git repo pass `--project`.
+
+**File paths in prompts:** Grok can read files anywhere, so absolute paths work. For consistency with the Codex skills and to keep review inputs with the project, copy files that live outside the repo (plan files, prior session artifacts) into `.tmp/` and reference them by root-relative path. `run_review.py` warns about absolute paths outside the project — it is a reminder, not an error. **Never inline file content into the prompt** — have Grok read files from disk.
+
+**You MUST run this as a background task** using your harness's background mechanism (e.g. `run_in_background: true` on the Bash tool in Claude Code; the background-task feature in Grok or Codex). The script blocks while Grok works — running it in the foreground will hit the shell tool's timeout. If your harness has no background mechanism, run it in the foreground with the shell timeout raised to at least 40 minutes. After launching, **stop and wait** for the completion notification. See "Handling Long-Running Reviews".
+
+### Step 4: Clean Up (User-Initiated Only)
+
+```bash
+python <skill-path>/scripts/cleanup_session.py --session <session-path>
+```
+
+Deletes all prompt, output, stream, and metadata files for the session, removes the session directory, and prunes empty parents.
+
+**Never clean up unless the user explicitly asks you to.** Session files live in `~/.grok-reviewer/` and are harmless to keep. Do not clean up after reaching consensus, after committing, after pushing, or after merging.
+
+### Discovering Past Sessions
+
+```bash
+python <skill-path>/scripts/list_sessions.py [options]
+```
+
+Returns JSON with matching sessions, their metadata, and associated files (prompts, outputs, and any retained failure streams).
+
+**Filter options (combinable):**
+
+- `--project <name>` — auto-slugified to match the directory
+- `--date today` / `--date yesterday` / `--date 2026-03-25`
+- `--from 2026-03-01 --to 2026-03-25`
+- `--week`
+- `--month`
+
+**When to use:** At the start of a new conversation when the user references a prior review, or when you need context from an earlier session on the same project. Read the returned prompt/output files to recover the review history.
+
+### Handling Long-Running Reviews
+
+`run_review.py` blocks until Grok finishes, then prints JSON. **It produces zero output while Grok is working.** Shell-tool timeouts (typically 2-10 minutes) are shorter than many reviews, so run in the background.
+
+**Mandatory workflow:**
+
+1. Run `run_review.py` as a background task.
+2. The shell tool immediately returns a "running in the background" confirmation. **This is NOT the result.**
+3. Tell the user the review is running and **end your turn** — zero tool calls after that message. Do not poll.
+4. You will be **automatically notified** when the background task completes, with the script's JSON output or an error message.
+5. **Only after the completion notification**, read the `output_file`.
+
+**CRITICAL — do not run ANY shell commands to monitor the review.** No `while ! test -s`, no `ls`, no `cat`, no `tail -f`. No additional `run_review.py` calls for the same round. No raw `grok` commands.
+
+**Interpreting background task results:**
+
+- **JSON with `session_id` and `output_file`** → success. Read the `output_file`.
+- **Exit code 1** → CLI error (non-zero Grok exit or an `error` event). The message is in the error output. A `no longer exists` error on round 2+ means the Grok session dir was deleted from `~/.grok/sessions/` — start a fresh session and carry context forward via `.tmp/` (a round-1 retry restarts automatically with the same id). Retry if the cause looks transient.
+- **Exit code 2** → wall-clock timeout. **Re-run `run_review.py` with the same `--session`**; do NOT call `write_prompt.py` again. Repeated timeouts mean the scope is too large — split it into smaller rounds.
+- **Exit code 3** → Grok exited cleanly but produced no review, or the turn ended early (`stop_reason` other than `end_turn`, e.g. `cancelled`, `max_turns`, `refusal` — partial text is discarded as intermediate narration, except `max_tokens`, where the truncated review is kept on disk). Re-run with the same `--session` first; only if that also fails, pipe a fresh prompt to `write_prompt.py --force` (this advances the round, it does not retry the current one) or start a fresh session (see "Empty Output").
+- **Exit code 4** → stall. **Re-run `run_review.py` with the same `--session`**; do NOT call `write_prompt.py` again.
+- **Exit code 128+signal (e.g. 137, 143)** → the Grok process was killed externally, not a Grok failure. Check with the user before retrying, then re-run with the same `--session`.
+- **`<status>killed</status>` with empty output and no exit code** → the harness killed the task; see "Externally Killed Tasks".
+
+**Retry mechanics in one rule:** when the error says "the round N prompt file is still on disk", just re-run `run_review.py` with the same `--session`. Only call `write_prompt.py --force` when the error explicitly says so.
+
+### Externally Killed Tasks
+
+A `<status>killed</status>` notification with a completely empty output is not a Grok failure — every `run_review.py` failure path prints a diagnostic and a non-zero exit code, so zero output means the wrapper was killed before it could report. The usual cause is the harness reaping idle background tasks under memory pressure. (In Claude Code, `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` in the `env` block of `~/.claude/settings.json` disables it.)
+
+**Recovery:** re-run `run_review.py` with the same `--session`. Do NOT call `write_prompt.py`. Kills arrive in bursts, so a second kill on the retry is expected and the third attempt usually succeeds.
+
+### Empty Output
+
+If Grok repeatedly exits 3 on a resumed session, carry the context into a fresh session:
+
+1. **Leave the broken session in place** (no `cleanup_session.py`). It lives at `~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/`.
+2. **Init a fresh session** with `init_session.py` for the same project.
+3. **Copy the artifacts to carry forward into the new project's `.tmp/` using `cp`** — do NOT read them into your context first:
+   ```bash
+   cp ~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/r1-prompt.md <project_dir>/.tmp/prior-grok-r1-prompt.md
+   cp ~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/r1-output.md <project_dir>/.tmp/prior-grok-r1-output.md
+   ```
+4. **Write a new initial-round prompt** telling Grok to read those `.tmp/` files from disk, then state the follow-up question. Do NOT inline their contents.
+5. **Run `run_review.py`** on the fresh session (initial mode, since there is no `grok_session_id` yet).
+
+## Critical Thinking — Do Not Follow Grok Blindly
+
+Critically evaluate each finding before acting on it:
+
+1. **Assess validity** — is this accurate given the full context, or is Grok misunderstanding something?
+2. **Research if unsure** — read code, check docs, verify assumptions before deciding
+3. **Push back when warranted** — note your objection with reasoning; communicate it in the follow-up so Grok can accept or counter-argue
+4. **Use your judgment** — you have context Grok may not (user goals, codebase history, project constraints)
+
+## Constructing the Review Prompt
+
+### Context Bridging
+
+Grok is a separate session with zero knowledge of your conversation with the user. Without context, it may produce recommendations that are technically valid but misaligned — e.g., heavy architecture when the user asked for a quick fix.
+
+**Before every prompt, include relevant context:**
+
+- User's goals and the problem being solved
+- Constraints: scope, simplicity preferences, timeline, technical limitations
+- Decisions already made that Grok should not re-litigate
+- What's explicitly out of scope
+- Direction: prototype, MVP, production, learning exercise
+
+Skip context when the review is genuinely open-ended with no prior constraints.
+
+### File Access Audit
+
+Grok can read any path on the machine, so a wrong or external path is not fatal — but a **non-existent** path makes Grok review from assumptions. Before every prompt, verify each referenced file exists, prefer root-relative paths, and copy external inputs into `.tmp/` with `cp`/`mv` (do NOT read them into your context first — that wastes tokens and risks truncation).
+
+**Never inline file content into the prompt.** Always have Grok read files from disk.
+
+### Controlling Grok's Output
+
+Grok's response enters your context window. Always tell Grok how to shape its output — scale to the task:
+
+- **Large reviews**: "Be concise. Numbered findings with severity. 2-3 sentences each. Skip minor stylistic issues."
+- **Focused reviews**: "Be thorough and detailed for this specific area."
+- **Follow-ups**: "One sentence per point. Accept or reject my reasoning."
+
+### Prompt Template — Initial Review
+
+Adapt this structure for each review type:
+
+```
+You are acting as an independent reviewer. Your job is to review the artifact below and provide your findings and recommendations.
+
+IMPORTANT CONSTRAINTS:
+- Do NOT modify any files. This is a read-only review.
+- Do NOT create any files. Only provide your analysis as text output.
+- Do NOT run any commands that modify state.
+
+CONTEXT:
+[What this artifact is, who created it, what problem it solves]
+
+BACKGROUND AND GOALS:
+[Relevant context from your conversation with the user:
+- What the user is trying to achieve and why
+- Constraints (e.g., "keep it simple", "short-term fix", "production-grade")
+- Decisions already made that should not be re-litigated
+- What is explicitly out of scope
+If open-ended: "No specific constraints — review freely."]
+
+ARTIFACT TO REVIEW:
+[Instruct Grok to read specific files from disk. For files originally outside the project, tell Grok to read the copy in .tmp/. Never paste file contents here.]
+
+REVIEW FOCUS:
+[Specific areas to evaluate]
+Your recommendations should be appropriate given the background and goals above.
+
+OUTPUT INSTRUCTIONS:
+[Scale to the task — see "Controlling Grok's Output" above]
+
+Provide your review in this format:
+
+## Summary
+A 2-3 sentence overall assessment.
+
+## Findings
+Numbered list. For each: what, why it matters, severity (Critical/Major/Minor/Suggestion).
+
+## Recommendations
+Specific, actionable.
+
+## What Works Well
+Strong aspects to preserve.
+```
+
+### Prompt Template — Follow-Up Round (via Resume)
+
+Grok already has context from the prior round. Focus on what changed and explain objections in detail.
+
+```
+I've reviewed your findings and critically assessed each one:
+
+FINDINGS ACCEPTED — CHANGES MADE:
+- [Finding #N]: [What you changed and why]
+
+FINDINGS REJECTED — WITH REASONING:
+- [Finding #N]: [Why you disagree — be specific, e.g., "This assumes X, but in our case Y applies because Z. The current approach is intentional because..."]
+
+FINDINGS NEEDING DISCUSSION:
+- [Finding #N]: [What you're unsure about — ask a specific question]
+
+UPDATED ARTIFACT:
+[Tell Grok which files to re-read from disk. Never paste file contents here.]
+
+For each rejection: accept my reasoning, or explain why it's flawed.
+Review changes for: adequacy, new issues, remaining concerns.
+Do NOT modify any files. Text output only.
+Keep concise — one sentence per point.
+```
+
+### Review-Type Tips
+
+- **PRD/Specs/Docs in the project**: Tell Grok to read from disk. Never paste project file contents into the prompt.
+- **Code**: Tell Grok which files to read. For diffs, save the diff to a file in `.tmp/` and tell Grok to read it.
+- **Plan/Architecture** (plan files stored outside the project, e.g. `~/.claude/plans/`): copy the plan file into `.tmp/`; recopy if it changes between rounds. Focus Grok on ordering, dependencies, risks, and simpler alternatives.
+
+## The Review Loop
+
+### Apply First, Then Re-Review
+
+**Never ask Grok to pre-approve planned changes.** Apply accepted changes to the actual files, then resume the session so Grok reviews the real result. "I plan to do X — does that sound right?" produces a rubber stamp, not a review.
+
+### Re-Review Is Mandatory — No Exceptions
+
+**Every time you apply changes based on Grok's findings, you MUST send those changes back to Grok for re-review.** This applies on round 1 and round 10. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent.
+
+**Watch for discipline erosion across rounds.** "These are minor changes, surely they're fine" is the most common failure mode. One line can introduce a bug.
+
+A review is not complete until Grok has reviewed the final state and explicitly confirmed there are no remaining issues. If you accepted findings and made changes, the next step is **always** a follow-up round — never presenting results to the user.
+
+### Workflow
+
+1. **Draft** your artifact
+2. **Init** — `init_session.py --title <title>` (omit `--project` inside a git repo). Store the returned `session` path.
+3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
+4. **Run review** — `run_review.py --session <s>` as a background task. Read `output_file` when done.
+5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
+6. **Apply changes** — modify the actual files for accepted findings
+7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes)
+8. **Iterate** — repeat 5-7 until Grok explicitly confirms no remaining issues. The exit condition is Grok's confirmation, not your own judgment
+9. **Do NOT clean up** — never run cleanup unless the user explicitly asks
+
+### Presenting Results to the User
+
+- **Summary** — what was reviewed, overall assessment
+- **Findings accepted** — what you changed and why
+- **Findings rejected** — your reasoning for each
+- **Findings debated** — back-and-forth across rounds, final resolution
+- **Open questions** — unresolved items needing the user's input
+
+Be transparent — don't silently incorporate or reject feedback. The user should see where you and Grok disagreed.

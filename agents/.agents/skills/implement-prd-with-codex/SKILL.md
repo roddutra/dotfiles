@@ -1,6 +1,6 @@
 ---
-name: implement-prd
-description: "Implement a PRD end-to-end as a PM delegating to subagents. Full workflow: digest the PRD and codebase, resolve every ambiguity or open decision with the user, then execute via task delegation with Codex code review (iterative per milestone for large PRDs). Use when the user wants to build out an existing PRD document."
+name: implement-prd-with-codex
+description: "Implement a PRD end-to-end as a PM delegating to subagents. Full workflow: digest the PRD and codebase, resolve every ambiguity or open decision with the user, then execute via task delegation with Codex code review (iterative per milestone for large PRDs). Use when the user wants to build out an existing PRD document with Codex reviewing the code."
 disable-model-invocation: true
 ---
 

@@ -27,4 +27,4 @@ Do not edit `SKILL.md` by hand — the next refresh overwrites it. If a local tw
 ### Related
 
 - `.skill-lock.json` in `agents/.agents/` records the upstream source (`herdrdev/herdr`) for `npx skills` tooling; `herdr --skill` is preferred over `npx skills update` because it always matches the installed binary.
-- The herdr *integration hooks* (`claude/.claude/hooks/herdr-agent-state.sh`, `grok/.grok/hooks/`) are separate from this skill and are managed by `herdr integration`.
+- The herdr *integration hooks* (`claude/.claude/hooks/herdr-agent-state.sh`; `~/.grok/hooks/`, untracked — see `grok/README.md`) are separate from this skill and are managed by `herdr integration`.

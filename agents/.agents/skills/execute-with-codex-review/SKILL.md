@@ -1,10 +1,10 @@
 ---
-name: codex-execute
-description: "Execute a task, requirement, plan, or PRD as a PM delegating to subagents, with Codex collaboration. Full workflow: digest the work and codebase, create tasks and dependencies, delegate to subagents as project manager, then use Codex (via codex-reviewer) to code-review or brainstorm solutions at the right points (per milestone for large scope, once at the end for small). Use when the user has already defined what to build and wants it implemented end-to-end with Codex collaboration."
+name: execute-with-codex-review
+description: "YOU (the agent) execute a task, requirement, plan, or PRD as a PM delegating to subagents, and Codex acts as an independent reviewer along the way — Codex does NOT do the work. Full workflow: digest the work and codebase, create tasks and dependencies, delegate to subagents as project manager, then use Codex (via codex-reviewer) to code-review or brainstorm solutions at the right points (per milestone for large scope, once at the end for small). Use when the user has already defined what to build and wants it implemented end-to-end with Codex reviewing the result (per milestone for large scope, once at the end for small)."
 disable-model-invocation: true
 ---
 
-# Codex-Execute: Implement as PM with Codex Collaboration
+# Execute-with-Codex-Review: Implement as PM, Codex Reviews Along the Way
 
 End-to-end execution workflow: digest an already-defined task, requirement, plan, or PRD, set up tasks and dependencies, execute as a project manager delegating to subagents, and pull in Codex (via the `codex-reviewer` skill) to code-review or brainstorm at the appropriate points.
 

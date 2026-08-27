@@ -1,0 +1,85 @@
+---
+name: plan-with-grok
+description: "Plan a feature or task with Grok as co-planner, then execute as PM delegating to subagents. Full workflow: gather requirements, draft plan, iterate with Grok review until consensus, present for user approval, then execute via task delegation with a final Grok code review. Use when the user wants to plan and build something end-to-end with Grok as co-planner and reviewer (Grok does not implement)."
+disable-model-invocation: true
+---
+
+# Plan-with-Grok: Plan with Grok, Execute as PM
+
+End-to-end workflow: collaboratively plan with Grok as an independent co-planner, get user approval, then execute the plan as a project manager delegating to subagents.
+
+## Prerequisites
+
+**Work in planning mode.** If your harness has a plan mode (e.g. Claude Code's `EnterPlanMode`), enter it before doing anything else. Otherwise, do not modify project files until Phase 5 — write the plan to a markdown file (see Phase 2) and treat that file as the plan.
+
+## Phase 1: Understand the Requirements
+
+The user may provide input in one of two ways — handle both:
+
+- **Reference files provided** (PRDs, specs, docs, or file references alongside the command): Read and digest them thoroughly. These are your primary requirements source.
+- **Freeform description**: The user described what they want inline. Use that as the starting point.
+
+Then:
+
+1. Explore the codebase thoroughly — understand the relevant code, architecture, patterns, and conventions. Read files, search for related code, check existing tests and docs.
+2. Interview the user only to fill genuine gaps. If a question can be answered by reading the codebase or the provided references, do that instead of asking.
+
+## Phase 2: Draft the Plan
+
+1. Decide where the plan file lives: your harness's plan location if it has one (e.g. `~/.claude/plans/` in Claude Code), otherwise `.tmp/plans/<slug>.md` inside the project (create `.tmp/` and gitignore it if needed).
+2. Draft a comprehensive implementation plan covering:
+   - Problem statement and goals
+   - Scope and out-of-scope items
+   - Implementation approach broken into clear, ordered tasks
+   - Key design decisions and trade-offs
+   - Files to create/modify
+   - Testing strategy
+   - Risks and mitigations
+3. The plan should be detailed enough that each task can be delegated to a subagent with sufficient context to execute independently.
+4. **Include an "Execution Instructions" section at the end of the plan document.** This section must be written into the plan file itself so it persists across session compaction. Write the following (reword for token efficiency):
+
+   > **Execution Instructions**
+   >
+   > 1. Research the codebase and thoroughly understand the plan, requirements, and any referenced docs/files. Once you have the necessary knowledge, convert the plan's tasks into tasks using your harness's task/todo tool (or an ordered checklist in the plan file if it has none).
+   > 2. The main agent acts as project manager — do not write code. Delegate each task to subagents via your harness's subagent mechanism, providing rich context (relevant plan section, files to modify, architectural decisions, constraints, relationship to other tasks) so each subagent can make aligned decisions independently.
+   > 3. Review each subagent's output. Iterate until the work meets quality standards and aligns with the plan. Once all tasks are complete, delegate documentation updates across three tiers:
+   >    - **Project documentation** (README.md, docs/, etc.): Update or create docs relevant to both human developers and AI coding agents — covering new features, functionality, architecture, usage, and any logic implemented during the plan.
+   >    - **Global agent instructions** (CLAUDE.md, AGENTS.md): Only update if something is critical for ALL future coding agent sessions to have in context every time. This is expensive (loaded into every agent's context window on every session), so keep it to information that is universally required regardless of what task an agent is working on.
+   >    - **Agent skills** (the project's skills directory — e.g. `.agents/skills/`, `.claude/skills/`, `.grok/skills/`, whichever the project uses): Create or update topic-specific skill files for instructions that are only relevant to certain areas of work. Agents load skills on-demand based on the skill's description, so this is the token-efficient way to document specialized patterns, workflows, or conventions without bloating every session's context.
+   > 4. **Grok code review — iterative for large plans.** If the plan has multiple milestones or phases, do NOT wait until all milestones are complete to run a single massive Grok review. Instead, run a partial Grok review after completing each milestone/phase (using the grok-reviewer skill). This keeps each review focused on a narrow set of changes, avoids overwhelming Grok's context window, and catches issues early so that subsequent milestones build on reviewed and corrected code. Only move on to the next milestone once all Critical/Major findings from the current review have been addressed and Grok has confirmed them resolved. For small plans with a single phase or a handful of changes, a single final review is fine — use judgment based on the scope. Regardless of strategy (iterative or final), after applying any changes based on Grok's findings, you MUST send the updated code back to Grok for re-review — never assume your changes are correct. A review round is only complete when Grok has seen the final state. Iterate until Grok explicitly confirms no remaining issues.
+
+## Phase 3: Grok Co-Planning — Iterate Until Consensus
+
+1. Use the `grok-reviewer` skill to have Grok review the draft plan. Follow the grok-reviewer skill's file access, session, and prompt rules — the only plan-specific addition is:
+   - **Plan files** that live outside the project (e.g. `~/.claude/plans/`) should be copied into `.tmp/` before the review so review inputs stay with the project (Grok can technically read outside it). If the plan changes between rounds, recopy the updated file before the next round. A plan already written to `.tmp/plans/` needs no copying.
+   - Provide the user's goals, constraints, decisions already made, and tell Grok which project files to read for codebase context.
+   - Review focus: feasibility, ordering, missed dependencies, over-engineering, simpler alternatives, gaps, risks
+2. Critically assess Grok's findings. Accept, reject with reasoning, or flag for discussion.
+3. Update the plan based on accepted findings.
+4. Send the updated plan back to Grok for re-review (mandatory — see grok-reviewer skill).
+5. Repeat until both you and Grok are satisfied the plan is solid. Consensus means:
+   - No Critical or Major findings remain unresolved
+   - Both sides agree the plan is complete, correctly ordered, and feasible
+   - Any disagreements have been debated and resolved
+
+**Do NOT present the plan to the user until you and Grok have reached consensus.**
+
+**Session recovery:** If the conversation is resumed in a new session and prior Grok review context is needed, use `list_sessions.py` (see grok-reviewer skill) to find and recover the prior review history rather than starting fresh.
+
+## Phase 4: User Approval
+
+1. Present the finalized plan to the user with:
+   - The plan itself
+   - A summary of what Grok reviewed and any notable debates or trade-offs that were resolved
+   - Any open questions that need the user's input
+2. Wait for explicit user approval before proceeding to execution.
+3. If the user requests changes, update the plan and re-run Grok review for any non-editorial change (scope, ordering, architecture, risks). Skip re-review only for wording or formatting fixes.
+
+## Phase 5: Execution
+
+Once the plan is approved:
+
+1. Leave plan mode if your harness has one (e.g. Claude Code's `ExitPlanMode`).
+2. Re-read the plan file from disk and follow the **Execution Instructions** section written in the plan. The plan file is the source of truth — it contains all the context needed to execute.
+3. **Iterative Grok reviews for large plans:** When the plan spans multiple milestones or phases, treat Grok reviews as milestone gates — complete a milestone, run a focused Grok review scoped to that milestone's changes, address all Critical/Major findings, then proceed to the next milestone. This prevents a massive end-of-project review where Grok must digest dozens of files at once, and ensures code written in later phases builds on a reviewed foundation. Use a single Grok session across milestones (resume, don't re-init) so Grok accumulates context. For each milestone review, tell Grok which files changed in that milestone and what the milestone's goals were. For small plans (single phase or few files), skip milestone gates and do one final review.
+4. When execution is complete, present a final summary to the user: what was implemented, any deviations from the plan and why, Grok's review verdicts (per-milestone if iterative), and any remaining items or follow-ups.
