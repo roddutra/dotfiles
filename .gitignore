@@ -68,6 +68,5 @@ claude/.claude/*
 # Grok CLI - ignore everything except version-controlled config
 grok/.grok/*
 !grok/.grok/config.toml
-!grok/.grok/hooks/
 !grok/.grok/skills/
 !grok/.grok/agents/
