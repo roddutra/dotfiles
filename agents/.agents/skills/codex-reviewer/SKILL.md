@@ -15,6 +15,10 @@ Use the OpenAI Codex CLI as an independent reviewer — a separate AI agent whos
 - **Architecture decisions** — trade-offs, missed alternatives
 - **Any artifact** where a second perspective adds value
 
+## Never Run `codex` Yourself
+
+Do not invoke the `codex` binary from the shell — not `codex exec`, `codex exec resume`, `codex review`, not "just to check something". The **only** sanctioned interface is the scripts in this skill's `scripts/` directory. They are what enforce the read-only policy, session/round bookkeeping, timeouts and output capture; a raw call bypasses all of it and desynchronises the session state. If a script cannot do what you need, tell the user — do not work around it with a direct CLI call.
+
 ## Safety: Read-Only Only
 
 The Codex process is strictly **read-only** — it must NEVER modify files or change state. The wrapper scripts enforce this via `--sandbox read-only` at the code level, which cannot be overridden. Never construct raw `codex exec` commands manually. Always include "do NOT modify any files" in prompts as an additional safeguard.

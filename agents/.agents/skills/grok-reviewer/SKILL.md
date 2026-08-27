@@ -15,6 +15,10 @@ Use the xAI Grok CLI (`grok`) as an independent reviewer — a separate AI agent
 - **Architecture decisions** — trade-offs, missed alternatives
 - **Any artifact** where a second perspective adds value
 
+## Never Run `grok` Yourself
+
+Do not invoke the `grok` binary from the shell — not `grok -p`, `grok --prompt-file`, `grok --resume`, not "just to check something". The **only** sanctioned interface is the scripts in this skill's `scripts/` directory. They are what enforce the read-only policy, session/round bookkeeping, timeouts and output capture; a raw call bypasses all of it and desynchronises the session state. If a script cannot do what you need, tell the user — do not work around it with a direct CLI call.
+
 ## Safety: Read-Only Only
 
 The Grok process must NEVER modify files or change state. The wrapper hardcodes the following and none of it can be overridden:
