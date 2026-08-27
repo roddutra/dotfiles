@@ -5,7 +5,7 @@ Files live in the session directory alongside session.json, with simple
 names: r1-prompt.md, r1-output.md, r2-prompt.md, etc.
 
 Directory structure:
-  ~/.grok-reviewer/<project>/<YYYY-MM-DD>/<HHMMSS-title>/
+  ~/.grok-reviews/<project>/<YYYY-MM-DD>/<HHMMSS-title>/
     session.json
     r1-prompt.md
     r1-output.md
@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REVIEWS_DIR = Path.home() / ".grok-reviewer"
+REVIEWS_DIR = Path.home() / ".grok-reviews"
 
 
 def to_kebab_case(text: str) -> str:

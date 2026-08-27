@@ -34,7 +34,7 @@ Without the kernel sandbox this is policy-level enforcement, so always include "
 
 **Reads are not restricted.** Unlike Codex's `--cd` jail, Grok can read any file on the machine regardless of `--cwd` or the `read-only` sandbox. The `.tmp/` copying convention below keeps review inputs alongside the project and matches the Codex skills; it is not a technical requirement.
 
-Note: the wrapper scripts themselves perform small local setup — creating session files in `~/.grok-reviewer/`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Grok actions.
+Note: the wrapper scripts themselves perform small local setup — creating session files in `~/.grok-reviews/`, creating `.tmp/` in the project, and updating `.gitignore`. These are orchestration side effects, not Grok actions.
 
 ## Scripts
 
@@ -58,7 +58,7 @@ Returns JSON with `session` (the only value you need to track) and `project_dir`
 - **`--force-project <name>`** overrides the git-derived name **anywhere**. Use it **only** for deliberate custom grouping (e.g. `tomobroker-frontend` / `tomobroker-backend`).
 - If both are supplied, **`--force-project` wins**.
 
-**Project name vs `project_dir`/`--cd`:** The project name affects **only** the grouping path `~/.grok-reviewer/<project>/`. `project_dir` is resolved separately from the worktree's own root (`git rev-parse --show-toplevel`), persisted, and used as Grok's `--cwd` on every round (no need to pass `--cd`). The script creates `.tmp/` there and gitignores it. Pass `--cd <dir>` only to override.
+**Project name vs `project_dir`/`--cd`:** The project name affects **only** the grouping path `~/.grok-reviews/<project>/`. `project_dir` is resolved separately from the worktree's own root (`git rev-parse --show-toplevel`), persisted, and used as Grok's `--cwd` on every round (no need to pass `--cd`). The script creates `.tmp/` there and gitignores it. Pass `--cd <dir>` only to override.
 
 **Model is set once, here, and locked — only if you pass `--model`.** With `--model <name>` (see `grok models`), the value is persisted and used on every round; start a fresh session to change it. Without it, each round uses whatever the local Grok CLI defaults to (`~/.grok/config.toml`).
 
@@ -120,7 +120,7 @@ python <skill-path>/scripts/cleanup_session.py --session <session-path>
 
 Deletes all prompt, output, stream, and metadata files for the session, removes the session directory, and prunes empty parents.
 
-**Never clean up unless the user explicitly asks you to.** Session files live in `~/.grok-reviewer/` and are harmless to keep. Do not clean up after reaching consensus, after committing, after pushing, or after merging.
+**Never clean up unless the user explicitly asks you to.** Session files live in `~/.grok-reviews/` and are harmless to keep. Do not clean up after reaching consensus, after committing, after pushing, or after merging.
 
 ### Discovering Past Sessions
 
@@ -176,12 +176,12 @@ A `<status>killed</status>` notification with a completely empty output is not a
 
 If Grok repeatedly exits 3 on a resumed session, carry the context into a fresh session:
 
-1. **Leave the broken session in place** (no `cleanup_session.py`). It lives at `~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/`.
+1. **Leave the broken session in place** (no `cleanup_session.py`). It lives at `~/.grok-reviews/<project>/<date>/<HHMMSS-title>/`.
 2. **Init a fresh session** with `init_session.py` for the same project.
 3. **Copy the artifacts to carry forward into the new project's `.tmp/` using `cp`** — do NOT read them into your context first:
    ```bash
-   cp ~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/r1-prompt.md <project_dir>/.tmp/prior-grok-r1-prompt.md
-   cp ~/.grok-reviewer/<project>/<date>/<HHMMSS-title>/r1-output.md <project_dir>/.tmp/prior-grok-r1-output.md
+   cp ~/.grok-reviews/<project>/<date>/<HHMMSS-title>/r1-prompt.md <project_dir>/.tmp/prior-grok-r1-prompt.md
+   cp ~/.grok-reviews/<project>/<date>/<HHMMSS-title>/r1-output.md <project_dir>/.tmp/prior-grok-r1-output.md
    ```
 4. **Write a new initial-round prompt** telling Grok to read those `.tmp/` files from disk, then state the follow-up question. Do NOT inline their contents.
 5. **Run `run_review.py`** on the fresh session (initial mode, since there is no `grok_session_id` yet).
