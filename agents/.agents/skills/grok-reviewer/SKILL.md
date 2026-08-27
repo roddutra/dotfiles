@@ -88,6 +88,12 @@ Auto-detects initial vs follow-up from session metadata:
 
 Returns JSON with `session_id`, `prompt_file`, `output_file`, `stream_file` (raw `streaming-json` events — `null` on success unless `--keep-stream`/`GROK_REVIEWER_KEEP_STREAM=1`; kept automatically when a round fails, since it is the diagnostic for timeouts/stalls and ~100x the output size), `round`, `mode`, `stop_reason`, `denied_tool_calls`, and `sandbox` (whether the kernel sandbox was active). Success requires an `end` event with `stop_reason: end_turn`; anything else exits 3 (a `max_tokens` truncation keeps the partial output on disk).
 
+**Stream file (`rN-stream.jsonl`):** while Grok works, the wrapper records the raw `streaming-json` event stream (every thought, tool call, and tool result) next to the round's files. It is typically 50-100x larger than the review itself and duplicates what Grok already persists under `~/.grok/sessions/<id>/`, so:
+
+- **On success it is deleted** and the result reports `"stream_file": null`. Do not look for it.
+- **On failure it is kept** (exit 2/3/4, early-ended turn, CLI error) — the error message names the path. Use it to diagnose: `tail` it for the last events, grep `"type":"tool_call"` to see what Grok was doing, `"type":"error"` for CLI errors, and the `end` event's `stopReason`. Do not read the whole file into your context — it can be megabytes.
+- Pass `--keep-stream` (or set `GROK_REVIEWER_KEEP_STREAM=1`) only when the user asks to debug a successful round. Retained streams are removed by `cleanup_session.py` like any other round file.
+
 **Wall-clock timeout (default 1800s / 30 min):** On timeout Grok is killed and the script exits 2. Override with `--timeout <seconds>`; `--timeout 0` disables.
 
 **Stall watchdog (default 300s / 5 min):** Grok streams thought/text/tool events on stdout continuously, so 5 min of stdout silence (stderr does not count) means the model stream dropped. On stall the script exits 4. Override with `--stall <seconds>`; `--stall 0` disables.
