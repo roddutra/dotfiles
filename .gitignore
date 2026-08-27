@@ -70,3 +70,10 @@ grok/.grok/*
 !grok/.grok/config.toml
 !grok/.grok/skills/
 !grok/.grok/agents/
+
+# herdr - skill and integration hook are installed/updated by the herdr binary
+# itself (`herdr --skill`, `herdr integration`) on each machine; tracking them
+# only causes conflicts between installs
+agents/.agents/skills/herdr/
+claude/.claude/skills/herdr
+claude/.claude/hooks/herdr-agent-state.sh

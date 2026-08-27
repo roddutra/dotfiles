@@ -84,15 +84,6 @@
       "installedAt": "2026-05-20T04:03:56.029Z",
       "updatedAt": "2026-05-20T04:04:59.757Z"
     },
-    "herdr": {
-      "source": "herdrdev/herdr",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/herdrdev/herdr.git",
-      "skillPath": "skills/herdr/SKILL.md",
-      "skillFolderHash": "3366121ac343afea5af7fe4c36a0bc7077d0198d",
-      "installedAt": "2026-06-21T23:59:46.807Z",
-      "updatedAt": "2026-06-22T00:01:21.556Z"
-    },
     "make-interfaces-feel-better": {
       "source": "jakubkrehel/make-interfaces-feel-better",
       "sourceType": "github",

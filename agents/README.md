@@ -6,25 +6,16 @@ This file holds maintenance notes for humans. It is excluded from stow via `agen
 
 ## herdr
 
-#
+Not version-controlled: the herdr skill (`agents/.agents/skills/herdr/`, symlinked as `claude/.claude/skills/herdr`) and its Claude hook (`claude/.claude/hooks/herdr-agent-state.sh`) are gitignored because the herdr binary manages them and rewrites them on update; tracking them caused conflicts between machines. They live in these paths on disk so the stow layout still exposes them to every agent.
 
-`SKILL.md` is the release-matched copy printed by the installed herdr binary, not a hand-edited file. Upstream: <https://herdr.dev/docs/agent-skill/> (source at `skills/herdr/SKILL.md` in <https://github.com/herdrdev/herdr>).
+Install/refresh on each machine:
 
-### Updating after `herdr update`
-
-```shell
-cd ~/dotfiles
-herdr --version                                   # note the new version
+```bash
+herdr integration                                  # installs the hooks (Claude, Grok)
+mkdir -p agents/.agents/skills/herdr
 herdr --skill > agents/.agents/skills/herdr/SKILL.md
-git diff --stat agents/.agents/skills/herdr       # sanity-check the change
-git commit -am "chore(herdr): refresh skill for herdr <version>"
+ln -sfn ../../../agents/.agents/skills/herdr claude/.claude/skills/herdr
+stow -R claude agents
 ```
 
-No re-stow is needed: every agent reads the skill through a symlink into this repo, so the new content is live immediately (`~/.agents/skills/herdr`, `~/.claude/skills/herdr`, `~/.codex/skills/herdr`; Grok via `[skills].paths` in `grok/.grok/config.toml`).
-
-Do not edit `SKILL.md` by hand — the next refresh overwrites it. If a local tweak is ever needed, record it in this file and reapply after refreshing.
-
-### Related
-
-- `.skill-lock.json` in `agents/.agents/` records the upstream source (`herdrdev/herdr`) for `npx skills` tooling; `herdr --skill` is preferred over `npx skills update` because it always matches the installed binary.
-- The herdr *integration hooks* (`claude/.claude/hooks/herdr-agent-state.sh`; `~/.grok/hooks/`, untracked — see `grok/README.md`) are separate from this skill and are managed by `herdr integration`.
+Repeat the `herdr --skill` step after `herdr update`. Upstream docs: <https://herdr.dev/docs/agent-skill/>.

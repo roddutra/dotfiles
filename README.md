@@ -242,7 +242,7 @@ Every skill that more than one agent uses lives **once**, in `agents/.agents/ski
 - Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
 - Add a Grok-only skill: create `grok/.grok/skills/<name>/` directly (same idea for any other agent package).
 - Never copy a skill into both packages; the copies drift.
-- Maintenance notes for humans (e.g. how `herdr/SKILL.md` is refreshed from `herdr --skill`) go in `agents/README.md`, never inside a skill directory: stow folds each skill into one directory symlink, so anything inside it is visible to agents. `agents/README.md` is excluded from stow via `agents/.stow-local-ignore`.
+- Maintenance notes for humans (e.g. how the untracked `herdr` skill is installed) go in `agents/README.md`, never inside a skill directory: stow folds each skill into one directory symlink, so anything inside it is visible to agents. `agents/README.md` is excluded from stow via `agents/.stow-local-ignore`.
 - On a machine where `~/.claude/skills` already exists, stow links each skill individually, so skills installed by other tools (e.g. `npx skills add`) coexist with the stowed ones.
 
 ### Setting up sensitive environment variables on a new machine:
