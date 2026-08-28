@@ -15,17 +15,22 @@ Read-only enforcement (hardcoded, no way to inject other flags):
   turn continues. (`dontAsk` was rejected: any shell command outside the
   built-in read-only list cancels the whole turn instead of failing the
   one call.)
-- `--deny Edit --deny Write`: file-edit tools are denied. Grok also
-  classifies mutating shell commands as edits (`touch`, `rm`, `mkdir`,
-  `sed -i`, `tee`, `> file` redirects), so these are denied too.
+- `--deny Edit --deny Write` ONLY when the kernel sandbox cannot start:
+  Grok applies these class rules to `spawn_subagent` as well, so they cost
+  subagents. With the sandbox active the OS already blocks every write and
+  the class rules are dropped, which lets Grok fan out to subagents for
+  large reviews; subagents inherit the sandbox, the `--deny Bash(...)`
+  rules and `--disallowed-tools` (verified empirically). Without the
+  sandbox the class rules stay (they also catch `sed -i`, `> file`
+  redirects and other shell writes the prefix list cannot express).
 - `--deny Bash(...)` list (`_DENIED_SHELL`): git mutators, remote-write
   tools, package managers, and interpreters (`python -c "open(...,'w')"` would
   otherwise bypass the edit classifier). Read-only git (`log`, `diff`,
   `status`, `show`, `blame`) still runs.
-- `--disallowed-tools` (`_DISALLOWED_TOOLS`) + `--no-subagents` +
-  `--deny MCPTool`: strips every built-in tool except shell/read/list/grep
-  (schedulers persist jobs, image_gen writes files, workflow/Agent spawn
-  subagents) and denies MCP tool dispatch. `--tools` (allowlist) is not
+- `--disallowed-tools` (`_DISALLOWED_TOOLS`) + `--deny MCPTool`: strips
+  every built-in tool except shell/read/list/grep and subagents
+  (schedulers persist jobs, image_gen writes files, workflow runs
+  pipelines) and denies MCP tool dispatch. `--tools` (allowlist) is not
   honoured by grok 1.0.5 and is not used.
 - `--sandbox read-only` (kernel-enforced) is added when it can start:
   Grok refuses the profile if `~/.grok/hooks/` or `~/.grok/hooks-paths`
@@ -115,25 +120,26 @@ _DENIED_SHELL = [
     # interpreters / shells (can write files without a redirect)
     "python", "node", "deno", "ruby", "perl", "php", "lua",
     "bash ", "bash -", "sh ", "sh -", "zsh ", "zsh -", "eval",
-    # process / filesystem mutators (cp/mv/rm/touch/mkdir/tee/sed -i/redirects
-    # are already caught by Grok's edit classifier; listed for belt-and-braces)
+    # process / filesystem mutators. With the sandbox active these prefix
+    # rules are the policy layer (the Edit class rule is dropped there);
+    # `> file` redirects are only caught by the kernel sandbox.
     "kill", "pkill", "dd", "ln", "chmod", "chown", "install", "make",
     "cp", "mv", "rm", "rmdir", "touch", "mkdir", "tee", "truncate",
+    "sed -i", "sed --in-place", "patch", "unzip", "tar x", "tar -x",
 ]
 
 # Built-in tools removed from Grok's toolset. Everything except
 # run_terminal_command / read_file / list_dir / grep goes: edit tools,
 # schedulers (persist jobs), image/video generation (write files), workflow
-# and subagent spawning, MCP dispatch (use_tool/search_tool), plan mode.
+# pipelines, MCP dispatch (use_tool/search_tool), plan mode. Subagents stay
+# available (they inherit every restriction) so large reviews can fan out.
 # `--tools` (allowlist) was tested and is NOT honoured by grok 1.0.5 for the
-# stock profile; the denylist is. `Agent` is the documented subagent entry.
+# stock profile; the denylist is.
 _DISALLOWED_TOOLS = ",".join([
-    "Agent", "write", "search_replace", "todo_write",
+    "write", "search_replace", "todo_write",
     "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
     "image_gen", "image_edit", "image_to_video", "reference_to_video",
     "workflow", "use_tool", "search_tool",
-    "kill_command_or_subagent", "get_command_or_subagent_output",
-    "wait_commands_or_subagents",
     "enter_plan_mode", "exit_plan_mode", "ask_user_question",
 ])
 
@@ -294,13 +300,14 @@ def _build_cmd(
         "--cwd", str(project_dir),
         "--output-format", "streaming-json",
         "--permission-mode", "auto",
-        "--deny", "Edit",
-        "--deny", "Write",
         "--deny", "MCPTool",
         "--disallowed-tools", _DISALLOWED_TOOLS,
-        "--no-subagents",
         "--rules", _READ_ONLY_RULES,
     ]
+    if not sandbox:
+        # Policy-only fallback. The Edit/Write class rules also deny
+        # `spawn_subagent`, so subagents are only available with the sandbox.
+        cmd += ["--deny", "Edit", "--deny", "Write", "--no-subagents"]
     for prefix in _DENIED_SHELL:
         cmd += ["--deny", f"Bash({prefix}*)"]
     if sandbox:

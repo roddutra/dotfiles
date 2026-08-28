@@ -23,11 +23,12 @@ Do not invoke the `grok` binary from the shell — not `grok -p`, `grok --prompt
 
 The Grok process must NEVER modify files or change state. The wrapper hardcodes the following and none of it can be overridden:
 
-- `--disallowed-tools` + `--no-subagents` — strips every built-in tool except shell, `read_file`, `list_dir`, `grep` (no edit tools, schedulers, image/video generation, workflows, or subagents).
-- `--deny Edit --deny Write --deny MCPTool` — denies the edit class (Grok's shell classifier maps `touch`, `rm`, `cp`, `mv`, `mkdir`, `sed -i`, `tee`, and `> file` redirects to it) and all MCP tool calls.
+- `--disallowed-tools` — strips every built-in tool except shell, `read_file`, `list_dir`, `grep` and subagents (no edit tools, schedulers, image/video generation, workflows). Grok may fan a large review out to its own subagents; they inherit the sandbox, deny rules and tool restrictions.
+- `--deny MCPTool` — no MCP tool calls.
+- `--deny Edit --deny Write` only when the kernel sandbox is unavailable: Grok applies these class rules to `spawn_subagent` too, so in that fallback subagents are disabled (`--no-subagents`) and the shell edit classifier (`touch`, `sed -i`, `> file` redirects…) is the write barrier instead.
 - A `--deny Bash(...)` list covering git mutators, `ssh`/`scp`/`rsync`, package managers, interpreters (`python -c "open(..., 'w')"` bypasses the classifier), and process/filesystem mutators. Read-only git (`log`, `diff`, `status`, `show`, `blame`) still works.
 - `--permission-mode auto` — a blocked call fails and is reported to Grok so the turn continues (`dontAsk` cancels the whole turn on the first non-read-only shell command).
-- `--sandbox read-only` (kernel-enforced writes) whenever it can start. Grok refuses the profile when `~/.grok/hooks/` contains symlinks (stow-managed dotfiles), so the script checks first and persists the decision per session. `GROK_REVIEWER_SANDBOX=0|1` forces it off/on.
+- `--sandbox read-only` (kernel-enforced writes) whenever it can start. Note: every Grok sandbox profile leaves `/tmp`, `/var/tmp` and `~/.grok` writable. Grok refuses the profile when `~/.grok/hooks/` contains symlinks (stow-managed dotfiles), so the script checks first and persists the decision per session. `GROK_REVIEWER_SANDBOX=0|1` forces it off/on.
 - A `--rules` guardrail and `GROK_MEMORY=0` (no cross-session memory). Web search/fetch stay available so Grok can research while reviewing; shell `curl`/`wget` also work unless the kernel sandbox is active (it blocks child-process network on Linux).
 
 Without the kernel sandbox this is policy-level enforcement, so always include "do NOT modify any files" in prompts as an additional safeguard. Never construct raw `grok` commands manually. A non-zero `denied_tool_calls` in the result means Grok tried something the policy blocked — the review is still valid.

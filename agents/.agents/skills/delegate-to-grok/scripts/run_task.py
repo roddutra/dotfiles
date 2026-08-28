@@ -30,10 +30,11 @@ Execution policy (hardcoded; no way to inject other flags):
   clean, config, merge, cherry-pick, revert, submodule are always denied.
   Prefix rules are policy-level (a wrapper shell could evade them), so the
   wrapper also flags HEAD/branch/index changes as `git_state_changed`.
-- `--disallowed-tools` + `--no-subagents`: removes schedulers (persist
-  jobs), image/video generation, workflow/subagent spawning, plan mode and
-  the interactive question tool. Shell, file edit tools, web search/fetch
-  and MCP tools stay available — an implementer legitimately needs them
+- `--disallowed-tools`: removes schedulers (persist jobs), image/video
+  generation, workflow pipelines, plan mode and the interactive question
+  tool. Shell, file edit tools, subagents (they inherit the sandbox and
+  every deny rule), web search/fetch and MCP tools stay available — an
+  implementer legitimately needs them
   (e.g. project MCP servers); only the kernel sandbox bounds their side
   effects, and external services are outside it regardless.
 - Verify commands run on the host, unsandboxed, in their own process group
@@ -106,7 +107,6 @@ _GIT_ALWAYS_DENIED = [
 _ALWAYS_DENIED_SHELL = ["sudo", "doas", "ssh", "scp"]
 
 _DISALLOWED_TOOLS = ",".join([
-    "Agent", "spawn_subagent",
     "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
     "image_gen", "image_edit", "image_to_video", "reference_to_video",
     "workflow", "enter_plan_mode", "exit_plan_mode", "ask_user_question",
@@ -290,7 +290,6 @@ def _build_cmd(metadata: dict, brief_file: Path, project_dir: Path, session_id: 
         "--cwd", str(project_dir),
         "--output-format", "streaming-json",
         "--permission-mode", "auto",
-        "--no-subagents",
         "--disallowed-tools", _DISALLOWED_TOOLS,
         "--rules", _EXECUTOR_RULES,
     ]
