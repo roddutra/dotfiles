@@ -78,6 +78,10 @@ dotfiles/
 │   └── .grok/              # Will be symlinked to ~/.grok/
 │       ├── config.toml     # Grok CLI config (points skills at ~/.agents/skills)
 │       └── skills/         # Grok-only skills (shared ones live in agents/)
+├── omp/
+│   └── .omp/
+│       └── agent/
+│           └── config.yml # Portable OMP settings; runtime and auth data stay local
 ├── tmux/                   # The "package" name for stow
 │   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
 │   └── .config/
@@ -205,19 +209,19 @@ To setup the symlinks for each app in a new machine, make sure you have [GNU Sto
 
 ```shell
 cd ~/dotfiles
-stow {app_folder_name} # Eg. `stow nvim`
+stow --no-folding {app_folder_name} # Eg. `stow --no-folding nvim`
 ```
 
 ### Install ALL configurations at once:
 ```shell
 cd ~/dotfiles
-stow */  # Stow all directories (each one is treated as a package)
+stow --no-folding */  # Stow all directories without linking writable runtime roots
 ```
 
 ### Install specific configurations:
 ```shell
 cd ~/dotfiles
-stow tmux nvim zsh ghostty zed  # Only stow the packages you want
+stow --no-folding tmux nvim zsh ghostty zed omp  # Only stow the packages you want
 ```
 
 ### Remove/Uninstall configurations:
@@ -238,7 +242,8 @@ stow -D nvim
 - `stow zed` will symlink Zed's settings and custom themes to `~/.config/zed/` on Linux and macOS.
 - `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
 - `stow grok` will symlink `config.toml` into `~/.grok/`. Hooks are deliberately **not** tracked: Grok refuses to start its kernel sandbox (`--sandbox read-only`, used by the `grok-reviewer` skill) when `~/.grok/hooks/` contains symlinks, so `~/.grok/hooks/` must hold real files — `herdr integration` installs them. Grok rewrites `config.toml` in place when you change settings, which turns the symlink back into a plain file — run `cd ~/dotfiles && stow --adopt grok` afterwards to pull the change into the repo and relink.
-- `stow */` will symlink ALL application configs at once
+- `stow --no-folding omp` links only `config.yml`; authentication, sessions, memories, caches, generated extensions, and databases remain machine-local and gitignored.
+- `stow --no-folding */` will symlink ALL application configs at once
 
 ### Agent skills: one source of truth
 

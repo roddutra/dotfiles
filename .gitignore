@@ -77,3 +77,7 @@ grok/.grok/*
 agents/.agents/skills/herdr/
 claude/.claude/skills/herdr
 claude/.claude/hooks/herdr-agent-state.sh
+
+# Oh My Pi - track only reviewed portable configuration
+omp/.omp/agent/*
+!omp/.omp/agent/config.yml

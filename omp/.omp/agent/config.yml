@@ -1,0 +1,36 @@
+providers:
+  webSearchOrder:
+    []
+modelRoles:
+  default: openai-codex/gpt-5.6-sol
+symbolPreset: unicode
+composer:
+  shape: box
+theme:
+  dark: titanium
+  light: light
+setupVersion: 2
+statusLine:
+  preset: default
+  compactThinkingLevel: false
+  showHookStatus: true
+  separator: powerline
+  sessionAccent: true
+  transparent: false
+task:
+  showResolvedModelBadge: true
+  eager: default
+  enableEffort: true
+  maxRecursionDepth: 2
+  maxEffort: xhigh
+steeringMode: all
+followUpMode: all
+interruptMode: wait
+tools:
+  approvalMode: yolo
+memory:
+  backend: mnemopi
+mnemopi:
+  llmMode: none
+read:
+  renderMarkdown: true
