@@ -92,10 +92,15 @@ dotfiles/
 │   ├── .zshrc             # Local copy with tool configs (gitignored, symlinked to ~/.zshrc)
 │   ├── .zsh-settings      # Will be symlinked to ~/.zsh-settings (your config)
 │   └── .zsh-secrets       # Will be symlinked to ~/.zsh-secrets (gitignored)
-└── ghostty/
+├── ghostty/
+│   └── .config/
+│       └── ghostty/       # Will be symlinked to ~/.config/ghostty/
+│           └── config
+└── zed/
     └── .config/
-        └── ghostty/       # Will be symlinked to ~/.config/ghostty/
-            └── config
+        └── zed/           # Will be symlinked to ~/.config/zed/
+            ├── settings.json
+            └── themes/
 ```
 
 When you run `stow tmux`, it creates symlinks in your home directory that mirror the structure inside the `tmux/` folder.
@@ -212,7 +217,7 @@ stow */  # Stow all directories (each one is treated as a package)
 ### Install specific configurations:
 ```shell
 cd ~/dotfiles
-stow tmux nvim zsh ghostty  # Only stow the packages you want
+stow tmux nvim zsh ghostty zed  # Only stow the packages you want
 ```
 
 ### Remove/Uninstall configurations:
@@ -230,6 +235,7 @@ stow -D nvim
 - `stow zsh` will symlink `.zshrc`, `.zsh-settings`, and `.zsh-secrets` to the home directory (the `.zshrc.template` is excluded via `.stow-local-ignore`)
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
+- `stow zed` will symlink Zed's settings and custom themes to `~/.config/zed/` on Linux and macOS.
 - `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
 - `stow grok` will symlink `config.toml` into `~/.grok/`. Hooks are deliberately **not** tracked: Grok refuses to start its kernel sandbox (`--sandbox read-only`, used by the `grok-reviewer` skill) when `~/.grok/hooks/` contains symlinks, so `~/.grok/hooks/` must hold real files — `herdr integration` installs them. Grok rewrites `config.toml` in place when you change settings, which turns the symlink back into a plain file — run `cd ~/dotfiles && stow --adopt grok` afterwards to pull the change into the repo and relink.
 - `stow */` will symlink ALL application configs at once
