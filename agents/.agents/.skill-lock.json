@@ -47,33 +47,6 @@
       "installedAt": "2026-04-22T07:43:40.747Z",
       "updatedAt": "2026-04-22T07:43:40.747Z"
     },
-    "computer-use": {
-      "source": "stablyai/orca",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/stablyai/orca.git",
-      "skillPath": "skills/computer-use/SKILL.md",
-      "skillFolderHash": "ac1f6e3de0cbd9b488c5cfb1d4c5c076e17afea0",
-      "installedAt": "2026-05-20T00:36:09.823Z",
-      "updatedAt": "2026-05-20T00:36:09.823Z"
-    },
-    "orca-cli": {
-      "source": "stablyai/orca",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/stablyai/orca.git",
-      "skillPath": "skills/orca-cli/SKILL.md",
-      "skillFolderHash": "b545ca22a27b8cfff80fd2d33c77db8b03efd7ed",
-      "installedAt": "2026-05-20T00:36:09.826Z",
-      "updatedAt": "2026-05-20T04:07:29.259Z"
-    },
-    "orchestration": {
-      "source": "stablyai/orca",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/stablyai/orca.git",
-      "skillPath": "skills/orchestration/SKILL.md",
-      "skillFolderHash": "a75a8a7124054ebfa2898c13a399e8fb6578bbb0",
-      "installedAt": "2026-05-20T00:36:09.827Z",
-      "updatedAt": "2026-05-20T00:36:09.827Z"
-    },
     "llm-wiki": {
       "source": "lewislulu/llm-wiki-skill",
       "sourceType": "github",
