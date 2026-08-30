@@ -17,6 +17,16 @@ import sys
 from pathlib import Path
 
 _VERIFY_TIMEOUT = 900
+_VERIFY_PASS_MAX_LINES = 12
+_VERIFY_FAIL_MAX_LINES = 30
+_VERIFY_PASS_MAX_CHARS = 2_000
+_VERIFY_FAIL_MAX_CHARS = 6_000
+
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\|$)|\[[0-?]*[ -/]*[@-~]|[@-_])"
+)
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_PROGRESS_ONLY_RE = re.compile(r"^\s*[.·•]+\s*$")
 
 _STATUS_RE = re.compile(
     r"^\s{0,3}#{1,6}\s*status\s*\n+\s*\**\s*(DONE|PARTIAL|BLOCKED)\b",
@@ -363,6 +373,38 @@ def write_changes_file(
 # Verify
 # ---------------------------------------------------------------------------
 
+def _sanitize_verify_output(output: str, *, passed: bool) -> str:
+    """Keep verification evidence useful without feeding terminal noise back
+    into the lead agent's context."""
+    cleaned = _ANSI_ESCAPE_RE.sub("", output)
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = _CONTROL_RE.sub("", cleaned)
+
+    lines: list[str] = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.rstrip()
+        if _PROGRESS_ONLY_RE.fullmatch(line):
+            continue
+        if not line:
+            if lines and lines[-1]:
+                lines.append("")
+            continue
+        lines.append(line)
+    if lines and not lines[-1]:
+        lines.pop()
+
+    max_lines = _VERIFY_PASS_MAX_LINES if passed else _VERIFY_FAIL_MAX_LINES
+    max_chars = _VERIFY_PASS_MAX_CHARS if passed else _VERIFY_FAIL_MAX_CHARS
+    truncated = len(lines) > max_lines
+    text = "\n".join(lines[-max_lines:])
+
+    marker = "[... verification output truncated ...]\n"
+    if truncated or len(text) > max_chars:
+        keep = max_chars - len(marker)
+        text = marker + text[-keep:].lstrip("\n")
+    return text
+
+
 def run_verify(commands: list[str], project_dir: Path) -> list[dict]:
     """Run lead-chosen acceptance commands on the host (NOT inside the
     executor sandbox — they carry the same trust as the lead running the
@@ -376,8 +418,9 @@ def run_verify(commands: list[str], project_dir: Path) -> list[dict]:
         )
         try:
             out, _ = proc.communicate(timeout=_VERIFY_TIMEOUT)
-            tail = "\n".join(out.strip().splitlines()[-30:])
-            results.append({"command": cmd, "exit_code": proc.returncode, "passed": proc.returncode == 0, "output_tail": tail})
+            passed = proc.returncode == 0
+            tail = _sanitize_verify_output(out, passed=passed)
+            results.append({"command": cmd, "exit_code": proc.returncode, "passed": passed, "output_tail": tail})
         except subprocess.TimeoutExpired:
             kill_tree(proc)
             proc.communicate()
