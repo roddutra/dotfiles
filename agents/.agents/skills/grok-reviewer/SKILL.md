@@ -28,7 +28,7 @@ The Grok process must NEVER modify files or change state. The wrapper hardcodes 
 - `--deny Edit --deny Write` only when the kernel sandbox is unavailable: Grok applies these class rules to `spawn_subagent` too, so in that fallback subagents are disabled (`--no-subagents`) and the shell edit classifier (`touch`, `sed -i`, `> file` redirects…) is the write barrier instead.
 - A `--deny Bash(...)` list covering git mutators, `ssh`/`scp`/`rsync`, package managers, interpreters (`python -c "open(..., 'w')"` bypasses the classifier), and process/filesystem mutators. Read-only git (`log`, `diff`, `status`, `show`, `blame`) still works.
 - `--permission-mode auto` — a blocked call fails and is reported to Grok so the turn continues (`dontAsk` cancels the whole turn on the first non-read-only shell command).
-- `--sandbox read-only` (kernel-enforced writes) whenever it can start. Note: every Grok sandbox profile leaves `/tmp`, `/var/tmp` and `~/.grok` writable. Grok refuses the profile when `~/.grok/hooks/` contains symlinks (stow-managed dotfiles), so the script checks first and persists the decision per session. `GROK_REVIEWER_SANDBOX=0|1` forces it off/on.
+- `--sandbox read-only` (kernel-enforced writes) whenever it can start. The wrapper screens known-invalid hook layouts, then treats Grok startup as the authoritative probe. If Grok rejects the profile before creating its session—for example, because a runtime socket deny path cannot be resolved—the wrapper automatically persists the policy-enforced fallback and retries the same UUID, prompt, round, and review directory. Invokers do not manage this fallback. `GROK_REVIEWER_SANDBOX=0|1` is a diagnostic override: it applies before a Grok session exists, and forcing `1` disables automatic downgrade.
 - A `--rules` guardrail and `GROK_MEMORY=0` (no cross-session memory). Web search/fetch stay available so Grok can research while reviewing; shell `curl`/`wget` also work unless the kernel sandbox is active (it blocks child-process network on Linux).
 
 Without the kernel sandbox this is policy-level enforcement, so always include "do NOT modify any files" in prompts as an additional safeguard. Never construct raw `grok` commands manually. A non-zero `denied_tool_calls` in the result means Grok tried something the policy blocked — the review is still valid.
@@ -91,7 +91,7 @@ Auto-detects initial vs follow-up from session metadata:
 - No `grok_session_id` → initial review: the script generates a UUID, persists it, and starts Grok with `--session-id`, so a killed round 1 resumes correctly (if Grok never created the session, the retry starts it fresh with the same id)
 - Has `grok_session_id` → resume (`grok --resume <id>`), Grok keeps the prior rounds' context
 
-Returns JSON with `session_id`, `prompt_file`, `output_file`, `stream_file` (raw `streaming-json` events — `null` on success unless `--keep-stream`/`GROK_REVIEWER_KEEP_STREAM=1`; kept automatically when a round fails, since it is the diagnostic for timeouts/stalls and ~100x the output size), `round`, `mode`, `stop_reason`, `denied_tool_calls`, and `sandbox` (whether the kernel sandbox was active). Success requires an `end` event with `stop_reason: end_turn`; anything else exits 3 (a `max_tokens` truncation keeps the partial output on disk).
+Returns JSON with `session_id`, `prompt_file`, `output_file`, `stream_file` (raw `streaming-json` events — `null` on success unless `--keep-stream`/`GROK_REVIEWER_KEEP_STREAM=1`; kept automatically when a round fails, since it is the diagnostic for timeouts/stalls and ~100x the output size), `round`, `mode`, `stop_reason`, `denied_tool_calls`, `sandbox` (whether the kernel sandbox was active), `sandbox_source` (`auto`, `forced`, or `fallback`), and `sandbox_fallback` (whether this invocation automatically retried without the kernel sandbox). Success requires an `end` event with `stop_reason: end_turn`; anything else exits 3 (a `max_tokens` truncation keeps the partial output on disk).
 
 **Stream file (`rN-stream.jsonl`):** while Grok works, the wrapper records the raw `streaming-json` event stream (every thought, tool call, and tool result) next to the round's files. It is typically 50-100x larger than the review itself and duplicates what Grok already persists under `~/.grok/sessions/<id>/`, so:
 
@@ -166,6 +166,8 @@ Returns JSON with matching sessions, their metadata, and associated files (promp
 - **`<status>killed</status>` with empty output and no exit code** → the harness killed the task; see "Externally Killed Tasks".
 
 **Retry mechanics in one rule:** when the error says "the round N prompt file is still on disk", just re-run `run_review.py` with the same `--session`. Only call `write_prompt.py --force` when the error explicitly says so.
+
+**Sandbox startup is self-healing:** never create a second `-fallback` session, copy the prompt, or retry with `GROK_REVIEWER_SANDBOX=0` when the kernel sandbox cannot start. `run_review.py` automatically retries the same round in the same review directory with the policy-enforced read-only profile. If both attempts fail, report the final diagnostic; it includes the original sandbox startup error.
 
 ### Externally Killed Tasks
 

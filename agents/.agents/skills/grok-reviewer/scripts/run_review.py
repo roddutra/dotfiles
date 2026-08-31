@@ -33,11 +33,11 @@ Read-only enforcement (hardcoded, no way to inject other flags):
   pipelines) and denies MCP tool dispatch. `--tools` (allowlist) is not
   honoured by grok 1.0.5 and is not used.
 - `--sandbox read-only` (kernel-enforced) is added when it can start:
-  Grok refuses the profile if `~/.grok/hooks/` or `~/.grok/hooks-paths`
-  contains a symlink component (typical for stow-managed dotfiles), so
-  `_sandbox_usable()` checks that first. The decision is persisted per
-  session because a resumed session must keep its original profile.
-  Set GROK_REVIEWER_SANDBOX=0 to force it off, =1 to force it on.
+  `_sandbox_usable()` avoids known-invalid hook layouts, then the first Grok
+  launch is the authoritative probe. If Grok rejects the sandbox before
+  creating its session, the wrapper automatically persists the policy-only
+  fallback and retries the same UUID, prompt, round, and review directory.
+  `GROK_REVIEWER_SANDBOX=0|1` explicitly forces the initial profile.
 - `--rules`: a system-prompt guardrail telling Grok it is read-only.
 - `GROK_MEMORY=0`: independent of prior cross-session memory. Web search and
   web fetch are deliberately left available so Grok can research while
@@ -74,6 +74,7 @@ import select
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 import uuid
 from pathlib import Path
 
@@ -152,6 +153,24 @@ _BLOCKED_SIGNATURES = (
     "User cancelled the execution",
 )
 
+# Grok CLI/kernel diagnostics emitted when a sandbox profile cannot be
+# constructed. These are startup failures, not model or review failures.
+_SANDBOX_BOOTSTRAP_MARKERS = (
+    "deny path",
+    "landlock",
+    "seatbelt",
+)
+_SANDBOX_FAILURE_WORDS = (
+    "error",
+    "fail",
+    "invalid",
+    "refus",
+    "resolve",
+    "canonical",
+    "not found",
+    "no such file",
+)
+
 def _grok_session_exists(session_id: str) -> bool:
     """True if Grok persisted a session dir for this id under GROK_HOME."""
     root = _GROK_HOME / "sessions"
@@ -176,15 +195,15 @@ def _has_symlink_component(path: Path) -> bool:
     return False
 
 
-def _sandbox_usable() -> bool:
-    """True if `--sandbox read-only` can start on this machine.
-
-    Mirrors Grok's own refusal rule: the hook sources under GROK_HOME must
-    not contain symlink components. Cheap filesystem check, no model call.
-    """
+def _sandbox_override() -> bool | None:
     forced = os.environ.get("GROK_REVIEWER_SANDBOX")
-    if forced is not None:
-        return forced.strip().lower() in ("1", "true", "yes", "on")
+    if forced is None:
+        return None
+    return forced.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _sandbox_usable() -> bool:
+    """True when no known local condition prevents sandbox startup."""
     if sys.platform not in ("linux", "darwin"):
         return False
     if _GROK_HOME.is_symlink():
@@ -324,6 +343,150 @@ def _build_cmd(
         cmd += ["--session-id", session_id]
     return cmd
 
+@dataclass
+class _ProcessResult:
+    returncode: int
+    state: _StreamState
+    stderr_tail: str
+    timed_out: bool
+    stalled: bool
+
+
+def _run_grok_process(
+    cmd: list[str],
+    env: dict[str, str],
+    project_dir: Path,
+    stream_file: Path,
+    timeout: int,
+    stall: int,
+) -> _ProcessResult:
+    """Run one Grok process attempt and capture its event stream."""
+    process = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        cwd=str(project_dir),
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    fds = {process.stdout.fileno(): "out", process.stderr.fileno(): "err"}
+    for fd in fds:
+        try:
+            os.set_blocking(fd, False)
+        except OSError as exc:
+            process.kill()
+            process.wait()
+            print(f"Error: failed to set pipe to nonblocking mode: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    state = _StreamState()
+    stderr_lines: collections.deque[str] = collections.deque(maxlen=30)
+    decoders = {fd: codecs.getincrementaldecoder("utf-8")(errors="replace") for fd in fds}
+    buffers = {fd: "" for fd in fds}
+    open_fds = set(fds)
+
+    with stream_file.open("w", encoding="utf-8") as stream_out:
+        def emit_line(fd: int, line: str) -> None:
+            if fds[fd] == "out":
+                stream_out.write(line if line.endswith("\n") else line + "\n")
+                state.feed(line)
+            else:
+                stderr_lines.append(line)
+
+        def drain(fd: int, chunk: bytes, final: bool = False) -> None:
+            buffers[fd] += decoders[fd].decode(chunk, final=final)
+            while True:
+                nl = buffers[fd].find("\n")
+                if nl < 0:
+                    break
+                emit_line(fd, buffers[fd][: nl + 1])
+                buffers[fd] = buffers[fd][nl + 1:]
+            if final and buffers[fd]:
+                emit_line(fd, buffers[fd])
+                buffers[fd] = ""
+
+        def read_available(fd: int) -> bool:
+            got = False
+            for _ in range(16):
+                try:
+                    chunk = os.read(fd, 65536)
+                except BlockingIOError:
+                    break
+                except OSError:
+                    open_fds.discard(fd)
+                    break
+                if not chunk:
+                    open_fds.discard(fd)
+                    break
+                got = True
+                drain(fd, chunk)
+            return got
+
+        timed_out = stalled = False
+        last_activity = time.monotonic()
+        deadline = time.monotonic() + timeout if timeout > 0 else None
+
+        while True:
+            if process.poll() is not None:
+                for fd in list(open_fds):
+                    read_available(fd)
+                break
+            now = time.monotonic()
+            if deadline is not None and now > deadline:
+                timed_out = True
+                process.kill()
+                break
+            if stall > 0 and now - last_activity > stall:
+                stalled = True
+                process.kill()
+                break
+            if open_fds:
+                ready, _, _ = select.select(list(open_fds), [], [], 0.5)
+                for fd in ready:
+                    # Only stdout counts as liveness; chatty CLI logs must not
+                    # mask a dropped model stream.
+                    if read_available(fd) and fds[fd] == "out":
+                        last_activity = time.monotonic()
+            else:
+                time.sleep(0.5)
+
+        process.wait()
+        for fd in list(open_fds):
+            read_available(fd)
+        for fd in fds:
+            drain(fd, b"", final=True)
+
+    return _ProcessResult(
+        returncode=process.returncode,
+        state=state,
+        stderr_tail="".join(stderr_lines).strip(),
+        timed_out=timed_out,
+        stalled=stalled,
+    )
+
+
+def _is_sandbox_bootstrap_failure(result: _ProcessResult) -> bool:
+    """True only for a failed pre-session kernel sandbox startup."""
+    if (
+        result.timed_out
+        or result.stalled
+        or result.returncode == 0
+        or result.returncode < 0
+        or result.state.saw_end
+        or result.state.final_text()
+    ):
+        return False
+    diagnostic = "\n".join(
+        part for part in (result.state.error_message, result.stderr_tail) if part
+    ).lower()
+    return any(marker in diagnostic for marker in _SANDBOX_BOOTSTRAP_MARKERS) or (
+        "sandbox" in diagnostic
+        and any(word in diagnostic for word in _SANDBOX_FAILURE_WORDS)
+    )
+
 
 def run_review(
     session_path: Path,
@@ -384,13 +547,6 @@ def run_review(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     _warn_external_paths(prompt_file, project_dir)
 
-    # The sandbox profile is fixed for the life of a Grok session (a resume
-    # with a different profile is refused), so decide once and persist.
-    if "sandbox" not in metadata:
-        metadata["sandbox"] = _sandbox_usable()
-        session_path.write_text(json.dumps(metadata, indent=2))
-    sandbox = bool(metadata["sandbox"])
-
     if not is_resume:
         session_id = str(uuid.uuid4())
         metadata["grok_session_id"] = session_id
@@ -418,108 +574,76 @@ def run_review(
             )
             sys.exit(1)
 
-    cmd = _build_cmd(
-        prompt_file, project_dir, session_id, is_resume, session_model,
-        session_reasoning_effort, sandbox,
-    )
+    # A created Grok session locks its sandbox profile. Before that point an
+    # explicit override may replace stale metadata from a failed startup.
+    grok_session_exists = _grok_session_exists(session_id)
+    sandbox_override = _sandbox_override()
+    if sandbox_override is not None and not grok_session_exists:
+        sandbox = sandbox_override
+        sandbox_source = "forced"
+    elif "sandbox" not in metadata:
+        sandbox = _sandbox_usable()
+        sandbox_source = "auto"
+    else:
+        sandbox = bool(metadata["sandbox"])
+        sandbox_source = metadata.get("sandbox_source", "auto")
+
+    if (
+        metadata.get("sandbox") != sandbox
+        or metadata.get("sandbox_source") != sandbox_source
+    ):
+        metadata["sandbox"] = sandbox
+        metadata["sandbox_source"] = sandbox_source
+        session_path.write_text(json.dumps(metadata, indent=2))
 
     env = {**os.environ, "GROK_DISABLE_AUTOUPDATER": "1", "GROK_MEMORY": "0"}
-    process = subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        cwd=str(project_dir),
-    )
 
-    fds = {process.stdout.fileno(): "out", process.stderr.fileno(): "err"}
-    for fd in fds:
-        try:
-            os.set_blocking(fd, False)
-        except OSError as exc:
-            process.kill()
-            process.wait()
-            print(f"Error: failed to set pipe to nonblocking mode: {exc}", file=sys.stderr)
-            sys.exit(1)
+    def run_attempt(use_sandbox: bool) -> _ProcessResult:
+        cmd = _build_cmd(
+            prompt_file,
+            project_dir,
+            session_id,
+            is_resume,
+            session_model,
+            session_reasoning_effort,
+            use_sandbox,
+        )
+        return _run_grok_process(
+            cmd, env, project_dir, stream_file, timeout, stall
+        )
 
-    state = _StreamState()
-    stderr_lines: collections.deque[str] = collections.deque(maxlen=30)
-    decoders = {fd: codecs.getincrementaldecoder("utf-8")(errors="replace") for fd in fds}
-    buffers = {fd: "" for fd in fds}
-    open_fds = set(fds)
-    stream_out = stream_file.open("w", encoding="utf-8")
+    result = run_attempt(sandbox)
+    sandbox_fallback = False
+    sandbox_bootstrap_diagnostic: str | None = None
 
-    def _emit_line(fd: int, line: str) -> None:
-        if fds[fd] == "out":
-            stream_out.write(line if line.endswith("\n") else line + "\n")
-            state.feed(line)
-        else:
-            stderr_lines.append(line)
+    if (
+        sandbox
+        and sandbox_source != "forced"
+        and not _grok_session_exists(session_id)
+        and _is_sandbox_bootstrap_failure(result)
+    ):
+        sandbox_bootstrap_diagnostic = "\n".join(
+            part
+            for part in (result.state.error_message, result.stderr_tail)
+            if part
+        ).strip()
+        sandbox = False
+        sandbox_source = "fallback"
+        sandbox_fallback = True
+        metadata["sandbox"] = sandbox
+        metadata["sandbox_source"] = sandbox_source
+        session_path.write_text(json.dumps(metadata, indent=2))
+        print(
+            "Note: Grok's kernel sandbox could not start; retrying this review "
+            "automatically with the policy-enforced read-only fallback.",
+            file=sys.stderr,
+        )
+        result = run_attempt(sandbox)
 
-    def _drain(fd: int, chunk: bytes, final: bool = False) -> None:
-        buffers[fd] += decoders[fd].decode(chunk, final=final)
-        while True:
-            nl = buffers[fd].find("\n")
-            if nl < 0:
-                break
-            _emit_line(fd, buffers[fd][: nl + 1])
-            buffers[fd] = buffers[fd][nl + 1:]
-        if final and buffers[fd]:
-            _emit_line(fd, buffers[fd])
-            buffers[fd] = ""
-
-    def _read_available(fd: int) -> bool:
-        got = False
-        for _ in range(16):
-            try:
-                chunk = os.read(fd, 65536)
-            except BlockingIOError:
-                break
-            except OSError:
-                open_fds.discard(fd)
-                break
-            if not chunk:
-                open_fds.discard(fd)
-                break
-            got = True
-            _drain(fd, chunk)
-        return got
-
-    timed_out = stalled = False
-    last_activity = time.monotonic()
-    deadline = time.monotonic() + timeout if timeout > 0 else None
-
-    while True:
-        if process.poll() is not None:
-            for fd in list(open_fds):
-                _read_available(fd)
-            break
-        now = time.monotonic()
-        if deadline is not None and now > deadline:
-            timed_out = True
-            process.kill()
-            break
-        if stall > 0 and now - last_activity > stall:
-            stalled = True
-            process.kill()
-            break
-        if open_fds:
-            ready, _, _ = select.select(list(open_fds), [], [], 0.5)
-            for fd in ready:
-                # Only stdout (the event stream) counts as liveness; chatty
-                # stderr (MCP/CLI logs) must not mask a dropped model stream.
-                if _read_available(fd) and fds[fd] == "out":
-                    last_activity = time.monotonic()
-        else:
-            time.sleep(0.5)
-
-    process.wait()
-    for fd in list(open_fds):
-        _read_available(fd)
-    for fd in fds:
-        _drain(fd, b"", final=True)
-    stream_out.close()
+    state = result.state
+    stderr_tail = result.stderr_tail
+    timed_out = result.timed_out
+    stalled = result.stalled
 
     captured_session_id = session_id
     if state.session_id and state.session_id != session_id:
@@ -536,7 +660,6 @@ def run_review(
     if final_text:
         output_file.write_text(final_text)
 
-    stderr_tail = "".join(stderr_lines).strip()
     retry_hint = (
         f"  - Re-run `run_review.py` with the same --session. The round "
         f"{round_num} prompt file is still on disk — do NOT call "
@@ -552,6 +675,12 @@ def run_review(
             msg += f"\n\nSession ID for resume: {captured_session_id}"
         if stderr_tail:
             msg += f"\n\nLast stderr output:\n{stderr_tail}"
+        if sandbox_bootstrap_diagnostic:
+            msg += (
+                "\n\nInitial kernel sandbox startup failure "
+                "(automatic fallback attempted):\n"
+                f"{sandbox_bootstrap_diagnostic}"
+            )
         msg += f"\nRaw event stream: {stream_file}"
         return msg
 
@@ -576,8 +705,8 @@ def run_review(
         print(_tail(msg), file=sys.stderr)
         sys.exit(4)
 
-    if process.returncode is not None and process.returncode < 0:
-        sig = -process.returncode
+    if result.returncode < 0:
+        sig = -result.returncode
         msg = (
             f"Error: Grok was killed by signal {sig} (external kill, not a Grok "
             f"failure). Check with the user before retrying; then re-run "
@@ -586,8 +715,8 @@ def run_review(
         print(_tail(msg), file=sys.stderr)
         sys.exit(128 + sig)
 
-    if process.returncode != 0 or state.error_message:
-        msg = f"Error: Grok exited with code {process.returncode}"
+    if result.returncode != 0 or state.error_message:
+        msg = f"Error: Grok exited with code {result.returncode}"
         if state.error_message:
             msg += f"\nGrok error: {state.error_message}"
         if final_text:
@@ -659,6 +788,8 @@ def run_review(
         "stop_reason": state.stop_reason,
         "denied_tool_calls": len(state.denied_calls),
         "sandbox": sandbox,
+        "sandbox_source": sandbox_source,
+        "sandbox_fallback": sandbox_fallback,
     }
 
 
