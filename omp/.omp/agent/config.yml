@@ -3,6 +3,8 @@ providers:
     []
 modelRoles:
   default: openai-codex/gpt-5.6-sol
+  smol: openai-codex/gpt-5.6-luna
+  plan: openai-codex/gpt-5.6-sol:xhigh
 symbolPreset: unicode
 composer:
   shape: box
@@ -14,9 +16,10 @@ statusLine:
   preset: default
   compactThinkingLevel: false
   showHookStatus: true
-  separator: powerline
+  separator: slash
   sessionAccent: true
   transparent: false
+  contextLine: annotated
 task:
   showResolvedModelBadge: true
   eager: default
@@ -34,3 +37,13 @@ mnemopi:
   llmMode: none
 read:
   renderMarkdown: true
+dev:
+  autoqaConsent: denied
+edit:
+  mode: hashline
+checkpoint:
+  enabled: true
+github:
+  enabled: true
+security:
+  enabled: true
