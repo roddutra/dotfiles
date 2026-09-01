@@ -1,8 +1,10 @@
-# Shared agent skills
+# Shared agent configuration
 
-`stow agents` symlinks `.agents/` into `~/.agents/`, which is the canonical home for every skill shared across agents (Codex, Claude Code, Grok, Pi, ...). Claude links to these skills from `claude/.claude/skills/`; Grok reads them via `[skills].paths` in `grok/.grok/config.toml`. See the root README, section *Agent skills: one source of truth*.
+`stow agents` symlinks `.agents/` into `~/.agents/`. `AGENTS.md` is the canonical global instruction file. `claude/.claude/CLAUDE.md` links to it so Claude Code reads the same instructions.
 
-This file holds maintenance notes for humans. It is excluded from stow via `agents/.stow-local-ignore`, and it lives at the package root rather than inside a skill directory because stow folds each skill into a single directory symlink, so anything inside a skill directory is visible to agents.
+Shared skills also live in `.agents/skills/`. Claude links to them from `claude/.claude/skills/`; Grok reads them through `[skills].paths` in `grok/.grok/config.toml`. See the root README, section *Agent skills: one source of truth*.
+
+This file holds maintenance notes for humans. It is excluded from stow via `agents/.stow-local-ignore`.
 
 ## herdr
 

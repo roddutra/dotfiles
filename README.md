@@ -69,11 +69,13 @@ Each top-level directory in this repo represents an application's configuration:
 dotfiles/
 ├── agents/
 │   └── .agents/            # Will be symlinked to ~/.agents/
+│       ├── AGENTS.md           # Shared global instructions for compatible agents
 │       ├── .skill-lock.json
 │       └── skills/         # Canonical copy of every shared agent skill (Codex, Pi, Claude Code, etc.)
 ├── claude/
 │   └── .claude/            # Will be symlinked to ~/.claude/
-│       └── skills/         # Claude-only skills as real dirs + relative symlinks into ../agents/.agents/skills/
+│       ├── CLAUDE.md           # Relative symlink to ../../agents/.agents/AGENTS.md
+│       └── skills/             # Claude-only skills as real dirs + relative symlinks into ../agents/.agents/skills/
 ├── grok/
 │   └── .grok/              # Will be symlinked to ~/.grok/
 │       ├── config.toml     # Grok CLI config (points skills at ~/.agents/skills)
@@ -221,7 +223,7 @@ stow --no-folding */  # Stow all directories without linking writable runtime ro
 ### Install specific configurations:
 ```shell
 cd ~/dotfiles
-stow --no-folding tmux nvim zsh ghostty zed omp  # Only stow the packages you want
+stow --no-folding agents claude tmux nvim zsh ghostty zed omp  # Only stow the packages you want
 ```
 
 ### Remove/Uninstall configurations:
@@ -240,7 +242,7 @@ stow -D nvim
 - `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
 - `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
 - `stow zed` will symlink Zed's settings and custom themes to `~/.config/zed/` on Linux and macOS.
-- `stow agents` will symlink the `.agents` directory to `~/.agents` (the agent skills directory read by Codex, Pi, etc.)
+- `stow agents` will symlink `.agents` to `~/.agents`, including shared global instructions in `AGENTS.md` and skills read by Codex, Pi, and compatible agents.
 - `stow grok` will symlink `config.toml` into `~/.grok/`. Hooks are deliberately **not** tracked: Grok refuses to start its kernel sandbox (`--sandbox read-only`, used by the `grok-reviewer` skill) when `~/.grok/hooks/` contains symlinks, so `~/.grok/hooks/` must hold real files — `herdr integration` installs them. Grok rewrites `config.toml` in place when you change settings, which turns the symlink back into a plain file — run `cd ~/dotfiles && stow --adopt grok` afterwards to pull the change into the repo and relink.
 - `stow --no-folding omp` links only `config.yml`; authentication, sessions, memories, caches, generated extensions, and databases remain machine-local and gitignored.
 - `stow --no-folding */` will symlink ALL application configs at once
@@ -248,6 +250,8 @@ stow -D nvim
 ### Agent skills: one source of truth
 
 Every skill that more than one agent uses lives **once**, in `agents/.agents/skills/`. Claude Code sees a shared skill through a *relative* symlink in `claude/.claude/skills/` (e.g. `frontend-design -> ../../../agents/.agents/skills/frontend-design`). Git tracks these symlinks and stow links to them as files, so the chain resolves inside the repo no matter where the repo is cloned; `stow claude` works even if `stow agents` was never run. Shared skills are written harness-agnostically ("your harness's subagent mechanism", "run as a background task") with Claude Code specifics only as parenthetical examples, so Codex, Grok, Pi, etc. can follow them unchanged. Skills that only make sense for Claude Code are real directories in `claude/.claude/skills/` and nowhere else.
+
+Global instructions live once in `agents/.agents/AGENTS.md`. `claude/.claude/CLAUDE.md` is a relative symlink to that file, so `stow claude agents` exposes the same instructions at `~/.claude/CLAUDE.md` and `~/.agents/AGENTS.md` on every machine.
 
 - Add a shared skill: put it in `agents/.agents/skills/<name>/` and, if Claude should see it, `ln -s ../../../agents/.agents/skills/<name> claude/.claude/skills/<name>`.
 - Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.

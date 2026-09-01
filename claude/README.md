@@ -10,6 +10,7 @@ claude/
 │   ├── agents/                # Custom agents (version controlled)
 │   ├── commands/              # Slash commands (version controlled)
 │   ├── hooks/                 # Event hooks (version controlled)
+│   ├── CLAUDE.md              # Symlink to shared global instructions
 │   └── skills/                # Claude-only skills + symlinks to shared skills in ../../agents/.agents/skills/
 ├── .mcp.json                  # MCP server configurations (version controlled)
 ├── .stow-local-ignore         # Files to exclude from symlinking
@@ -19,6 +20,7 @@ claude/
 ## What Gets Version Controlled
 
 ### ✅ Version Controlled (committed to GitHub):
+- `.claude/CLAUDE.md` - Relative symlink to `agents/.agents/AGENTS.md`
 - `.claude/agents/` - Custom agent definitions
 - `.claude/commands/` - Custom slash commands
 - `.claude/hooks/` - Event hooks (e.g., pre-commit, user-prompt-submit)
