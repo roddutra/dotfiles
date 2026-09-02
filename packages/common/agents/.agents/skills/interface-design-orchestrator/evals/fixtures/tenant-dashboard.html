@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TomoBroker Tenant Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #f5f6fb; color: #1d2440; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 18px 28px; background: white; border-bottom: 1px solid #ddd; }
+    nav { display: flex; gap: 18px; }
+    nav a { color: #6e7385; text-decoration: none; }
+    main { max-width: 1180px; margin: auto; padding: 32px 24px; }
+    .hero { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .hero h1 { margin: 0; }
+    button, select { padding: 10px 14px; border: 1px solid #ddd; border-radius: 12px; background: white; }
+    .primary { background: linear-gradient(135deg, #725cff, #a746ff); color: white; border: 0; }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .card, .panel { background: white; border: 1px solid #e5e5ef; border-radius: 16px; padding: 20px; box-shadow: 0 6px 24px rgba(60, 45, 120, .06); }
+    .card small { color: #73788b; }
+    .card strong { display: block; margin-top: 14px; font-size: 28px; }
+    .layout { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-top: 16px; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 14px 8px; border-bottom: 1px solid #eee; text-align: left; }
+    .status { padding: 5px 9px; border-radius: 999px; background: #eeeaff; color: #5c45d8; font-size: 12px; }
+    .activity { display: grid; gap: 12px; }
+    .activity div { padding: 12px; border-radius: 12px; background: #f7f5ff; }
+    @media (max-width: 760px) { .cards, .layout { grid-template-columns: 1fr; } nav { display: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>TomoBroker</strong>
+    <nav><a href="#">Overview</a><a href="#">Policies</a><a href="#">Clients</a><a href="#">Reports</a></nav>
+    <button aria-label="Open account menu">RD</button>
+  </header>
+  <main>
+    <section class="hero">
+      <div><small>Wednesday, 2 September</small><h1>Good morning, Rodrigo</h1></div>
+      <button class="primary" data-action="new-quote">New quote</button>
+    </section>
+    <section class="cards" aria-label="Portfolio summary">
+      <article class="card"><small>Active policies</small><strong>1,248</strong><span>+4.8% this month</span></article>
+      <article class="card"><small>Gross premium</small><strong>R$ 2.84m</strong><span>+7.2% this month</span></article>
+      <article class="card"><small>Renewals due</small><strong>86</strong><span>23 need attention</span></article>
+      <article class="card"><small>Open claims</small><strong>34</strong><span>6 updated today</span></article>
+    </section>
+    <section class="layout">
+      <article class="panel">
+        <div class="panel-header"><h2>Renewals</h2><select id="renewal-filter" aria-label="Renewal period"><option value="30">Next 30 days</option><option value="60">Next 60 days</option></select></div>
+        <table>
+          <thead><tr><th>Client</th><th>Policy</th><th>Premium</th><th>Due</th><th>Status</th></tr></thead>
+          <tbody id="renewals">
+            <tr data-days="12"><td>Atlas Logistics</td><td>Fleet</td><td>R$ 48,600</td><td>14 Sep</td><td><span class="status">Review</span></td></tr>
+            <tr data-days="24"><td>Casa Norte</td><td>Property</td><td>R$ 21,350</td><td>26 Sep</td><td><span class="status">Quoted</span></td></tr>
+            <tr data-days="46"><td>Verde Campo</td><td>Agricultural</td><td>R$ 76,900</td><td>18 Oct</td><td><span class="status">Pending</span></td></tr>
+          </tbody>
+        </table>
+      </article>
+      <aside class="panel"><h2>Recent activity</h2><div class="activity"><div>Marina uploaded Atlas claims history</div><div>Bruno approved policy TB-10482</div><div>Casa Norte viewed its renewal quote</div></div></aside>
+    </section>
+  </main>
+  <script>
+    document.querySelector('#renewal-filter').addEventListener('change', (event) => {
+      const days = Number(event.target.value);
+      document.querySelectorAll('#renewals tr').forEach((row) => {
+        row.hidden = Number(row.dataset.days) > days;
+      });
+    });
+    document.querySelector('[data-action="new-quote"]').addEventListener('click', () => {
+      document.body.dataset.quoteStarted = 'true';
+      alert('Quote workflow started');
+    });
+  </script>
+</body>
+</html>

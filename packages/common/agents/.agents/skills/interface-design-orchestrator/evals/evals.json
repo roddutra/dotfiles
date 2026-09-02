@@ -1,0 +1,53 @@
+{
+  "skill_name": "interface-design-orchestrator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Build a new responsive marketing landing page for TomoBroker, an insurance brokerage operating system for Brazilian brokers. Write all interface copy in English. Work directly rather than presenting multiple concepts. The page should help an established brokerage owner understand that TomoBroker unifies clients, policies, renewals, claims, commissions, and team operations. Make the result distinctive, credible, and production-minded rather than looking like a generic SaaS template. Deliver a standalone HTML artifact that can be opened locally.",
+      "expected_output": "A complete, visually distinctive standalone landing page with realistic Portuguese-market brokerage content, responsive behavior, purposeful interaction, a coherent direction, and rendered verification evidence.",
+      "files": [],
+      "assertions": [
+        "A self-contained HTML entry opens locally without a build step and has no broken local asset references.",
+        "The page explains clients, policies, renewals, claims, commissions, and team operations with realistic brokerage content.",
+        "Rendered desktop and mobile layouts remain usable without accidental horizontal overflow, clipped primary content, or unreadable text.",
+        "The output follows direct-build scope by delivering one finished direction rather than an unrequested concept gallery.",
+        "The visual direction is product-specific and avoids a generic purple-gradient SaaS hero, excessive floating cards, and decorative pills without function.",
+        "Review notes identify the direction and only claim viewports or interactions that were actually inspected."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Refactor the provided TomoBroker tenant dashboard HTML to improve its design and usability. Work directly, preserve the renewal filter and New quote behavior, retain the information and realistic data, and keep it responsive. Remove generic AI styling and make the high-density brokerage workflow feel calm, precise, and trustworthy. Deliver the revised standalone HTML artifact.",
+      "expected_output": "A visually improved dashboard that preserves both interactions and content, uses a coherent product-specific direction, handles desktop and mobile layouts, and includes rendered verification evidence.",
+      "files": [
+        "evals/fixtures/tenant-dashboard.html"
+      ],
+      "assertions": [
+        "The revised HTML retains every portfolio metric, renewal row, recent activity item, and navigation destination from the fixture.",
+        "Changing the renewal period to 30 days hides the 46-day row, and changing it to 60 days shows that row again.",
+        "Activating New quote preserves an observable workflow-start behavior rather than becoming a decorative button.",
+        "Rendered desktop and mobile layouts remain usable without accidental horizontal overflow, clipped primary content, or unreadable data.",
+        "Every navigation destination remains reachable through visible controls at 390px and 320px widths rather than existing only in hidden DOM.",
+        "The design visibly supports a calm, precise, trustworthy high-density brokerage workflow and removes the fixture's generic purple-gradient styling.",
+        "Review notes identify the direction and only claim viewports or interactions that were actually inspected."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Explore three meaningfully different interface concepts for a TomoBroker administrator reviewing broker onboarding applications. The eventual feature will be implemented with Laravel Filament, so concepts must respect a dense table-and-actions workflow without being trapped by default Filament styling. Do not modify an application or choose a final direction. Produce standalone runnable HTML artifacts, a comparison gallery, concise concept tradeoffs, and a recommendation so I can inspect the options before deciding.",
+      "expected_output": "Three distinct, runnable admin concepts using the same realistic workflow and content, plus a working comparison gallery, clear tradeoffs, a recommendation, and no premature production implementation.",
+      "files": [],
+      "assertions": [
+        "The output includes exactly three runnable concept entry files plus a working comparison gallery that opens each concept.",
+        "Rendered desktop, tablet, and mobile concepts have no fixed or sticky controls overlapping content, checklists, or decision actions.",
+        "At desktop and mobile widths, every concept exposes a working search or filter interaction and a working row-selection or decision interaction.",
+        "At mobile width, primary review actions and the evidence needed to make the decision remain visibly reachable.",
+        "The three concepts differ materially in thesis, composition, hierarchy, density, typography, and interaction character rather than only color.",
+        "Every concept represents the same realistic broker-onboarding review workflow and comparable application data.",
+        "Each concept maps its table, filters, bulk or row actions, and detail inspector to supported Laravel Filament components and clearly identifies any custom view required.",
+        "Tradeoffs describe each concept's main strength and risk, provide a reasoned recommendation, and do not claim a final production choice.",
+        "Review notes only claim concepts, viewports, and interactions that were actually inspected."
+      ]
+    }
+  ]
+}
