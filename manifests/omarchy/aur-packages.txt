@@ -1,6 +1,7 @@
 # Curated packages installed from the AUR or another foreign source.
 blueferry-quickshell
 brave-bin
+claude-desktop
 dankcalendar-bin
 freedownloadmanager
 google-chrome

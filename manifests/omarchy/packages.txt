@@ -5,6 +5,7 @@ composer
 ghostty
 github-cli
 gitleaks
+gnome-keyring
 hermes-desktop
 nordvpn-bin
 omazed

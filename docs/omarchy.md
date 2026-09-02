@@ -57,6 +57,44 @@ The AI app's Codex usage widget starts a separate read-only Codex app-server pro
 
 Local usage charts can still work because they read local Codex and OMP session records. Do not re-authenticate solely because this widget shows `Initialize`.
 
+## Electron apps cannot reach the keyring
+
+Chromium selects its credential backend from `XDG_CURRENT_DESKTOP`. It does not recognise `Hyprland`, so Electron apps fall back to the `basic_text` backend and report encryption as unavailable even when gnome-keyring is running and unlocked. Claude Desktop reports this as `Your sign-in won't be saved on this device.`
+
+Confirm the cause before reinstalling or unlocking anything:
+
+```sh
+grep -i "safeStorage\|backend=" ~/.config/Claude/logs/main.log
+busctl --user list | grep org.freedesktop.secrets
+```
+
+`backend=basic_text` alongside a live `org.freedesktop.secrets` means desktop detection failed, not the keyring.
+
+Force the backend with a user desktop entry that shadows the packaged one:
+
+```sh
+mkdir -p ~/.local/share/applications
+sed 's|^Exec=claude-desktop |Exec=claude-desktop --password-store=gnome-libsecret |' \
+  /usr/share/applications/com.anthropic.Claude.desktop \
+  > ~/.local/share/applications/com.anthropic.Claude.desktop
+update-desktop-database ~/.local/share/applications
+```
+
+Quit the app and relaunch it from the launcher. A fixed session logs no `safeStorage` warnings.
+
+The override is regenerated rather than tracked in this repository because the packaged entry changes between releases and would silently go stale. After a Claude Desktop update, check for drift:
+
+```sh
+diff <(sed 's/ --password-store=gnome-libsecret//' ~/.local/share/applications/com.anthropic.Claude.desktop) \
+  /usr/share/applications/com.anthropic.Claude.desktop
+```
+
+Empty output means the override still matches upstream. Regenerate it if the diff is not empty.
+
+Omarchy updates do not affect this file. Omarchy writes only entries it owns into `~/.local/share/applications/`.
+
+Any Electron application on Hyprland can hit this. The same flag and the same override location apply.
+
 ## Universal Select All
 
 `SUPER + A` is defined in `~/.config/hypr/bindings.lua`:
