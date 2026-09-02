@@ -1,0 +1,21 @@
+{
+  "autohide": true,
+  "intelligentAutohide": false,
+  "showAppsButton": true,
+  "showTooltips": true,
+  "hoverEffect": "zoom",
+  "launchBounce": true,
+  "advancedTooltips": true,
+  "opacity": 0.8,
+  "shape": "theme",
+  "bgColor": "theme",
+  "itemSpacing": 8,
+  "minimizeMode": "off",
+  "clickToMinimize": false,
+  "showUrgentHint": true,
+  "urgentOnNotification": true,
+  "urgentSound": true,
+  "urgentSoundName": "bell",
+  "revealDelay": 160,
+  "tooltipDelay": 450
+}

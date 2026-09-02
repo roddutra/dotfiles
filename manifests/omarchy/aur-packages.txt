@@ -1,0 +1,16 @@
+# Curated packages installed from the AUR or another foreign source.
+blueferry-quickshell
+brave-bin
+dankcalendar-bin
+freedownloadmanager
+google-chrome
+grok-build
+hyprmoncfg
+hyprshell
+linear-bin
+openlogi-bin
+openwhispr-bin
+teams-for-linux
+trayscale
+zapzap
+zen-browser-bin

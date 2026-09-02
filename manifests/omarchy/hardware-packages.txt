@@ -1,0 +1,14 @@
+# Packages specific to the current AMD CPU and NVIDIA GPU desktop.
+amd-ucode
+nvidia-open-dkms
+nvidia-utils
+lib32-nvidia-utils
+libva-nvidia-driver
+glmark2
+lact
+lib32-gamemode
+lib32-mangohud
+mangohud
+ollama-cuda
+steam
+stress-ng

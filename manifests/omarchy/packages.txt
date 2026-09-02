@@ -1,0 +1,26 @@
+# Curated packages beyond the Omarchy defaults.
+1password
+1password-cli
+composer
+ghostty
+github-cli
+gitleaks
+hermes-desktop
+nordvpn-bin
+omazed
+openai-codex-desktop
+pandoc-cli
+php-gd
+php-pgsql
+php-sqlite
+podman
+rclone
+spotify
+spotifyd
+stow
+switcheroo
+t3code-bin
+tigervnc
+visual-studio-code-bin
+xdebug
+zed

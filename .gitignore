@@ -11,9 +11,9 @@
 .env
 .env.*
 !.env.example
-zsh/.zshrc
-zsh/.zshrc.local
-zsh/.zsh-secrets
+packages/macos/zsh/.zshrc
+packages/macos/zsh/.zshrc.local
+packages/macos/zsh/.zsh-secrets
 
 # Shell history that might accidentally get added
 .zsh_history
@@ -21,15 +21,15 @@ zsh/.zsh-secrets
 
 # Tmux
 # Ignore TPM-installed plugins (except our submodules)
-tmux/.config/tmux/plugins/*
-!tmux/.config/tmux/plugins/tpm
-!tmux/.config/tmux/plugins/catppuccin
+packages/common/tmux/.config/tmux/plugins/*
+!packages/common/tmux/.config/tmux/plugins/tpm
+!packages/common/tmux/.config/tmux/plugins/catppuccin
 # Tmux resurrect automatic saves
-tmux/.config/tmux/resurrect/
+packages/common/tmux/.config/tmux/resurrect/
 
 # Neovim
-nvim/.config/nvim/plugin/packer_compiled.lua
-nvim/.config/nvim/lazy-lock.json
+packages/*/nvim/.config/nvim/plugin/packer_compiled.lua
+packages/*/nvim/.config/nvim/lazy-lock.json
 
 # VSCode
 .vscode/*
@@ -58,27 +58,36 @@ __pycache__/
 venv/
 
 # Claude Code - ignore all files and directories except version-controlled configs
-claude/.claude/*
-!claude/.claude/agents/
-!claude/.claude/commands/
-!claude/.claude/hooks/
-!claude/.claude/skills/
-!claude/.claude/CLAUDE.md
+packages/common/claude/.claude/*
+!packages/common/claude/.claude/agents/
+!packages/common/claude/.claude/commands/
+!packages/common/claude/.claude/hooks/
+!packages/common/claude/.claude/skills/
+!packages/common/claude/.claude/CLAUDE.md
 .tmp/
 
 # Grok CLI - ignore everything except version-controlled config
-grok/.grok/*
-!grok/.grok/config.toml
-!grok/.grok/skills/
-!grok/.grok/agents/
+packages/common/grok/.grok/*
+!packages/common/grok/.grok/config.toml
+!packages/common/grok/.grok/skills/
+!packages/common/grok/.grok/agents/
 
 # herdr - skill and integration hook are installed/updated by the herdr binary
 # itself (`herdr --skill`, `herdr integration`) on each machine; tracking them
 # only causes conflicts between installs
-agents/.agents/skills/herdr/
-claude/.claude/skills/herdr
-claude/.claude/hooks/herdr-agent-state.sh
+packages/common/agents/.agents/skills/herdr/
+packages/common/claude/.claude/skills/herdr
+packages/common/claude/.claude/hooks/herdr-agent-state.sh
 
 # Oh My Pi - track only reviewed portable configuration
-omp/.omp/agent/*
-!omp/.omp/agent/config.yml
+packages/common/omp/.omp/agent/*
+!packages/common/omp/.omp/agent/config.yml
+
+# Omarchy generated, local, and downloaded state
+packages/omarchy/hypr/.config/hypr/*.bak.*
+packages/omarchy/hypr/.config/hypr/hyprmoncfg-monitors.lua
+packages/omarchy/hypr/.config/hypr/monitors.local.lua
+packages/omarchy/hypr/.config/hypr/omasettings*
+packages/omarchy/omarchy/.config/omarchy/plugins/
+packages/omarchy/omarchy/.config/omarchy/themes/
+packages/omarchy/omarchy/.config/omarchy/hass.json

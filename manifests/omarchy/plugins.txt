@@ -1,0 +1,10 @@
+# plugin-id|repository-url
+crmne.hyprmoncfg|https://github.com/crmne/omarchy-hyprmoncfg.git
+hass|https://github.com/konradk/hass.git
+io.github.thetrueferret.decent-workspaces|https://github.com/TheTrueFerret/omarchy-decent-workspaces.git
+io.weirdware.blueferry|https://github.com/erikwb/omarchy-blueferry.git
+jankeesvw.notification-center|https://github.com/jankeesvw/omarchy-notification-center.git
+lgse.sandman|https://github.com/lgse/sandman.git
+omadock|https://github.com/thepathless/omadock
+quickshell.spotify|https://github.com/stappmus/Omarchy-Spotify.git
+sh.lerd.glance|https://github.com/lerd-env/lerd-omarchy-glance.git

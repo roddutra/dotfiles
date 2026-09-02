@@ -1,0 +1,7 @@
+# Files and patterns excluded when the platform wrapper applies this package.
+
+# Copy MCP config into a project when needed.
+\.mcp\.json
+
+# Keep maintainer documentation inside the repository.
+README\.md

@@ -1,0 +1,63 @@
+providers:
+  webSearchOrder:
+    []
+modelRoles:
+  default: openai-codex/gpt-5.6-sol:high
+  smol: openai-codex/gpt-5.6-luna:high
+  plan: openai-codex/gpt-5.6-sol:xhigh
+  task: openai-codex/gpt-5.6-sol:high
+  designer: openai-codex/gpt-5.6-sol:high
+symbolPreset: unicode
+composer:
+  shape: box
+theme:
+  dark: titanium
+  light: light
+setupVersion: 2
+statusLine:
+  preset: default
+  compactThinkingLevel: false
+  showHookStatus: true
+  separator: slash
+  sessionAccent: true
+  transparent: false
+  contextLine: annotated
+task:
+  showResolvedModelBadge: true
+  eager: default
+  enableEffort: true
+  maxRecursionDepth: 2
+  maxEffort: xhigh
+steeringMode: all
+followUpMode: all
+interruptMode: wait
+tools:
+  approvalMode: yolo
+memory:
+  backend: mnemopi
+mnemopi:
+  llmMode: none
+read:
+  renderMarkdown: true
+dev:
+  autoqaConsent: denied
+edit:
+  mode: hashline
+checkpoint:
+  enabled: true
+github:
+  enabled: true
+security:
+  enabled: true
+cycleOrder:
+  - slow
+  - smol
+  - default
+compaction:
+  methodOrder:
+    - remote
+    - handoff
+    - soft
+    - shake
+    - snapcompact
+  handoffSaveToDisk: true

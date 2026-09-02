@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+manifest_root="$repo_root/manifests/omarchy"
+dry_run=false
+include_hardware=false
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/bootstrap-omarchy [--dry-run] [--hardware]
+
+Install curated Omarchy packages, plugins, and the saved theme.
+
+  --dry-run   Print commands without running them.
+  --hardware  Include packages specific to this desktop's AMD CPU and NVIDIA GPU.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --dry-run) dry_run=true ;;
+    --hardware) include_hardware=true ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if ! command -v omarchy >/dev/null 2>&1; then
+  echo "This script must run on Omarchy." >&2
+  exit 1
+fi
+
+run() {
+  if $dry_run; then
+    printf '  '
+    printf '%q ' "$@"
+    printf '\n'
+  else
+    "$@"
+  fi
+}
+
+read_manifest() {
+  local file=$1
+  local -n destination=$2
+  local line
+
+  destination=()
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ -z $line || $line == \#* ]] && continue
+    destination+=("$line")
+  done < "$file"
+}
+
+install_packages() {
+  local command_group=$1
+  local manifest=$2
+  local packages=()
+
+  read_manifest "$manifest" packages
+  ((${#packages[@]})) || return
+
+  if [[ $command_group == repo ]]; then
+    run omarchy pkg add "${packages[@]}"
+  else
+    run omarchy pkg aur add "${packages[@]}"
+  fi
+}
+
+echo "Installing repository packages..."
+install_packages repo "$manifest_root/packages.txt"
+
+echo "Installing AUR packages..."
+install_packages aur "$manifest_root/aur-packages.txt"
+
+if $include_hardware; then
+  echo "Installing this desktop's hardware packages..."
+  install_packages repo "$manifest_root/hardware-packages.txt"
+fi
+
+echo "Restoring Omarchy plugins..."
+while IFS='|' read -r plugin_id plugin_url || [[ -n ${plugin_id:-} ]]; do
+  [[ -z ${plugin_id:-} || $plugin_id == \#* ]] && continue
+  if [[ -d "$HOME/.config/omarchy/plugins/$plugin_id" ]]; then
+    echo "  $plugin_id already installed"
+  else
+    run omarchy plugin add "$plugin_url" --enable --yes
+  fi
+done < "$manifest_root/plugins.txt"
+
+theme_url=$(<"$manifest_root/theme.txt")
+if [[ -d "$HOME/.config/omarchy/themes/rose-pine-moon" ]]; then
+  echo "  Rose Pine Moon already installed"
+else
+  echo "Installing Rose Pine Moon..."
+  run omarchy theme install "$theme_url"
+fi
+
+echo "Omarchy bootstrap complete."

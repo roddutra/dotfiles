@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+dry_run=false
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/apply-dotfiles [--dry-run]
+
+Stow shared packages plus packages for the detected operating system.
+EOF
+}
+
+case "${1:-}" in
+  "") ;;
+  --dry-run) dry_run=true ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if (($# > 1)); then
+  usage >&2
+  exit 2
+fi
+
+if ! command -v stow >/dev/null 2>&1; then
+  echo "GNU Stow is required." >&2
+  exit 1
+fi
+
+common_packages=(
+  agents
+  claude
+  grok
+  omp
+  pnpm
+  tmux
+  zed
+)
+
+case "$(uname -s)" in
+  Darwin)
+    platform=macos
+    platform_packages=(ghostty karabiner nvim zsh)
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    platform=windows
+    platform_packages=(ohmyposh)
+    ;;
+  Linux)
+    if [[ -x /usr/bin/omarchy || -d /usr/share/omarchy ]]; then
+      platform=omarchy
+      platform_packages=(ghostty hypr nvim omarchy)
+    else
+      echo "Linux host is not an Omarchy installation. Refusing to apply platform packages." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Unsupported operating system: $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+
+stow_packages() {
+  local package_root=$1
+  shift
+  local args=(--dir "$package_root" --target "$HOME" --no-folding)
+
+  if $dry_run; then
+    args+=(--simulate --verbose=1)
+  fi
+
+  stow "${args[@]}" "$@"
+}
+
+echo "Applying common dotfiles..."
+stow_packages "$repo_root/packages/common" "${common_packages[@]}"
+
+echo "Applying $platform dotfiles..."
+stow_packages "$repo_root/packages/$platform" "${platform_packages[@]}"
+
+if $dry_run; then
+  echo "Dry run complete. No links were changed."
+else
+  echo "Dotfiles applied for $platform."
+fi

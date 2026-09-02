@@ -1,402 +1,179 @@
 # dotfiles
 
-My MacOS dotfiles, managed using [GNU Stow](https://www.gnu.org/software/stow/) to easily create symlinks from this repo's dotfiles in a new machine.
+Personal configuration for macOS, Omarchy, and Windows, managed with GNU Stow.
 
-## Overview
+## Layout
 
-This repository contains my personal configuration files (dotfiles) for various applications. It uses:
-- **GNU Stow** for symlink management - allowing easy installation/uninstallation of configs
-- **Git Submodules** for tracking external plugin repositories (e.g., tmux plugins)
-- **Homebrew Bundle** for consistent package installation across machines
-- **gitleaks** pre-commit hook to prevent accidental secret commits
-
-## Fresh MacOS installation steps
-
-1. Install XCode Command Line Tools:
-
-```shell
-xcode-select --install
+```text
+packages/
+├── common/     # Shared CLI, editor, and coding-agent configuration
+├── macos/      # macOS packages
+├── omarchy/    # Omarchy, Hyprland, and Linux-specific packages
+└── windows/    # Windows packages
+manifests/
+├── macos/      # Homebrew bundle
+└── omarchy/    # Curated packages, plugins, theme, and hardware profile
+docs/           # Notes that are never processed by Stow
+scripts/        # Platform-aware apply and bootstrap commands
 ```
 
-2. Install Homebrew:
+Each directory below a platform root is a normal Stow package. Its contents mirror paths below the home directory.
 
-```shell
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
+## Clone
 
-3. (Optional) Run the following `brew` command to install all packages from a previous setup:
+Keep the repository at `~/dotfiles` on every machine:
 
-```shell
-brew bundle install --file homebrew/Brewfile
-```
-> *Otherwise make sure to [install GNU Stow separately](#to-install-gnu-stow-only).*
-
-4. Clone this repository to your MacOS home directory (`~/`) **with submodules**:
-
-```shell
+```sh
 cd ~
 git clone --recurse-submodules https://github.com/roddutra/dotfiles.git
+cd dotfiles
 ```
 
-> **Important:** The `--recurse-submodules` flag ensures that git submodules (like tmux plugins) are automatically downloaded.
+Do not add machine-specific absolute home paths to tracked files. Use `~`, `$HOME`, or repository-relative paths.
 
-5. Run the setup script to configure the repository:
+## Apply dotfiles
 
-```shell
-cd ~/dotfiles
+Preview the links for the current platform:
+
+```sh
+./scripts/apply-dotfiles --dry-run
+```
+
+Apply them:
+
+```sh
+./scripts/apply-dotfiles
+```
+
+The wrapper always applies `packages/common/`, then exactly one platform root:
+
+- Darwin applies `packages/macos/`.
+- Omarchy applies `packages/omarchy/`.
+- Git Bash, MSYS, and Cygwin apply `packages/windows/`.
+- Other Linux distributions and unknown platforms are refused.
+
+The wrapper passes `--no-folding` so application-owned runtime directories remain real directories. Do not replace it with `stow */`; that can process documentation or packages for the wrong operating system.
+
+## Initial setup
+
+Run:
+
+```sh
 ./setup.sh
 ```
 
-This script creates local config files from templates (`.zshrc`, `.zsh-secrets`) and installs the gitleaks pre-commit hook.
+This creates local macOS Zsh files when needed, installs the gitleaks pre-commit hook, and applies the correct Stow packages.
 
-### To install GNU Stow only
+### macOS packages
 
-To install GNU Stow on a Mac using homebrew, run:
+Install Homebrew dependencies with:
 
-```shell
-brew install stow
+```sh
+brew bundle install --file manifests/macos/Brewfile
 ```
 
-## How GNU Stow Works
+Local files remain untracked:
 
-GNU Stow creates symlinks from this repository to your home directory, making it easy to manage dotfiles with version control.
+- `packages/macos/zsh/.zshrc`
+- `packages/macos/zsh/.zsh-secrets`
 
-### Directory Structure
+### Omarchy packages
 
-Each top-level directory in this repo represents an application's configuration:
+Restore curated packages, plugins, and the saved theme:
 
-```
-dotfiles/
-├── agents/
-│   └── .agents/            # Will be symlinked to ~/.agents/
-│       ├── AGENTS.md           # Shared global instructions for compatible agents
-│       ├── .skill-lock.json
-│       └── skills/         # Canonical copy of every shared agent skill (Codex, Pi, Claude Code, etc.)
-├── claude/
-│   └── .claude/            # Will be symlinked to ~/.claude/
-│       ├── CLAUDE.md           # Relative symlink to ../../agents/.agents/AGENTS.md
-│       └── skills/             # Claude-only skills as real dirs + relative symlinks into ../agents/.agents/skills/
-├── grok/
-│   └── .grok/              # Will be symlinked to ~/.grok/
-│       ├── config.toml     # Grok CLI config (points skills at ~/.agents/skills)
-│       └── skills/         # Grok-only skills (shared ones live in agents/)
-├── omp/
-│   └── .omp/
-│       └── agent/
-│           └── config.yml # Portable OMP settings; runtime and auth data stay local
-├── tmux/                   # The "package" name for stow
-│   ├── .tmux.conf         # Will be symlinked to ~/.tmux.conf
-│   └── .config/
-│       └── tmux/          # Will be symlinked to ~/.config/tmux/
-│           └── plugins/
-├── nvim/
-│   └── .config/
-│       └── nvim/          # Will be symlinked to ~/.config/nvim/
-│           └── lua/
-├── zsh/
-│   ├── .zshrc.template    # Template for .zshrc (version controlled)
-│   ├── .zshrc             # Local copy with tool configs (gitignored, symlinked to ~/.zshrc)
-│   ├── .zsh-settings      # Will be symlinked to ~/.zsh-settings (your config)
-│   └── .zsh-secrets       # Will be symlinked to ~/.zsh-secrets (gitignored)
-├── ghostty/
-│   └── .config/
-│       └── ghostty/       # Will be symlinked to ~/.config/ghostty/
-│           └── config
-└── zed/
-    └── .config/
-        └── zed/           # Will be symlinked to ~/.config/zed/
-            ├── settings.json
-            └── themes/
+```sh
+./scripts/bootstrap-omarchy
 ```
 
-When you run `stow tmux`, it creates symlinks in your home directory that mirror the structure inside the `tmux/` folder.
+On the workstation with the matching AMD CPU and NVIDIA GPU profile:
 
-### The repo lives at `~/dotfiles`
-
-Clone this repo to `~/dotfiles` on every machine. All commands in this repo assume that location, so they can be copy-pasted without edits, and `.stowrc` pins `--target=~` so `stow <package>` always links into your home directory no matter which directory you run it from.
-
-Even so, never write an absolute path to the repo or to a home directory (`/Users/...`, `/home/...`) into docs, scripts or config here: use `~/dotfiles`, `~`, `$HOME`, or paths relative to the repo root, and let stow's relative symlinks do the rest.
-
-## Backing up config files to this repo
-
-To add a new application's configuration:
-
-1. Create a folder in the root of this repo named after the application (e.g., `nvim`, `vim`, `alacritty`)
-2. Inside this folder, recreate the exact directory structure as it appears in your home directory
-3. Place the configuration files in their appropriate locations
-
-Example:
-```shell
-# If your config lives at ~/.config/nvim/
-mkdir -p nvim/.config/nvim/
-cp -r ~/.config/nvim/* nvim/.config/nvim/
+```sh
+./scripts/bootstrap-omarchy --hardware
 ```
 
-### Backing up Homebrew packages
+Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configuration ownership, exclusions, recovery notes, and verified lessons.
 
-To backup your Homebrew packages to this repo, use the custom `brew-dump` function included in the `.zshrc`:
+### Windows packages
 
-```shell
-brew-dump
+Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform wrapper can apply it from Git Bash, MSYS, or Cygwin when GNU Stow is available.
+
+## Package ownership
+
+### Common
+
+- `agents`
+- `claude`
+- `grok`
+- `omp`
+- `pnpm`
+- `tmux`
+- `zed`
+
+### macOS
+
+- `ghostty`
+- `karabiner`
+- `nvim`
+- `zsh`
+
+### Omarchy
+
+- `ghostty`
+- `hypr`
+- `nvim`
+- `omarchy`
+
+### Windows
+
+- `ohmyposh`
+
+Ghostty remains platform-specific because the macOS and Omarchy configurations differ in theme integration, font sizing, keybindings, shell integration, and toolkit settings.
+
+Zed settings synchronization alternatives are documented in `docs/zed-settings.md`. The current tracked-file behavior remains unchanged until an option is selected.
+
+## Add a configuration
+
+1. Choose `packages/common/`, `packages/macos/`, `packages/omarchy/`, or `packages/windows/`.
+2. Create an application package below that root.
+3. Reproduce the path relative to `$HOME` inside the package.
+4. Add the package name to the matching array in `scripts/apply-dotfiles`.
+5. Run the wrapper with `--dry-run`, then without it.
+
+Example for `~/.config/example/config.toml`:
+
+```text
+packages/common/example/.config/example/config.toml
 ```
 
-This custom function:
-- Dumps all Homebrew formulae, casks, and taps to `~/dotfiles/homebrew/Brewfile`
-- **Automatically excludes VSCode extensions** to keep the Brewfile clean
-- VSCode extensions should be managed through VSCode's built-in Settings Sync instead
+Use a package-level `.stow-local-ignore` for maintainer files inside a package. Keep general documentation under `docs/` instead.
 
-#### Why exclude VSCode extensions?
+## Sensitive and generated files
 
-When `brew bundle dump` runs on a system with VSCode installed, it includes all installed extensions as `vscode` entries. This can add 100+ lines to the Brewfile and creates several issues:
-- Makes the Brewfile unnecessarily large and hard to read
-- Forces the same VSCode setup on all users of these dotfiles
-- Duplicates functionality since VSCode has its own sync mechanism
+Do not track:
 
-#### Manual alternative (without the custom function):
+- Authentication data, API keys, or credentials
+- Shell secrets
+- Caches, logs, runtime state, or backups
+- Generated monitor output
+- Downloaded Omarchy plugins or themes restored by manifests
+- Machine-specific files that cannot safely load elsewhere
 
-```shell
-cd homebrew
-brew bundle dump --describe --force
-# Remove VSCode extensions
-sed -i '' '/^vscode /d' Brewfile
+The root `.gitignore` and package-level Stow ignores enforce known exclusions. Review every new file before committing it.
+
+## Submodules
+
+Tmux Plugin Manager and the Catppuccin Tmux theme are Git submodules. Initialize or repair them with:
+
+```sh
+git submodule update --init --recursive
 ```
 
-### ZSH Configuration Structure
+## Gitleaks
 
-The zsh configuration is split into three modular files to separate concerns and enable version control without polluting your curated settings:
+`setup.sh` installs a pre-commit hook that runs gitleaks when available. Install it before committing on a new machine:
 
-**How it works:**
-- **`.zshrc.template`** - Version-controlled clean loader (the source of truth). Copied to `.zshrc` by `setup.sh` on first run.
-- **`.zshrc`** - Local working copy (gitignored). Tools (NVM, pnpm, Herd, etc.) auto-append their configs here without polluting git history.
-- **`.zsh-settings`** - Your curated shell configuration (version controlled): Oh My Posh theme, Zinit plugins, aliases, custom functions, history settings, completion styling, etc.
-- **`.zsh-secrets`** - Sensitive environment variables (gitignored): API keys, tokens, passwords, etc.
-
-**Why this structure:**
-This allows you to version control your personalized shell setup while letting package managers work normally - they'll append to `.zshrc` as expected, but those auto-generated configs won't pollute your git history since `.zshrc` is gitignored. Your curated settings stay clean in `.zsh-settings`, and secrets remain safely gitignored in `.zsh-secrets`.
-
-### Managing Sensitive Environment Variables
-
-The zsh configuration supports a separate `.zsh-secrets` file for storing sensitive environment variables (API keys, tokens, passwords, etc.) that should never be committed to version control.
-
-#### How it works:
-
-- **`.zsh-secrets`**: Your actual file containing sensitive variables (gitignored, never committed)
-- **`.zsh-secrets.example`**: A template file showing what variables you can add (version controlled)
-- The main `.zshrc` file automatically sources `.zsh-secrets` if it exists
-
-#### Adding sensitive variables:
-
-1. Copy the example file to create your local file (or run `./setup.sh` which does this automatically):
-   ```shell
-   cd ~/dotfiles/zsh
-   cp .zsh-secrets.example .zsh-secrets
-   ```
-
-2. Edit `.zsh-secrets` and add your sensitive variables:
-   ```shell
-   export GITHUB_TOKEN="your_token_here"
-   export OPENAI_API_KEY="your_api_key_here"
-   ```
-
-3. The file is already symlinked if you've run `stow zsh`, or run it now:
-   ```shell
-   stow zsh
-   ```
-
-The `.zsh-secrets` file lives in your `dotfiles/zsh/` directory, gets symlinked to `~/.zsh-secrets` by stow, but is never committed to GitHub thanks to `.gitignore`.
-
-## Importing config files from this repo
-
-To setup the symlinks for each app in a new machine, make sure you have [GNU Stow installed](#to-install-gnu-stow-only) and run the following from `~/dotfiles`:
-
-```shell
-cd ~/dotfiles
-stow --no-folding {app_folder_name} # Eg. `stow --no-folding nvim`
+```sh
+brew install gitleaks
 ```
 
-### Install ALL configurations at once:
-```shell
-cd ~/dotfiles
-stow --no-folding */  # Stow all directories without linking writable runtime roots
-```
-
-### Install specific configurations:
-```shell
-cd ~/dotfiles
-stow --no-folding agents claude tmux nvim zsh ghostty zed omp  # Only stow the packages you want
-```
-
-### Remove/Uninstall configurations:
-To remove symlinks created by stow, use the `-D` (delete) flag:
-
-```shell
-# Remove all symlinks
-stow -D */
-
-# Remove specific app symlinks
-stow -D nvim
-```
-
-### Examples:
-- `stow zsh` will symlink `.zshrc`, `.zsh-settings`, and `.zsh-secrets` to the home directory (the `.zshrc.template` is excluded via `.stow-local-ignore`)
-- `stow ghostty` will symlink the `config` file to `~/.config/ghostty` as the config file is nested under `./ghostty/.config/ghostty`
-- `stow tmux` will symlink both `.tmux.conf` to `~/.tmux.conf` AND the plugins directory to `~/.config/tmux/plugins/`
-- `stow zed` will symlink Zed's settings and custom themes to `~/.config/zed/` on Linux and macOS.
-- `stow agents` will symlink `.agents` to `~/.agents`, including shared global instructions in `AGENTS.md` and skills read by Codex, Pi, and compatible agents.
-- `stow grok` will symlink `config.toml` into `~/.grok/`. Hooks are deliberately **not** tracked: Grok refuses to start its kernel sandbox (`--sandbox read-only`, used by the `grok-reviewer` skill) when `~/.grok/hooks/` contains symlinks, so `~/.grok/hooks/` must hold real files — `herdr integration` installs them. Grok rewrites `config.toml` in place when you change settings, which turns the symlink back into a plain file — run `cd ~/dotfiles && stow --adopt grok` afterwards to pull the change into the repo and relink.
-- `stow --no-folding omp` links only `config.yml`; authentication, sessions, memories, caches, generated extensions, and databases remain machine-local and gitignored.
-- `stow --no-folding */` will symlink ALL application configs at once
-
-### Agent skills: one source of truth
-
-Every skill that more than one agent uses lives **once**, in `agents/.agents/skills/`. Claude Code sees a shared skill through a *relative* symlink in `claude/.claude/skills/` (e.g. `frontend-design -> ../../../agents/.agents/skills/frontend-design`). Git tracks these symlinks and stow links to them as files, so the chain resolves inside the repo no matter where the repo is cloned; `stow claude` works even if `stow agents` was never run. Shared skills are written harness-agnostically ("your harness's subagent mechanism", "run as a background task") with Claude Code specifics only as parenthetical examples, so Codex, Grok, Pi, etc. can follow them unchanged. Skills that only make sense for Claude Code are real directories in `claude/.claude/skills/` and nowhere else.
-
-Global instructions live once in `agents/.agents/AGENTS.md`. `claude/.claude/CLAUDE.md` is a relative symlink to that file, so `stow claude agents` exposes the same instructions at `~/.claude/CLAUDE.md` and `~/.agents/AGENTS.md` on every machine.
-
-- Add a shared skill: put it in `agents/.agents/skills/<name>/` and, if Claude should see it, `ln -s ../../../agents/.agents/skills/<name> claude/.claude/skills/<name>`.
-- Add a Claude-only skill: create `claude/.claude/skills/<name>/` directly.
-- Add a Grok-only skill: create `grok/.grok/skills/<name>/` directly (same idea for any other agent package).
-- Never copy a skill into both packages; the copies drift.
-- Maintenance notes for humans (e.g. how the untracked `herdr` skill is installed) go in `agents/README.md`, never inside a skill directory: stow folds each skill into one directory symlink, so anything inside it is visible to agents. `agents/README.md` is excluded from stow via `agents/.stow-local-ignore`.
-- On a machine where `~/.claude/skills` already exists, stow links each skill individually, so skills installed by other tools (e.g. `npx skills add`) coexist with the stowed ones.
-
-### Setting up sensitive environment variables on a new machine:
-
-After running `./setup.sh` and `stow zsh`, you'll need to edit your `.zsh-secrets` file for sensitive environment variables:
-
-```shell
-# The setup.sh script already created .zsh-secrets from the template
-# Just edit it and add your sensitive variables
-cd ~/dotfiles/zsh
-# Edit .zsh-secrets (or ~/.zsh-secrets after running stow)
-
-# The file is already symlinked by stow, so changes take effect immediately
-```
-
-See the [Managing Sensitive Environment Variables](#managing-sensitive-environment-variables) section for more details.
-
-## Git Submodules
-
-This repository uses git submodules to track external plugin repositories. This allows us to:
-- Pin specific versions of plugins
-- Update plugins independently
-- Ensure consistent plugin versions across machines
-
-### Current Submodules:
-- **TPM (Tmux Plugin Manager)**: `tmux/.config/tmux/plugins/tpm`
-- **Catppuccin for tmux**: `tmux/.config/tmux/plugins/catppuccin`
-
-### Managing Submodules:
-
-```shell
-# Update all submodules to their latest versions
-git submodule update --remote --merge
-
-# If you forgot to clone with --recurse-submodules
-git submodule init
-git submodule update
-```
-
-## Tmux Setup
-
-The tmux configuration uses TPM (Tmux Plugin Manager) for plugin management. All plugins are consolidated in `~/.config/tmux/plugins/` for a clean, organized structure.
-
-### Configuration Details:
-- **Plugin Path**: The tmux.conf sets `TMUX_PLUGIN_MANAGER_PATH` to `~/.config/tmux/plugins/` to ensure all plugins install to the same location as our submodules
-- **No ~/.tmux directory**: Everything is kept under `~/.config/tmux/` following XDG base directory standards
-
-### After running `stow tmux`:
-
-1. Start tmux:
-   ```shell
-   tmux
-   ```
-
-2. Install TPM plugins (inside tmux):
-   - Press `Ctrl+Space` (prefix) then `Shift+I`
-   - TPM will automatically install all plugins listed in `.tmux.conf` to `~/.config/tmux/plugins/`
-
-### Included Plugins:
-- **TPM**: Plugin manager (included as submodule)
-- **Catppuccin**: Theme (included as submodule)
-- **tmux-sensible**: Sensible defaults
-- **tmux-resurrect**: Save/restore sessions
-- **tmux-continuum**: Automatic session saving
-- **vim-tmux-navigator**: Seamless navigation between vim and tmux panes
-- **tmux-yank**: Enhanced copy mode
-
-The first two are included as git submodules for reliability, while the others are automatically installed by TPM on first run.
-
-## Neovim Setup
-
-This configuration uses [LazyVim](https://www.lazyvim.org/) - a Neovim setup powered by lazy.nvim.
-
-### After running `stow nvim`:
-
-1. Start Neovim:
-   ```shell
-   nvim
-   ```
-   LazyVim will automatically install all plugins on first launch.
-
-2. **Seamless tmux/nvim navigation**: The configuration includes `vim-tmux-navigator` which allows you to use `Ctrl+h/j/k/l` to navigate between:
-   - Neovim splits
-   - Tmux panes
-   - From Neovim to tmux and vice versa seamlessly
-
-3. **Tmux integration from Neovim**: Custom keymaps are available to control tmux directly from within Neovim using the `<leader>t` prefix:
-   - `<leader>tw` - Choose/switch tmux windows (replaces `Ctrl+Space w`)
-   - `<leader>ts` - Choose/switch tmux sessions (replaces `Ctrl+Space s`)
-   - `<leader>tc` - Create new tmux window
-   - `<leader>tx` - Kill current tmux window
-   - `<leader>tn` - Next tmux window
-   - `<leader>tp` - Previous tmux window
-   - `<leader>tr` - Rename tmux window
-   - `<leader>td` - Detach from tmux session
-
-   These commands are also accessible via the which-key menu - press `<leader>` and look for the `t → Tmux` submenu.
-
-   **Why this exists**: When running Neovim inside tmux, the tmux prefix key (`Ctrl+Space`) doesn't work because Neovim intercepts the keystroke. These direct tmux commands bypass this limitation and provide seamless tmux control from within Neovim.
-
-### Note:
-The `lazy-lock.json` file is automatically generated by LazyVim and excluded from version control.
-
-## pnpm Supply-Chain Security
-
-The `pnpm/` folder is reference-only (not a stow target). It contains a hardened pnpm v10+ config that mitigates compromised npm package attacks, plus a template for applying the same protection per-project.
-
-See [`pnpm/README.md`](./pnpm/README.md) for setup commands, per-project template usage, and how to handle the common friction points.
-
-## Troubleshooting
-
-### Stow Conflicts
-If you get errors about existing files when running stow:
-```shell
-# Check what would be stowed
-stow -n -v tmux  # Dry run with verbose output
-
-# Force re-stow (will override existing symlinks)
-stow -R tmux
-```
-
-### Missing Submodules
-If plugin directories are empty:
-```shell
-git submodule init
-git submodule update
-```
-
-### Updating Everything
-```shell
-# Pull latest changes including submodules
-git pull --recurse-submodules
-
-# Update submodules to latest upstream versions
-git submodule update --remote --merge
-```
-
-## Notes
-
-- Once the symlinks are set for a given app, config files can be edited either in this repo's directory or in the target location as the symlinks are bi-directional
-- The `.gitignore` file is configured to exclude TPM-installed plugins (but keep the submodules)
-- Always use `--recurse-submodules` when cloning to ensure all plugins are available
+On Omarchy it is included in `manifests/omarchy/packages.txt`.

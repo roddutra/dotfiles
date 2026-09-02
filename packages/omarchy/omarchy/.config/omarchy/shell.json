@@ -1,0 +1,110 @@
+{
+  "bar": {
+    "centerAnchor": "omarchy.clock",
+    "layout": {
+      "center": [
+        {
+          "id": "omarchy.indicators"
+        },
+        {
+          "id": "omarchy.keyboard-layout"
+        },
+        {
+          "format": "ddd d MMM h:mm AP",
+          "id": "omarchy.clock"
+        },
+        {
+          "id": "omarchy.weather"
+        },
+        {
+          "id": "omarchy.system-update"
+        },
+        {
+          "id": "quickshell.spotify",
+          "deviceName": "Omarchy Spotify",
+          "idleShutdownMinutes": 15,
+          "showMiniPlayer": "On",
+          "shortcutPlayer": "Omarchy Music app",
+          "shortcutHints": "Off",
+          "showTrackTitle": "Off",
+          "showArtistName": "Off",
+          "scrollBarText": "Off",
+          "scrollSpeed": "0.25",
+          "maxBarTextWidth": "200",
+          "audioQuality": "320 kbps"
+        }
+      ],
+      "left": [
+        {
+          "id": "omarchy.menu"
+        },
+        {
+          "id": "io.github.thetrueferret.decent-workspaces",
+          "showEmpty": true,
+          "maxIcons": 3
+        }
+      ],
+      "right": [
+        {
+          "id": "omarchy.tray",
+          "pinned": [],
+          "hidden": []
+        },
+        {
+          "id": "io.weirdware.blueferry"
+        },
+        {
+          "id": "omarchy.tailscale"
+        },
+        {
+          "id": "sh.lerd.glance"
+        },
+        {
+          "id": "hass"
+        },
+        {
+          "id": "omarchy.agents"
+        },
+        {
+          "id": "omarchy.bluetooth"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "crmne.hyprmoncfg"
+        },
+        {
+          "id": "omarchy.monitor"
+        },
+        {
+          "id": "omarchy.power"
+        },
+        {
+          "id": "lgse.sandman"
+        },
+        {
+          "id": "omarchy.audio"
+        },
+        {
+          "id": "jankeesvw.notification-center"
+        }
+      ]
+    },
+    "position": "top",
+    "transparent": true
+  },
+  "idle": {
+    "lock": 604800,
+    "screensaver": 900
+  },
+  "plugins": [
+    {
+      "id": "omadock"
+    },
+    {
+      "id": "io.github.twiking.omasettings"
+    }
+  ],
+  "version": 1
+}
