@@ -198,6 +198,34 @@ Critically evaluate each finding before acting on it:
 3. **Push back when warranted** — note your objection with reasoning; communicate it in the follow-up so Grok can accept or counter-argue
 4. **Use your judgment** — you have context Grok may not (user goals, codebase history, project constraints)
 
+## Burden of Proof
+
+Asking a reviewer to find problems rewards it for finding something whether or not a defect exists. The scripts counter that pressure by injecting a fixed review standard into every round, so the reviewer is held to it even if a prompt forgets to say so.
+
+**Injected reviewer rules.** `run_review.py` passes it via `--rules` (system prompt) every round. You do not need to repeat these in your prompt, but your prompt must not contradict them (for example, do not ask for "all possible issues" or "a thorough list of concerns"). This is the text Grok receives, condensed:
+
+```
+REVIEW STANDARD (applies to every round):
+- Report only what is wrong. Do not report things in order to have something to report. Zero findings is a correct and expected result when the artifact meets its goals.
+- Every finding must cite (a) the exact requirement, goal, or invariant being violated and (b) the exact code or text that violates it, by file and line or quoted passage. If you cannot cite both, do not report it.
+- Classify each finding as CONFIRMED DEFECT, AMBIGUOUS REQUIREMENT, or OPTIONAL IMPROVEMENT. Findings with no evidence are dropped, not listed.
+- Give each finding a confidence (High, Medium, Low) and an impact (Blocking, Should fix, Nice to have). Blocking means the artifact fails its stated purpose, loses data, or is insecure. Style, naming, preferences, and hypothetical future requirements are never blocking.
+- Propose a fix only for a CONFIRMED DEFECT.
+- On follow-up rounds, re-check only what changed and whether prior findings are resolved. Do not widen scope to areas you already approved.
+- End every response with a verdict line: APPROVE, APPROVE WITH NOTES, or CHANGES REQUIRED.
+```
+
+The prompt templates below add the output format that goes with these rules. Give Grok the goals and constraints it needs to judge "requirement violated" against; without them it has nothing to cite and will either report nothing or fall back to preferences.
+
+**Invoker rules (how you use the output):**
+
+- Only `CONFIRMED DEFECT` findings with `Blocking` or `Should fix` impact drive changes. Verify them yourself before acting; a cited line that does not say what the reviewer claims is a rejected finding.
+- `AMBIGUOUS REQUIREMENT` findings are questions for the user, not code changes. Do not guess at a fix and send it back for another round.
+- `OPTIONAL IMPROVEMENT` findings go in your report to the user as a list. Apply them only if they are trivial and clearly in scope. They never trigger a re-review on their own.
+- Under `APPROVE WITH NOTES`, apply the notes and treat the review as complete. Re-review only if applying a note changed behaviour.
+- Low-confidence findings are not actionable without your own independent verification.
+- Watch the round count. If a round produces no confirmed defects, the loop is done regardless of how many optional items appear. If you are past round 3 and still receiving new `CONFIRMED DEFECT`s, stop and tell the user: either the artifact has real depth problems or the reviewer is generating work. Both are the user's call.
+
 ## Constructing the Review Prompt
 
 ### Context Bridging
@@ -224,9 +252,9 @@ Grok can read any path on the machine, so a wrong or external path is not fatal 
 
 Grok's response enters your context window. Always tell Grok how to shape its output — scale to the task:
 
-- **Large reviews**: "Be concise. Numbered findings with severity. 2-3 sentences each. Skip minor stylistic issues."
+- **Large reviews**: "Be concise. 2-3 sentences per finding. Skip style and naming."
 - **Focused reviews**: "Be thorough and detailed for this specific area."
-- **Follow-ups**: "One sentence per point. Accept or reject my reasoning."
+- **Follow-ups**: "One sentence per point. Accept or reject my reasoning, then give a verdict."
 
 ### Prompt Template — Initial Review
 
@@ -259,21 +287,29 @@ REVIEW FOCUS:
 Your recommendations should be appropriate given the background and goals above.
 
 OUTPUT INSTRUCTIONS:
-[Scale to the task — see "Controlling Grok's Output" above]
+[Scale to the task - see "Controlling Grok's Output" above]
+
+Report only what is wrong. Finding nothing is a correct result when the artifact meets its goals; do not invent findings to fill the list. Style, naming and hypothetical future needs are not defects.
 
 Provide your review in this format:
 
 ## Summary
-A 2-3 sentence overall assessment.
+2-3 sentences: does the artifact meet the goals above, and what is the single most important thing the author should know?
 
 ## Findings
-Numbered list. For each: what, why it matters, severity (Critical/Major/Minor/Suggestion).
+Numbered. Omit anything you cannot back with evidence. For each:
+- Violates: the exact requirement, goal or invariant (quote it)
+- Evidence: file and line, or quoted text, showing the violation
+- Class: CONFIRMED DEFECT | AMBIGUOUS REQUIREMENT | OPTIONAL IMPROVEMENT
+- Confidence: High | Medium | Low
+- Impact: Blocking | Should fix | Nice to have
+- Fix: concrete change (CONFIRMED DEFECT only)
 
-## Recommendations
-Specific, actionable.
+## Verdict
+APPROVE | APPROVE WITH NOTES | CHANGES REQUIRED, with one sentence of justification. Use CHANGES REQUIRED only when a Blocking CONFIRMED DEFECT exists.
 
 ## What Works Well
-Strong aspects to preserve.
+Strong aspects to preserve. One line each.
 ```
 
 ### Prompt Template — Follow-Up Round (via Resume)
@@ -295,10 +331,11 @@ FINDINGS NEEDING DISCUSSION:
 UPDATED ARTIFACT:
 [Tell Grok which files to re-read from disk. Never paste file contents here.]
 
-For each rejection: accept my reasoning, or explain why it's flawed.
-Review changes for: adequacy, new issues, remaining concerns.
+For each rejection: accept my reasoning, or show the evidence that it is wrong.
+Re-check only the changed areas and whether each accepted finding is resolved. Report a new finding only if it meets the same burden of proof as round 1 (requirement violated, evidence, class, confidence, impact). Do not widen scope to areas you already approved.
+End with a verdict: APPROVE, APPROVE WITH NOTES, or CHANGES REQUIRED.
 Do NOT modify any files. Text output only.
-Keep concise — one sentence per point.
+Keep concise - one sentence per point.
 ```
 
 ### Review-Type Tips
@@ -315,11 +352,11 @@ Keep concise — one sentence per point.
 
 ### Re-Review Is Mandatory — No Exceptions
 
-**Every time you apply changes based on Grok's findings, you MUST send those changes back to Grok for re-review.** This applies on round 1 and round 10. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent.
+**Every fix for a `CONFIRMED DEFECT` MUST go back to Grok for re-review.** This applies on round 1 and round 10. Implementations can introduce new bugs, miss edge cases, or misinterpret the finding's intent.
 
 **Watch for discipline erosion across rounds.** "These are minor changes, surely they're fine" is the most common failure mode. One line can introduce a bug.
 
-A review is not complete until Grok has reviewed the final state and explicitly confirmed there are no remaining issues. If you accepted findings and made changes, the next step is **always** a follow-up round — never presenting results to the user.
+A review is complete when Grok has seen the final state and returned `APPROVE`, or returned `APPROVE WITH NOTES` and you have applied the notes. A fix for a `CONFIRMED DEFECT` always goes back for re-review before you present results. Optional improvements and ambiguous-requirement questions do not reopen the loop (see Burden of Proof).
 
 ### Workflow
 
@@ -327,18 +364,19 @@ A review is not complete until Grok has reviewed the final state and explicitly 
 2. **Init** — `init_session.py --title <title>` (omit `--project` inside a git repo). Store the returned `session` path.
 3. **Write prompt** — pipe content to `write_prompt.py --session <s>`. Round auto-increments.
 4. **Run review** — `run_review.py --session <s>` as a background task. Read `output_file` when done.
-5. **Critically assess** each finding — accept, reject with reasoning, or flag for discussion
-6. **Apply changes** — modify the actual files for accepted findings
+5. **Triage** each finding per Burden of Proof: verify confirmed defects yourself, route ambiguous requirements to the user, list optional improvements
+6. **Apply changes** - fix verified confirmed defects in the actual files (and trivial in-scope notes)
 7. **Re-review (mandatory)** — pipe follow-up prompt to `write_prompt.py --session <s>`, then `run_review.py --session <s>` (auto-resumes)
-8. **Iterate** — repeat 5-7 until Grok explicitly confirms no remaining issues. The exit condition is Grok's confirmation, not your own judgment
+8. **Iterate** - repeat 5-7 until the verdict is `APPROVE`, or `APPROVE WITH NOTES` with notes applied. Past round 3 with new confirmed defects still arriving, stop and report to the user
 9. **Do NOT clean up** — never run cleanup unless the user explicitly asks
 
 ### Presenting Results to the User
 
-- **Summary** — what was reviewed, overall assessment
+- **Summary** - what was reviewed, Grok's final verdict, round count
 - **Findings accepted** — what you changed and why
 - **Findings rejected** — your reasoning for each
 - **Findings debated** — back-and-forth across rounds, final resolution
-- **Open questions** — unresolved items needing the user's input
+- **Optional improvements** - items the reviewer flagged as non-blocking that you did not apply
+- **Open questions** - ambiguous requirements and unresolved items needing the user's input
 
 Be transparent — don't silently incorporate or reject feedback. The user should see where you and Grok disagreed.

@@ -61,6 +61,15 @@ class GrokReviewerSandboxFallbackTest(unittest.TestCase):
         (root / "r1-prompt.md").write_text("Review the project without modifying files.\n")
         return session
 
+    def test_rules_flag_carries_review_standard(self):
+        module = load_reviewer()
+        cmd = module._build_cmd(
+            Path("r1-prompt.md"), Path("."), "uuid", False, None, None, False
+        )
+        rules = cmd[cmd.index("--rules") + 1]
+        self.assertIn("REVIEW STANDARD", rules)
+        self.assertIn("APPROVE WITH NOTES", rules)
+
     def test_recognizes_only_sandbox_bootstrap_failures(self):
         sandbox_error = process_result(
             returncode=1,

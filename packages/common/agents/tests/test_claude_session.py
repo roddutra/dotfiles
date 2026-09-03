@@ -63,6 +63,9 @@ class ClaudeCommandTest(unittest.TestCase):
         deny = command.index("--disallowedTools")
         self.assertIn("Write", command[deny + 1])
         self.assertIn("--append-system-prompt", command)
+        system_prompt = command[command.index("--append-system-prompt") + 1]
+        self.assertIn("REVIEW STANDARD", system_prompt)
+        self.assertIn("APPROVE WITH NOTES", system_prompt)
 
     def test_task_command_resumes_and_honors_overrides(self):
         values = metadata("task", started=True)

@@ -89,10 +89,20 @@ _DEFAULT_TIMEOUT = 1800
 # stream. stderr activity does not count.
 _DEFAULT_STALL = 300
 
+_REVIEW_STANDARD = """REVIEW STANDARD (applies to every round):
+- Report only what is wrong. Do not report things in order to have something to report. Zero findings is a correct and expected result when the artifact meets its goals.
+- Every finding must cite (a) the exact requirement, goal, or invariant being violated and (b) the exact code or text that violates it, by file and line or quoted passage. If you cannot cite both, do not report it.
+- Classify each finding as CONFIRMED DEFECT (evidence shows behaviour is wrong against a stated goal), AMBIGUOUS REQUIREMENT (artifact and goals disagree or the goal is unclear), or OPTIONAL IMPROVEMENT (would be better, nothing is wrong). Findings with no evidence are dropped, not listed.
+- Give each finding a confidence (High, Medium, Low) and an impact (Blocking, Should fix, Nice to have). Blocking means the artifact fails its stated purpose, loses data, or is insecure. Style, naming, preferences, and hypothetical future requirements are never blocking.
+- Propose a fix only for a CONFIRMED DEFECT.
+- On follow-up rounds, re-check only what changed and whether prior findings are resolved. Do not widen scope to areas you already approved. New findings must meet the same burden of proof.
+- End every response with a verdict line: APPROVE (no confirmed defects), APPROVE WITH NOTES (only non-blocking items; the author applies them and is then approved without another round), or CHANGES REQUIRED (at least one Blocking CONFIRMED DEFECT)."""
+
 _READ_ONLY_RULES = (
     "You are acting as a strictly read-only reviewer. Never create, modify, "
     "move, or delete files, and never run commands that change state. "
-    "Respond with analysis as text only."
+    "Respond with analysis as text only.\n\n"
+    + _REVIEW_STANDARD
 )
 
 # Absolute-path prefixes that commonly appear in prompts and indicate

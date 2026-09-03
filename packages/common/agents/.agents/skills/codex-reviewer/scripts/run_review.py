@@ -22,6 +22,7 @@ import re
 import select
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -37,6 +38,15 @@ _DEFAULT_TIMEOUT = 1800
 # this many seconds, it's almost certainly stuck — healthy runs emit
 # progress frequently. Override with --stall.
 _DEFAULT_STALL = 300
+
+_REVIEW_STANDARD = """REVIEW STANDARD (applies to every round):
+- Report only what is wrong. Do not report things in order to have something to report. Zero findings is a correct and expected result when the artifact meets its goals.
+- Every finding must cite (a) the exact requirement, goal, or invariant being violated and (b) the exact code or text that violates it, by file and line or quoted passage. If you cannot cite both, do not report it.
+- Classify each finding as CONFIRMED DEFECT (evidence shows behaviour is wrong against a stated goal), AMBIGUOUS REQUIREMENT (artifact and goals disagree or the goal is unclear), or OPTIONAL IMPROVEMENT (would be better, nothing is wrong). Findings with no evidence are dropped, not listed.
+- Give each finding a confidence (High, Medium, Low) and an impact (Blocking, Should fix, Nice to have). Blocking means the artifact fails its stated purpose, loses data, or is insecure. Style, naming, preferences, and hypothetical future requirements are never blocking.
+- Propose a fix only for a CONFIRMED DEFECT.
+- On follow-up rounds, re-check only what changed and whether prior findings are resolved. Do not widen scope to areas you already approved. New findings must meet the same burden of proof.
+- End every response with a verdict line: APPROVE (no confirmed defects), APPROVE WITH NOTES (only non-blocking items; the author applies them and is then approved without another round), or CHANGES REQUIRED (at least one Blocking CONFIRMED DEFECT)."""
 
 # Absolute-path prefixes that commonly appear in prompts and indicate
 # files outside the project directory.
@@ -339,7 +349,14 @@ def run_review(
     # os.read. Text-mode readline() on a pipe can block indefinitely on
     # a partial line (select sees bytes, readline waits for a newline that
     # never arrives), which would defeat the stall watchdog entirely.
-    with open(prompt_file) as stdin_file:
+    # Codex has no system-prompt flag, so the review standard is prepended
+    # to the prompt on stdin every round. The prompt file on disk is left
+    # untouched so the session history shows exactly what the invoker wrote.
+    stdin_file = tempfile.TemporaryFile(mode="w+")
+    stdin_file.write(_REVIEW_STANDARD + "\n\n" + prompt_file.read_text())
+    stdin_file.flush()
+    stdin_file.seek(0)
+    with stdin_file:
         process = subprocess.Popen(
             cmd,
             stdin=stdin_file,
