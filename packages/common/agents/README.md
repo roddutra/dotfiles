@@ -8,6 +8,23 @@ Skills that invoke the Claude Code CLI, including `claude-reviewer`, `delegate-t
 
 This maintainer file is excluded through `.stow-local-ignore`.
 
+## Third-party skills
+
+Do not copy third-party skills manually. Import them from this package directory with the `skills` CLI so `skills-lock.json` records the upstream source:
+
+```sh
+cd packages/common/agents
+npx skills add <source> --skill <name> --agent codex --yes
+```
+
+Update a tracked skill from the same directory:
+
+```sh
+npx skills update <name> --project --yes
+```
+
+Shared-agent installs belong in `.agents/skills/`. Remove agent-specific directories generated inside this package. Add links through the existing dedicated packages instead, such as `packages/common/claude/.claude/skills/` for Claude Code.
+
 ## Herdr
 
 The Herdr binary manages its skill and integration hooks. They remain untracked because updates rewrite them.

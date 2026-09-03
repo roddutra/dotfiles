@@ -4,3 +4,4 @@
 \.DS_Store
 # Maintainer notes, not part of any skill
 ^/README\.md$
+^/skills-lock\.json$
