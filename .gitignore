@@ -65,6 +65,7 @@ packages/common/claude/.claude/*
 !packages/common/claude/.claude/skills/
 !packages/common/claude/.claude/CLAUDE.md
 .tmp/
+.pr-media/
 
 # Grok CLI - ignore everything except version-controlled config
 packages/common/grok/.grok/*
