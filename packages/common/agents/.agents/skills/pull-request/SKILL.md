@@ -20,24 +20,20 @@ A bare "did X, changed Y" PR forces the reviewer to reconstruct intent from the 
 
 Not every PR needs visuals; applying them to a one-line config change is noise. Knowing *when* to add them is the core skill - see the decision guide.
 
-## How media gets into the PR (the mechanism)
+## How media gets into the PR
 
-Two facts make this fully headless:
+GitHub CLI uploads local images and videos directly to GitHub user attachments through the repeatable `--attach` flag. When the PR body references an attached local path, `gh` rewrites that reference in place to the uploaded URL. Attached files not referenced in the body are appended in flag order.
 
-- **Any public image URL renders inline** on GitHub via `![](url)`. So screenshots just need a host.
-- A recording is turned into an **animated GIF or WebP** (ffmpeg). That makes it an *image*, so it renders inline and autoplays from any host - sidestepping GitHub's rule that only its own `user-attachments` render as a `<video>` player. No browser upload, no drag-drop.
+This keeps the workflow headless without release assets, prerelease tags, or browser uploads. Mermaid needs no upload because GitHub renders it from a fenced block.
 
-The host is **GitHub release assets**: media is uploaded to a dedicated prerelease tag with the `gh` CLI (already authenticated), and the returned `.../releases/download/...` URL is embedded in the body. On a private repo those URLs stay behind GitHub auth, so internal UI screenshots aren't exposed to the public. Mermaid needs no host at all - GitHub renders it from a fenced block.
+## Dependencies
 
-## Dependencies (don't assume they're installed)
+**Minimum GitHub CLI version: 2.99.0.** Check `gh --version` before using this skill. Older versions do not support `--attach`; update them before opening a PR with media.
 
-This skill runs across different machines and CI, so check for tools before using them rather than assuming - and never silently install. What each path needs:
+- **`gh` 2.99.0 or later, authenticated** - required for every PR. Run `gh auth status` and ensure the account has write access to the repository. GitHub Enterprise Server does not support `--attach` as of this minimum version.
+- **A browser-automation or screen-capture tool** - required only when capturing screenshots or recordings. `agent-browser` is recommended, but Playwright, Puppeteer, a native screen recorder, or OS screenshot tools also work.
 
-- **`gh` (authenticated)** - required to open the PR and host assets. Needed by every PR. The bundled scripts check for it and print install + `gh auth login` guidance if it's missing.
-- **`ffmpeg`** - required *only* when converting a recording to a GIF/WebP. Text-only, Mermaid-only, and screenshot-only PRs don't need it. `scripts/webm-to-gif.sh` checks for ffmpeg first and, if absent, prints per-OS install instructions and exits without installing.
-- **A browser-automation / screen-capture tool** - only when capturing screenshots or recordings. `agent-browser` is the recommended option (see step 3), but any equivalent works - Playwright/Puppeteer, a headless-browser script, a native screen recorder, or OS screenshot tools. It's a convenience, not a dependency.
-
-When a required tool is missing, surface the printed guidance to the user and **ask permission before installing** (e.g. `brew install ffmpeg` on macOS, `sudo apt-get install -y ffmpeg` on Debian/Ubuntu, `winget install Gyan.FFmpeg` on Windows). If the user declines or you can't install, degrade gracefully: drop the visual that needed it (a recording becomes before/after screenshots, or a plain link to the clip) rather than blocking the PR.
+If `gh` is missing or older than 2.99.0, surface the version requirement and ask permission before installing or updating it. If it cannot be updated, omit the media or give the user its local path for manual upload. Do not create release assets as a fallback.
 
 ## Workflow
 
@@ -82,13 +78,9 @@ agent-browser skills get core            # screenshots + video recording workflo
 
 Any equivalent works just as well - Playwright/Puppeteer, a headless-browser script, or an OS screenshot tool. agent-browser is a convenience, not a requirement. Capture **before and after** the same screen at the same viewport when feasible - the contrast is what makes the change legible. After-only is fine for a net-new screen. Save into `.pr-media/` (next step) with descriptive names (`login-before.png`, `login-after.png`).
 
-**Recordings (complex changes).** Record the one flow the PR changes with any screen-recorder - keep it short and purposeful, not a tour. agent-browser (`record start/stop`, WebM out) is the recommended option, but a native screen recorder or any tool that emits a video file works too. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Then convert it to a compact inline asset:
+**Recordings (complex changes).** Record the one flow the PR changes with any screen recorder. Keep it short and purposeful, not a tour. agent-browser (`record start/stop`, WebM out) is recommended, but any tool that emits WebM, MP4, or MOV works. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Save the original recording in `.pr-media/`; `gh --attach` uploads supported videos directly and GitHub renders them as a player.
 
-```bash
-bash <this-skill>/scripts/webm-to-gif.sh .pr-media/checkout-flow.webm .pr-media/checkout-flow.webp
-```
-
-WebP is smaller; pass a `.gif` output name instead for maximum compatibility. The script wraps the ffmpeg palette/scale flags so you don't hand-tune them. If ffmpeg isn't installed it prints per-OS install instructions and exits (code 3) without installing - surface that to the user and ask before installing; if they decline, fall back to before/after screenshots or embed the raw clip as a link instead of blocking the PR.
+Keep upload limits in mind: images and GIFs are limited to 10 MB; videos are limited to 10 MB on GitHub Free and 100 MB on paid plans.
 
 ### 4. Stage media locally - and keep it out of git
 
@@ -99,22 +91,29 @@ grep -qxF '.pr-media/' .gitignore 2>/dev/null || echo '.pr-media/' >> .gitignore
 mkdir -p .pr-media
 ```
 
-Because media is served from GitHub release assets (next step), it never needs to live in the repo history - `.pr-media/` is scratch space, and gitignoring it is the safety net against a stray `git add -A`.
+`.pr-media/` is scratch space. Gitignoring it protects screenshots, recordings, and the temporary PR body from a stray `git add -A`.
 
-### 5. Publish image/GIF assets and get their URLs
+### 5. Reference media in the PR body
 
-Mermaid is already inline and needs nothing here. For every screenshot and converted clip, upload and collect the embeddable URL:
+Use the exact local path that will be passed to `--attach`. `gh` rewrites image references in place and preserves their Markdown alt text:
 
-```bash
-bash <this-skill>/scripts/publish-pr-media.sh .pr-media/login-before.png .pr-media/login-after.png
-# prints one https://github.com/<owner>/<repo>/releases/download/pr-assets/<branch>__<file> per input
+```markdown
+| Before | After |
+| --- | --- |
+| ![Login before the change](.pr-media/login-before.png) | ![Login after the change](.pr-media/login-after.png) |
 ```
 
-The script creates a dedicated `pr-assets` prerelease once (if missing), uploads each file namespaced by branch (so PRs don't collide), and prints the inline-ready URL. Re-running clobbers the same asset name, so it's safe to iterate. If you'd rather run it by hand, the equivalent is `gh release create pr-assets --prerelease` (once) then `gh release upload pr-assets <file> --clobber`, with the URL built as `https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/releases/download/pr-assets/<file>`.
+To place a video player at a specific point, put its reference alone in a paragraph:
+
+```markdown
+![](.pr-media/checkout-flow.webm)
+```
+
+An attached file not referenced in the body is appended at the end. Video attachments do not support alt text.
 
 ### 6. Assemble the PR body
 
-Use this structure. Sections that don't apply are omitted, not left empty. Write it to a file (`.pr-media/pr-body.md`) so the next step can use `--body-file` - that avoids shell-escaping a long body full of backticks and pipes.
+Use this structure. Sections that do not apply are omitted, not left empty. Write it to `.pr-media/pr-body.md` so the next step can use `--body-file` without shell-escaping a long body.
 
 ````markdown
 ## Summary
@@ -140,9 +139,9 @@ flowchart TD
 
 | Before | After |
 | --- | --- |
-| ![before](RELEASE_ASSET_URL) | ![after](RELEASE_ASSET_URL) |
+| ![Login before the change](.pr-media/login-before.png) | ![Login after the change](.pr-media/login-after.png) |
 
-![flow](RELEASE_ASSET_URL_FOR_GIF)   <!-- the converted recording, autoplays inline -->
+![](.pr-media/checkout-flow.webm)
 
 ## How to verify (optional)
 
@@ -155,30 +154,31 @@ flowchart TD
 
 Keep it proportional: a trivial PR is just **Summary** + a two-line **What changed and why it matters**; a large UX change earns the full treatment. Match the repo's existing PR conventions if it has any (`gh pr view <n>` on a recent merged PR). Plain hyphens, never em/en dashes. No filler openers or closers.
 
-### 7. Create the PR
+### 7. Create the PR and upload media
+
+Pass every referenced image and video through a separate `--attach` flag:
 
 ```bash
-gh pr create --base <base> --title "<title>" --body-file .pr-media/pr-body.md
+gh pr create \
+  --base <base> \
+  --title "<title>" \
+  --body-file .pr-media/pr-body.md \
+  --attach .pr-media/login-before.png \
+  --attach .pr-media/login-after.png \
+  --attach .pr-media/checkout-flow.webm
 ```
 
-Then confirm it rendered: `gh pr view --web` (or fetch the body) and check the diagram, images, and clip all display. If an image 404s, the asset name in the URL doesn't match what was uploaded - re-check step 5's output.
+For an image that is not referenced in the body, alt text can follow the path after `#`, for example `--attach '.pr-media/error.png#Login error state'`. A body reference takes its alt text from the Markdown instead.
 
-If `gh` release upload is unavailable in the environment, fall back gracefully: leave the media in `.pr-media/`, write the body with a short note listing which files map to which spot, and tell the user the exact paths so they can attach them manually.
+Then fetch the PR body or open `gh pr view --web` and confirm the diagram, images, and video render. If some uploads fail, `gh` can still create the PR with the successful attachments and exit non-zero. Capture the printed PR URL and inspect the created PR. To rewrite a failed local reference in place, fetch the current body to a temporary file, then pass that file and the missing attachment to `gh pr edit`.
 
 ## Quick reference
 
-| Change type | Visual | Host |
+| Change type | Visual | Delivery |
 | --- | --- | --- |
-| Logic / flow / algorithm | Mermaid diagram (before→after if replaced) | Inline, none needed |
-| UI / UX / frontend | Before/after screenshots | GitHub release asset |
-| Complex / interactive | Short recording → GIF/WebP | GitHub release asset |
+| Logic / flow / algorithm | Mermaid diagram (before→after if replaced) | Fenced block in body |
+| UI / UX / frontend | Before/after screenshots | `gh pr create --attach` |
+| Complex / interactive | Short WebM, MP4, or MOV recording | `gh pr create --attach` |
 | Trivial (docs/config/refactor) | None | - |
 
-Every PR gets **Summary** and **What changed and why it matters**. Visuals are additive and conditional. Media never enters git history - it's staged in gitignored `.pr-media/` and served from release assets.
-
-## Bundled scripts
-
-Both live in this skill's own directory - `~/.claude/skills/pull-request/scripts/` under Claude Code, `~/.agents/skills/pull-request/scripts/` under Codex. Invoke by that path (the `<this-skill>` in the examples above stands for the skill's directory).
-
-- `scripts/publish-pr-media.sh <file>...` - ensure the `pr-assets` prerelease exists, upload each file (namespaced by branch), print inline-ready URLs. Checks for authenticated `gh` and prints install/auth guidance if missing.
-- `scripts/webm-to-gif.sh <input.webm> [output.gif|.webp]` - convert a recording to a compact animated asset. Checks for ffmpeg and prints per-OS install guidance if missing. Env: `FPS` (default 12), `WIDTH` (default 960).
+Every PR gets **Summary** and **What changed and why it matters**. Visuals are additive and conditional. Media never enters git history; it stays in gitignored `.pr-media/` and is uploaded as a GitHub user attachment.
