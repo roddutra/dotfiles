@@ -58,6 +58,10 @@ o.bind("SUPER + A", "Universal select all", function()
   send_select_all(active_window_is_terminal() and "CTRL + SHIFT" or "CTRL")
 end)
 
+-- Use Handy transcription with LLM post-processing by default.
+o.bind("SUPER + H", "Handy post-processed transcription", "handy --toggle-post-process")
+o.bind("SUPER + SHIFT + H", "Handy transcription", "handy --toggle-transcription")
+
 -- Logitech MX Keys examples:
 -- o.bind("SUPER + SHIFT + S", nil, "omarchy-capture-screenshot")
 -- o.bind("SUPER + H", nil, "voxtype record toggle")

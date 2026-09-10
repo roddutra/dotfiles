@@ -37,6 +37,7 @@ fi
 
 common_packages=(
   agents
+  codex
   claude
   grok
   omp

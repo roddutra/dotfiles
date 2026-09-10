@@ -1,0 +1,260 @@
+<!doctype html>
+<!-- explain-change page template. Copy this file, inline assets/explainer.css into the
+     <style> block and assets/explainer.js into the <script> block, then replace the
+     bracketed content. Keep every id, class and data attribute shown here: the script
+     depends on them and the reader depends on every page looking the same.
+     For an index page keep sections 1, 2 and the findings/provenance blocks, replace the
+     rest with the .slices list (see the bottom of this file), and drop the learning check. -->
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[Spec and milestone, or change name]</title>
+<style>
+/* paste assets/explainer.css here, unchanged */
+</style>
+</head>
+<body data-snapshot="[snapshot id, e.g. 619c9ab6 or HEAD+diffhash]">
+<main class="page">
+
+<header>
+  <p class="eyebrow">Explainer, review artefact, not a durable doc</p>
+  <h1>[Spec and milestone, or change name]</h1>
+  <div class="callout first"><span class="label">Read this first</span>
+    <p>[What the change does for users, one sentence.] [The most consequential decision made without you, one sentence.] [What to do with this page, one sentence.]</p>
+  </div>
+  <dl class="meta">
+    <dt>Target</dt><dd>[PR #n / range / branch / uncommitted work]</dd>
+    <dt>Pinned snapshot</dt><dd><code>[sha or range]</code> [merge base <code>[sha]</code> for a branch or PR]</dd>
+    <dt>Surrounding code read at</dt><dd><code>[sha]</code> [in a detached worktree / current checkout]</dd>
+    <dt>Intent sources</dt><dd>[user instructions and approvals; spec path and sections; plan or run sheet; agent accounts]</dd>
+    <dt>Current-state guide</dt><dd>[guide path]</dd>
+    <dt>Reader</dt><dd>[fresh sub-agent / Codex, did not write the code]</dd>
+    <dt>Produced</dt><dd>[YYYY-MM-DD]</dd>
+  </dl>
+  <p class="persist" id="persist-status"></p>
+  <div class="legend">
+    <span><span class="pill pill-code">code inspected</span> read at the snapshot, cited</span>
+    <span><span class="pill pill-test">test inspected</span> a test asserts it, cited</span>
+    <span><span class="pill pill-exec">test executed</span> run, command and result recorded</span>
+    <span><span class="pill pill-infer">inferred</span> reasoning stated</span>
+    <span><span class="pill pill-unver">unverified</span> not checked</span>
+    <span><span class="pill pill-user">user decided</span> <span class="pill pill-prd">spec decided</span> <span class="pill pill-agent">agent decided</span> <span class="pill pill-pack">domain variant</span></span>
+  </div>
+  <!-- verdict class: is-ok (matches), is-warn (matches with deviations), is-bad (diverges), is-unknown (cannot determine) -->
+  <div class="verdict is-warn"><strong>Verdict: [matches intent, with noted deviations].</strong> [One paragraph.]</div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#deviations">Deviations and decisions</a></li>
+    <li><a href="#ledger">Intent ledger</a></li>
+    <li><a href="#remember">What to remember from the surrounding system</a></li>
+    <li><a href="#scenarios">Intuition through scenarios</a></li>
+    <li><a href="#walkthrough">Walkthrough</a></li>
+    <li><a href="#boundaries">Boundary checklist</a></li>
+    <!-- <li><a href="#microworld">Microworld</a></li> only when warranted -->
+    <li><a href="#check">Learning check</a></li>
+    <li><a href="#findings">Findings and follow-ups</a></li>
+    <li><a href="#provenance">Provenance</a></li>
+  </ol>
+</nav>
+
+<section id="deviations">
+  <h2>1. Deviations and decisions</h2>
+  <p>Consequential items first. Accept, reject or discuss each; reject and discuss land in the findings list.</p>
+  <h3>Deviations from intent</h3>
+  <!-- one card per item; data-item ids are stable and unique on the page.
+       Title: the decision as the end user would experience it, in plain words, no flag or class names.
+       Assume no prior knowledge: if a moving part needs a name, define it in the sentence that names it. -->
+  <article class="card is-deviation" data-item="dev-1" id="dev-1">
+    <h3>1. [What differs, said as behaviour a user or operator would notice]</h3>
+    <dl class="kv">
+      <dt>You asked for</dt><dd>[what the intent source asked for, in plain words] <span class="pill pill-prd">spec decided</span></dd>
+      <dt>What shipped</dt><dd>[what the software does instead, in plain words]</dd>
+      <dt>In practice</dt><dd>[A concrete moment, played out step by step: who does what, what the system does, what happens next. Two or three sentences.]</dd>
+      <dt>Users experience</dt><dd>[What the end user or operator sees, hears or waits for. One or two sentences.]</dd>
+      <dt>Why</dt><dd>[recorded reason, or "not recorded"]</dd>
+      <dt>Your options</dt><dd>
+        <ul class="options-list">
+          <li><strong>Keep it (shipped):</strong> [what users experience and what it costs]</li>
+          <li><strong>[Alternative A]:</strong> [what users would experience instead and what it costs]</li>
+          <li><strong>[Alternative B]:</strong> [same]</li>
+        </ul>
+      </dd>
+    </dl>
+    <p class="evidence-line">Evidence: <code>path/to/File.php:123</code> <span class="pill pill-code">code inspected</span>. Ask the agent for the code walk if you need it.</p>
+    <div class="controls">
+      <button type="button" data-choice="accept">Accept</button>
+      <button type="button" data-choice="reject">Reject</button>
+      <button type="button" data-choice="discuss">Discuss</button>
+      <span class="state"></span>
+    </div>
+  </article>
+  <h3>Decisions the intent left open</h3>
+  <article class="card is-decision" data-item="dec-1" id="dec-1">
+    <h3>1. [The choice, said as behaviour: "If X happens, the system does Y rather than Z"]</h3>
+    <dl class="kv">
+      <dt>Decided by</dt><dd><span class="pill pill-agent">agent decided</span> [why, if recorded]</dd>
+      <dt>In practice</dt><dd>[A concrete moment, played out step by step with named example inputs. Two or three sentences.]</dd>
+      <dt>Users experience</dt><dd>[What the end user or operator sees, hears or waits for.]</dd>
+      <dt>Your options</dt><dd>
+        <ul class="options-list">
+          <li><strong>Keep it (shipped):</strong> [what users experience and what it costs]</li>
+          <li><strong>[Alternative A]:</strong> [what users would experience instead and what it costs]</li>
+          <li><strong>[Alternative B]:</strong> [same]</li>
+        </ul>
+      </dd>
+    </dl>
+    <p class="evidence-line">Evidence: <code>path:line</code> <span class="pill pill-code">code inspected</span></p>
+    <div class="controls">
+      <button type="button" data-choice="accept">Accept</button>
+      <button type="button" data-choice="reject">Reject</button>
+      <button type="button" data-choice="discuss">Discuss</button>
+      <span class="state"></span>
+    </div>
+  </article>
+  <!-- unrequested additions use class="card is-unrequested" with the same rows and controls -->
+</section>
+
+<section id="ledger">
+  <h2>2. Intent ledger</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Requirement</th><th>Source</th><th>Status</th><th>Where it landed</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>[requirement in the source's words]</td><td><span class="pill pill-prd">spec</span></td><td>matched</td><td>[class or route]</td><td><code>path:line</code> <span class="pill pill-test">test inspected</span></td></tr>
+      <!-- status values: matched, changed, deferred, missing, unrequested -->
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="remember">
+  <h2>3. What to remember from the surrounding system</h2>
+  <div class="callout"><span class="label">[Canonical term]</span>[Three to six facts, each one callout, each linking the guide section that owns it.]</div>
+</section>
+
+<section id="scenarios">
+  <h2>4. Intuition through scenarios</h2>
+  <h3>[Scenario title: an actor does a thing]</h3>
+  <figure class="figure">
+    <div class="flow">
+      <div class="step is-human"><span class="who">User</span>[action with toy data]</div>
+      <div class="step"><span class="who">System</span>[what happens]</div>
+      <div class="step is-agent"><span class="who">Agent or worker</span>[what it does]</div>
+      <div class="step is-fail"><span class="who">Failure</span>[what goes wrong and what the code does about it]</div>
+    </div>
+    <figcaption>[One sentence.]</figcaption>
+  </figure>
+  <!-- other figure families: .lanes with .lane rows for parallel actors; .ui for a simplified screen; svg.diagram for data flow with example payloads -->
+</section>
+
+<section id="walkthrough">
+  <h2>5. Walkthrough</h2>
+  <h3>[Concept 1]</h3>
+  <p>[Explain in conceptual order, cite as you go.]</p>
+<pre><code>[short excerpt only where the shape matters]</code></pre>
+</section>
+
+<section id="boundaries">
+  <h2>6. Boundary checklist</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Boundary</th><th>What the code does</th><th>Decided by</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Domain variability</td><td>[universal or varies by region, product line, tenant or configuration; who owns the variant]</td><td><span class="pill pill-agent">agent decided</span></td><td><code>path:line</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="check">
+  <h2>7. Learning check</h2>
+  <p>Commit to an answer before revealing. Each answer separates what the code does from whether you wanted it.</p>
+  <article class="quiz" data-item="q-1" id="q-1">
+    <span class="kind">Scenario prediction</span>
+    <p class="prompt">[A concrete situation. What happens, and why?]</p>
+    <textarea placeholder="Your prediction"></textarea>
+    <button type="button" class="reveal">Reveal answer</button>
+    <div class="answer" hidden>
+      <span class="part">What happens</span><p>[the outcome in plain words, two or three sentences]</p>
+      <span class="part">What users experience</span><p>[what the end user or operator sees, hears or waits for]</p>
+      <span class="part">Why it matters</span><p>[the consequence, one sentence]</p>
+      <p class="evidence-line">Evidence: <code>path:line</code> <span class="pill pill-code">code inspected</span></p>
+      <span class="part">Is that what you intended?</span>
+      <div class="controls">
+        <button type="button" data-choice="accept">Accept</button>
+        <button type="button" data-choice="reject">Reject</button>
+        <button type="button" data-choice="discuss">Discuss</button>
+        <span class="state"></span>
+      </div>
+    </div>
+  </article>
+  <article class="quiz" data-item="q-2" id="q-2">
+    <span class="kind">Spec or agent?</span>
+    <p class="prompt">[A judgment call from section 1. Who decided it?]</p>
+    <ul class="options">
+      <li><button type="button" data-option="a" data-correct="false">The spec</button></li>
+      <li><button type="button" data-option="b" data-correct="true">The implementing agent, recorded in the run sheet</button></li>
+      <li><button type="button" data-option="c" data-correct="false">You, in review</button></li>
+      <li><button type="button" data-option="d" data-correct="false">Nobody; it is unrecorded</button></li>
+    </ul>
+    <div class="answer" hidden>
+      <span class="part">What happens</span><p>[who decided it and what that choice does in practice]</p>
+      <span class="part">Why it matters</span><p>[the consequence, one sentence]</p>
+      <p class="evidence-line">Evidence: <code>path:line</code></p>
+      <span class="part">Is that what you intended?</span>
+      <div class="controls">
+        <button type="button" data-choice="accept">Accept</button>
+        <button type="button" data-choice="reject">Reject</button>
+        <button type="button" data-choice="discuss">Discuss</button>
+        <span class="state"></span>
+      </div>
+    </div>
+  </article>
+  <!-- kinds: Scenario prediction, Spec or agent?, Variability. At most two multiple-choice per page. -->
+</section>
+
+<section id="findings" class="findings">
+  <h2>8. Findings and follow-ups</h2>
+  <h3>Your rejections and discussion items</h3>
+  <ul id="findings-list"></ul>
+  <div class="actions">
+    <button type="button" id="copy-findings">Copy as markdown</button>
+    <span class="status" id="copy-status"></span>
+  </div>
+  <textarea id="findings-text" readonly aria-label="Findings as markdown"></textarea>
+  <h3>Guide sections this change should have updated</h3>
+  <ul><li>[guide path and heading, why]</li></ul>
+  <h3>Unverified claims</h3>
+  <ul><li>[claim, what would verify it]</li></ul>
+</section>
+
+<footer class="provenance" id="provenance">
+  <h2>9. Provenance</h2>
+  <p>Snapshot <code>[sha]</code>. Files read: [count or list]. Tests executed: [commands and results, or "none"]. Not checked: [list]. Browser verification: [what was exercised]. Produced [date] by [reader].</p>
+</footer>
+
+<!-- Index page only: replace sections 3 to 7 with this and set the eyebrow to "Explainer set" -->
+<!--
+<section id="slices">
+  <h2>Slices, most consequential first</h2>
+  <ol class="slices">
+    <li>
+      <span class="rank">1 of N</span>
+      <h3><a href="[slice].html">[Slice title]</a></h3>
+      <div class="verdict is-warn">[One-line verdict.]</div>
+      <ul><li>[Top deviation or decision, one line, linking the card on the slice page]</li></ul>
+    </li>
+  </ol>
+</section>
+-->
+
+</main>
+<script>
+/* paste assets/explainer.js here, unchanged */
+</script>
+</body>
+</html>

@@ -31,20 +31,12 @@ require("default.hypr.toggles")
 -- Disable Omarchy's default window transparency.
 o.window(".*", { opacity = "1 override 1 override" })
 
-
-
-
-
-
 -- CS2's X11 client fills the monitor without requesting compositor fullscreen.
 hl.window_rule({
   name = "cs2-fullscreen",
   match = { class = "^cs2$" },
   fullscreen = true,
 })
-
-
-
 
 -- Load settings written by OmaSettings (omasettings:managed).
 require("hypr.omasettings")
