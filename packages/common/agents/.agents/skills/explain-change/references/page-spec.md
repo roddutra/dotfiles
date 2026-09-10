@@ -38,6 +38,7 @@ When the change was split into slices, `index.html` is the page the reader opens
 - Medium difficulty: answerable only with the substance of the change, never a gotcha.
 - Each answer has these parts: what happens (plain words), what users experience, why it matters, a muted evidence line, and a control asking "is that what you intended?" with accept, reject, or discuss. Reject and discuss feed the findings list.
 - Free-recall questions reveal a model answer for self-grading rather than being auto-graded.
+- The stylesheet is light by default with a dark palette under `data-theme="dark"`; the bundled script owns the toggle button (top right) and remembers the choice across pages. Do not add page-specific colours; use the tokens.
 - The bundled script handles persistence (`localStorage` keyed by snapshot id and page path, try/catch, status line in the header), the accept, reject and discuss controls with an optional note per item (shown once a choice is made, exported under the item in the markdown), reveal, the findings list, and copy as markdown with the textarea fallback. Accepted items appear in the export only when they carry a note. Use its ids and attributes exactly; do not reimplement any of it. Never rely on a download link.
 - No external requests: no CDN scripts, fonts, or fetches.
 

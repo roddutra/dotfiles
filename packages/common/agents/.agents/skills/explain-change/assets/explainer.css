@@ -1,5 +1,5 @@
 /* explain-change page stylesheet. Inline verbatim into every page; do not restyle.
-   Palette and type follow docs/visual/assets/visual.css. Light theme only. */
+   Light by default; the script toggles data-theme="dark" on <html> and remembers it. */
 :root {
   --brand-1: #2fc7b8; --brand-2: #1884b2; --brand-deep: #0d3b47;
   --tint: #e8f7f4; --tint-2: #ddeef4;
@@ -17,8 +17,25 @@
   --mono: ui-monospace, Menlo, Monaco, Consolas, monospace;
   --radius: 12px; --measure: 74ch;
 }
+:root[data-theme="dark"] {
+  --tint: #123a3a; --tint-2: #12303d;
+  --ink: #e8eff1; --ink-2: #c5d2d6; --ink-3: #93a3a8; --ink-4: #6f7f84;
+  --line: #24353a; --line-2: #31454b;
+  --bg: #0f1a1d; --bg-warm: #15242a; --card: #172a30;
+  --ok: #4cc48a; --ok-bg: #123527;
+  --warn: #e0a84a; --warn-bg: #3a2c12;
+  --bad: #e06868; --bad-bg: #3c1c1c;
+  --muted: #a6abc9; --muted-bg: #262a3d;
+  --human: #ea8a4f; --human-bg: #3b2416;
+  --pack: #d1b25a; --pack-bg: #352d14;
+  --agent: #b08ff0; --agent-bg: #2b2140;
+  --brand-2: #4fb3e0; --brand-deep: #0b2f38;
+}
 * { box-sizing: border-box; }
 html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+.theme-toggle { position: fixed; top: .75rem; right: .75rem; z-index: 10; font: inherit; font-size: .8rem; border: 1px solid var(--line-2); background: var(--card); color: var(--ink-2); border-radius: 999px; padding: .3em .9em; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.theme-toggle:hover { border-color: var(--ink-4); }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--sans); }
 a { color: var(--brand-2); }
 code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
@@ -56,6 +73,7 @@ p, ul, ol { max-width: var(--measure); }
 .pill-code { color: var(--ok); background: var(--ok-bg); }
 .pill-test { color: var(--brand-2); background: var(--tint-2); }
 .pill-exec { color: #fff; background: var(--ok); }
+:root[data-theme="dark"] .pill-exec { color: #0f1a1d; }
 .pill-infer { color: var(--warn); background: var(--warn-bg); }
 .pill-unver { color: var(--bad); background: var(--bad-bg); }
 .pill-prd { color: var(--brand-deep); background: var(--tint); }
@@ -88,6 +106,7 @@ p, ul, ol { max-width: var(--measure); }
 .controls button { font: inherit; font-size: .9rem; border: 1px solid var(--line-2); background: var(--card); color: var(--ink-2); border-radius: 999px; padding: .3em 1em; cursor: pointer; }
 .controls button:hover { border-color: var(--ink-4); }
 .controls button[aria-pressed="true"] { color: #fff; border-color: transparent; }
+:root[data-theme="dark"] .controls button[aria-pressed="true"] { color: #0f1a1d; }
 .controls button[data-choice="accept"][aria-pressed="true"] { background: var(--ok); }
 .controls button[data-choice="reject"][aria-pressed="true"] { background: var(--bad); }
 .controls button[data-choice="discuss"][aria-pressed="true"] { background: var(--warn); }

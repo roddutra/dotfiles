@@ -4,6 +4,29 @@
    optional .options buttons with data-correct; a .findings section with
    #findings-list, #findings-text, #copy-findings, #copy-status; and #persist-status. */
 (function () {
+  /* Theme: light by default, toggle to dark and back, remembered across pages */
+  var themeKey = 'explain-change:theme';
+  var root = document.documentElement;
+  function applyTheme(t) {
+    if (t === 'dark') root.setAttribute('data-theme', 'dark'); else root.removeAttribute('data-theme');
+    var b = document.getElementById('theme-toggle');
+    if (b) { b.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; b.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false'); }
+  }
+  var theme = 'light';
+  try { theme = localStorage.getItem(themeKey) === 'dark' ? 'dark' : 'light'; } catch (e) {}
+  var toggle = document.getElementById('theme-toggle');
+  if (!toggle) {
+    toggle = document.createElement('button');
+    toggle.type = 'button'; toggle.id = 'theme-toggle'; toggle.className = 'theme-toggle';
+    document.body.appendChild(toggle);
+  }
+  toggle.addEventListener('click', function () {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem(themeKey, theme); } catch (e) {}
+    applyTheme(theme);
+  });
+  applyTheme(theme);
+
   var snapshot = document.body.getAttribute('data-snapshot') || 'unknown';
   var key = 'explain-change:' + snapshot + ':' + location.pathname;
   var state = {};
