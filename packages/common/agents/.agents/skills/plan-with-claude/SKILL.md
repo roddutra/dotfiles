@@ -48,7 +48,7 @@ Then:
 1. Re-read this plan, referenced files, and relevant repository code. Convert every plan task into the harness's task or todo system.
 2. The main agent acts as project manager. It does not implement code. Delegate each implementation task to a fresh subagent with its plan section, paths, contracts, constraints, dependencies, and acceptance criteria.
 3. Review each subagent's real changes and verification. Iterate until each task matches the plan.
-4. For a large plan, run a focused Claude review after each milestone through claude-reviewer. Address every Critical and Major finding, then send the corrected code back to the same Claude session before starting the next milestone. For a small plan, one final Claude review is sufficient.
+4. For a large plan, run a focused Claude review after each milestone through claude-reviewer, in a fresh Claude session for each milestone. Address every Critical and Major finding, then send the corrected code back to that milestone's session for re-review before starting the next milestone. Never carry a session across milestones. For a small plan, one final Claude review is sufficient.
 5. After implementation, update project documentation where behavior changed. Update global agent instructions only for universally required context. Put topic-specific guidance in the project's on-demand skills.
 ```
 
@@ -93,10 +93,11 @@ After approval:
 6. Review every subagent's changed files and checks.
 7. For large work, use milestone review gates:
    - complete one milestone
-   - run a focused review through the existing `claude-reviewer` session
+   - run a focused review through a fresh `claude-reviewer` session, naming the milestone's changed files and goals in the prompt
    - address all Critical and Major findings
-   - re-review the corrected code
+   - re-review the corrected code in that same milestone session
    - proceed only after Claude confirms the final milestone state
+   - never carry a session across milestones: a resumed session accumulates every earlier prompt and finding, so Claude works with a polluted, noisy context that wastes tokens and degrades review quality
 8. For small work, run one final Claude code review and the same correction and re-review loop.
 9. Verify the actual end-to-end behavior after integration.
 10. Complete documentation and cleanup required by the plan.
@@ -111,6 +112,6 @@ Tell the user:
 - Claude's milestone or final review verdicts
 - accepted and rejected review findings
 - remaining items
-- the saved Claude review session path
+- the saved Claude review session paths
 
 Do not clean Claude session artifacts unless the user explicitly asks.
