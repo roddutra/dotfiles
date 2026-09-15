@@ -95,6 +95,22 @@ Omarchy updates do not affect this file. Omarchy writes only entries it owns int
 
 Any Electron application on Hyprland can hit this. The same flag and the same override location apply.
 
+## Type Portuguese accents
+
+`packages/omarchy/hypr/.config/hypr/input.lua` maps Right Ctrl as the Compose key. Tap each key in sequence rather than holding them together.
+
+| Character | Sequence |
+|---|---|
+| `é` | Right Ctrl, `'`, `e` |
+| `á` | Right Ctrl, `'`, `a` |
+| `ç` | Right Ctrl, `,`, `c` |
+| `ã` | Right Ctrl, `~`, `a` |
+| `õ` | Right Ctrl, `~`, `o` |
+| `ê` | Right Ctrl, `^`, `e` |
+| `à` | Right Ctrl, `` ` ``, `a` |
+
+Use Shift with the final letter for capitals. On a US keyboard, `~` is Shift plus backtick and `^` is Shift plus `6`.
+
 ## Universal Select All
 
 `SUPER + A` is defined in `~/.config/hypr/bindings.lua`:
