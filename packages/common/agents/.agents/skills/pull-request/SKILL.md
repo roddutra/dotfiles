@@ -1,6 +1,6 @@
 ---
 name: pull-request
-description: 'Compose and open GitHub pull requests with reviewer-friendly descriptions - a plain-language explanation of what changed and why it matters, plus diagrams, screenshots, or a short screen recording when the change warrants visual proof. For Claude Code and Codex. MUST load BEFORE opening any pull request: before `gh pr create`, before pushing a branch for review, or before invoking any PR-creation tool. Triggers when the user asks to open, create, raise, or submit a PR, or otherwise prepare a change for review.'
+description: 'MUST load for ANY pull request work, whether requested by the user or initiated by the agent. Load BEFORE drafting, writing, or editing a PR title or description; before `gh pr create`, `gh pr edit`, pushing a branch for review, or invoking any PR creation or update tool. Triggers on opening, creating, raising, submitting, updating, or preparing a GitHub PR, drafting a PR body, making a branch ready for review, or summarizing changes for reviewers. Do not draft a PR by hand without loading this skill. Produces reviewer-friendly explanations and appropriate diagrams, screenshots, or recordings.'
 ---
 
 # Pull Request
@@ -76,26 +76,26 @@ Only the ones step 1 flagged.
 agent-browser skills get core            # screenshots + video recording workflows
 ```
 
-Any equivalent works just as well - Playwright/Puppeteer, a headless-browser script, or an OS screenshot tool. agent-browser is a convenience, not a requirement. Capture **before and after** the same screen at the same viewport when feasible - the contrast is what makes the change legible. After-only is fine for a net-new screen. Save into `.pr-media/` (next step) with descriptive names (`login-before.png`, `login-after.png`).
+Any equivalent works just as well - Playwright/Puppeteer, a headless-browser script, or an OS screenshot tool. agent-browser is a convenience, not a requirement. Capture **before and after** the same screen at the same viewport when feasible - the contrast is what makes the change legible. After-only is fine for a net-new screen. Save files in the temporary media directory from the next step with descriptive names (`login-before.png`, `login-after.png`).
 
-**Recordings (complex changes).** Record the one flow the PR changes with any screen recorder. Keep it short and purposeful, not a tour. agent-browser (`record start/stop`, WebM out) is recommended, but any tool that emits WebM, MP4, or MOV works. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Save the original recording in `.pr-media/`; `gh --attach` uploads supported videos directly and GitHub renders them as a player.
+**Recordings (complex changes).** Record the one flow the PR changes with any screen recorder. Keep it short and purposeful, not a tour. agent-browser (`record start/stop`, WebM out) is recommended, but any tool that emits WebM, MP4, or MOV works. Optionally load the `video-inspector` skill afterward to confirm the clip caught the intended moments. Save the original recording in the temporary media directory; `gh --attach` uploads supported videos directly and GitHub renders them as a player.
 
 Keep upload limits in mind: images and GIFs are limited to 10 MB; videos are limited to 10 MB on GitHub Free and 100 MB on paid plans.
 
 ### 4. Stage media locally - and keep it out of git
 
-Screenshots and recordings are binaries that must never be committed. Stage them in `.pr-media/` and gitignore it **before** writing any files:
+Follow the project's instructions for temporary files and verification artifacts. Those instructions always override this default. When the project has no preference, make a best effort to stage PR media in `.pr-media/` at the repository root so the files remain associated with the project and are easy to find later. Media and temporary PR body files must not be committed.
 
 ```bash
-grep -qxF '.pr-media/' .gitignore 2>/dev/null || echo '.pr-media/' >> .gitignore
 mkdir -p .pr-media
+git check-ignore -q .pr-media/ || printf '%s\n' '.pr-media/' >> "$(git rev-parse --git-path info/exclude)"
 ```
 
-`.pr-media/` is scratch space. Gitignoring it protects screenshots, recordings, and the temporary PR body from a stray `git add -A`.
+The repository-local exclude prevents accidental commits without changing the tracked `.gitignore`. If the project requires another location, use it instead and apply its rules. These staging instructions are best effort; never override project guidance to enforce them.
 
 ### 5. Reference media in the PR body
 
-Use the exact local path that will be passed to `--attach`. `gh` rewrites image references in place and preserves their Markdown alt text:
+Use the exact local path that will be passed to `--attach`. The examples below use the default `.pr-media/`; replace it with the project-required location when applicable. `gh` rewrites image references in place and preserves their Markdown alt text:
 
 ```markdown
 | Before | After |
@@ -113,7 +113,7 @@ An attached file not referenced in the body is appended at the end. Video attach
 
 ### 6. Assemble the PR body
 
-Use this structure. Sections that do not apply are omitted, not left empty. Write it to `.pr-media/pr-body.md` so the next step can use `--body-file` without shell-escaping a long body.
+Use this structure. Sections that do not apply are omitted, not left empty. Write it to `.pr-media/pr-body.md`, or the project-required location, so the next step can use `--body-file` without shell-escaping a long body.
 
 ````markdown
 ## Summary
@@ -170,7 +170,7 @@ gh pr create \
 
 For an image that is not referenced in the body, alt text can follow the path after `#`, for example `--attach '.pr-media/error.png#Login error state'`. A body reference takes its alt text from the Markdown instead.
 
-Then fetch the PR body or open `gh pr view --web` and confirm the diagram, images, and video render. If some uploads fail, `gh` can still create the PR with the successful attachments and exit non-zero. Capture the printed PR URL and inspect the created PR. To rewrite a failed local reference in place, fetch the current body to a temporary file, then pass that file and the missing attachment to `gh pr edit`.
+Then fetch the PR body or open `gh pr view --web` and confirm the diagram, images, and video render. If some uploads fail, `gh` can still create the PR with the successful attachments and exit non-zero. Capture the printed PR URL and inspect the created PR. To rewrite a failed local reference in place, fetch the current body to the staging directory, then pass that file and the missing attachment to `gh pr edit`. Preserve the files until the final PR body and every attachment are verified, then remove them when project instructions permit.
 
 ## Quick reference
 
@@ -181,4 +181,4 @@ Then fetch the PR body or open `gh pr view --web` and confirm the diagram, image
 | Complex / interactive | Short WebM, MP4, or MOV recording | `gh pr create --attach` |
 | Trivial (docs/config/refactor) | None | - |
 
-Every PR gets **Summary** and **What changed and why it matters**. Visuals are additive and conditional. Media never enters git history; it stays in gitignored `.pr-media/` and is uploaded as a GitHub user attachment.
+Every PR gets **Summary** and **What changed and why it matters**. Visuals are additive and conditional. Media never enters git history; stage it in project-local scratch space by default, or the location required by project instructions, then upload it as a GitHub user attachment.
