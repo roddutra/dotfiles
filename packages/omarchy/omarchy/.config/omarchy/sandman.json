@@ -2,7 +2,7 @@
   "screensaver": 900,
   "display": 1800,
   "lock": 0,
-  "sleep": 0,
+  "sleep": 3600,
   "hibernate": 0,
   "lid": "system"
 }

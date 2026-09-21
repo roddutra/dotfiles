@@ -17,9 +17,6 @@
           "id": "omarchy.weather"
         },
         {
-          "id": "omarchy.system-update"
-        },
-        {
           "id": "io.github.kristoferlund.webcam",
           "device": "/dev/video0"
         },
@@ -29,13 +26,22 @@
           "idleShutdownMinutes": 15,
           "showMiniPlayer": "On",
           "shortcutPlayer": "Omarchy Music app",
-          "shortcutHints": "Off",
-          "showTrackTitle": "Off",
+          "shortcutHints": "On",
+          "showTrackTitle": "On",
           "showArtistName": "Off",
           "scrollBarText": "Off",
-          "scrollSpeed": "0.25",
-          "maxBarTextWidth": "200",
-          "audioQuality": "320 kbps"
+          "scrollSpeed": "1",
+          "maxBarTextWidth": "240",
+          "audioQuality": "320 kbps",
+          "showVinylRecord": "Off",
+          "showLyrics": "On",
+          "showPausedTrack": "On",
+          "fixedBarWidth": "Off",
+          "showArtwork": "On",
+          "clientId": ""
+        },
+        {
+          "id": "omarchy.system-update"
         }
       ],
       "left": [
@@ -53,56 +59,13 @@
           "id": "io.github.tyrichards.tray",
           "hidden": [],
           "order": [
-            "crmne.hyprmoncfg",
-            "omarchy.monitor",
             "1Password_status_icon_1",
             "dank-calendar",
             "NordVPN",
             "systray",
-            "io.weirdware.blueferry",
-            "sh.lerd.glance",
-            "omarchy.network",
-            "hass",
             "tray-icon tray app 47890-1"
           ],
-          "widgets": [
-            {
-              "entry": {
-                "id": "io.weirdware.blueferry"
-              },
-              "listed": true
-            },
-            {
-              "entry": {
-                "id": "sh.lerd.glance"
-              },
-              "listed": true
-            },
-            {
-              "entry": {
-                "id": "omarchy.monitor"
-              },
-              "listed": true
-            },
-            {
-              "entry": {
-                "id": "crmne.hyprmoncfg"
-              },
-              "listed": true
-            },
-            {
-              "entry": {
-                "id": "hass"
-              },
-              "listed": true
-            },
-            {
-              "entry": {
-                "id": "omarchy.network"
-              },
-              "listed": true
-            }
-          ]
+          "showTrayIcons": true
         },
         {
           "id": "omarchy.tailscale"
@@ -111,16 +74,34 @@
           "id": "omarchy.agents"
         },
         {
+          "id": "io.weirdware.blueferry"
+        },
+        {
+          "id": "omarchy.monitor"
+        },
+        {
+          "id": "crmne.hyprmoncfg"
+        },
+        {
+          "id": "sh.lerd.glance"
+        },
+        {
+          "id": "omarchy.network"
+        },
+        {
+          "id": "hass"
+        },
+        {
           "id": "omarchy.power"
         },
         {
           "id": "omarchy.bluetooth"
         },
         {
-          "id": "lgse.sandman"
+          "id": "omarchy.audio"
         },
         {
-          "id": "omarchy.audio"
+          "id": "lgse.sandman"
         },
         {
           "id": "jankeesvw.notification-center"
@@ -142,23 +123,15 @@
       "id": "io.github.twiking.omasettings"
     },
     {
-      "id": "io.weirdware.blueferry"
-    },
-    {
-      "id": "sh.lerd.glance"
-    },
-    {
-      "id": "omarchy.monitor"
-    },
-    {
-      "id": "crmne.hyprmoncfg"
-    },
-    {
-      "id": "hass"
-    },
-    {
-      "id": "omarchy.network"
+      "id": "io.github.sirjul1337.lock-explorer",
+      "design": "split"
     }
   ],
-  "version": 1
+  "version": 1,
+  "disabledPlugins": [
+    "omarchy.lock"
+  ],
+  "cloneSourceRestores": [
+    "io.github.sirjul1337.lock-explorer"
+  ]
 }
