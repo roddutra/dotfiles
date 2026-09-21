@@ -102,6 +102,7 @@ Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform 
 ### Common
 
 - `agents`
+- `ccstatusline`
 - `claude`
 - `grok`
 - `omp`
