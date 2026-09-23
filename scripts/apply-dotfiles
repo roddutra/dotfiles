@@ -47,6 +47,7 @@ common_packages=(
   zed
 )
 
+platform_folded_packages=()
 case "$(uname -s)" in
   Darwin)
     platform=macos
@@ -59,7 +60,8 @@ case "$(uname -s)" in
   Linux)
     if [[ -x /usr/bin/omarchy || -d /usr/share/omarchy ]]; then
       platform=omarchy
-      platform_packages=(bash ghostty hypr nvim omarchy starship voxtype)
+      platform_packages=(bash ghostty hypr nvim omarchy starship)
+      platform_folded_packages=(voxtype)
     else
       echo "Linux host is not an Omarchy installation. Refusing to apply platform packages." >&2
       exit 1
@@ -83,11 +85,27 @@ stow_packages() {
   stow "${args[@]}" "$@"
 }
 
+stow_folded_packages() {
+  local package_root=$1
+  shift
+  local args=(--dir "$package_root" --target "$HOME")
+
+  if $dry_run; then
+    args+=(--simulate --verbose=1)
+  fi
+
+  stow "${args[@]}" "$@"
+}
+
 echo "Applying common dotfiles..."
 stow_packages "$repo_root/packages/common" "${common_packages[@]}"
 
 echo "Applying $platform dotfiles..."
 stow_packages "$repo_root/packages/$platform" "${platform_packages[@]}"
+if ((${#platform_folded_packages[@]})); then
+  echo "Applying folded $platform dotfiles..."
+  stow_folded_packages "$repo_root/packages/$platform" "${platform_folded_packages[@]}"
+fi
 
 if $dry_run; then
   echo "Dry run complete. No links were changed."

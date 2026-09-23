@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def meaningful_lines(path: Path):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ConfigError(f"{path}: {error}") from error
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if line and not line.startswith("#"):
+            yield line_number, line
+
+
+def load_replacements(path: Path):
+    aliases = {}
+    replacement_terms = []
+
+    for line_number, line in meaningful_lines(path):
+        if "=>" not in line:
+            raise ConfigError(f"{path}:{line_number}: expected 'alias, alias => replacement'")
+
+        source, replacement = (part.strip() for part in line.split("=>", 1))
+        variants = [variant.strip() for variant in source.split(",")]
+
+        if not replacement:
+            raise ConfigError(f"{path}:{line_number}: replacement cannot be empty")
+        if not variants or any(not variant for variant in variants):
+            raise ConfigError(f"{path}:{line_number}: aliases cannot be empty")
+
+        for variant in variants:
+            key = variant.casefold()
+            existing = aliases.get(key)
+            if existing and existing[1] != replacement:
+                raise ConfigError(
+                    f"{path}:{line_number}: alias {variant!r} already maps to {existing[1]!r}"
+                )
+            aliases.setdefault(key, (variant, replacement))
+
+        replacement_terms.append(replacement)
+
+    return aliases, replacement_terms
+
+
+def load_dictionary(path: Path, replacement_terms):
+    entries = []
+    seen = set()
+
+    for entry in replacement_terms:
+        key = entry.casefold()
+        if key not in seen:
+            seen.add(key)
+            entries.append(entry)
+
+    for _, entry in meaningful_lines(path):
+        key = entry.casefold()
+        if key not in seen:
+            seen.add(key)
+            entries.append(entry)
+
+    return entries
+
+
+def bounded_pattern(alias: str):
+    prefix = r"(?<!\w)" if alias[0].isalnum() or alias[0] == "_" else ""
+    suffix = r"(?!\w)" if alias[-1].isalnum() or alias[-1] == "_" else ""
+    return prefix + re.escape(alias) + suffix
+
+
+def apply_replacements(transcript: str, aliases):
+    if not aliases:
+        return transcript
+
+    ordered = sorted(
+        (entry for entry in aliases.values()),
+        key=lambda entry: len(entry[0]),
+        reverse=True,
+    )
+    pattern = re.compile(
+        "|".join(bounded_pattern(alias) for alias, _ in ordered),
+        re.IGNORECASE,
+    )
+
+    return pattern.sub(lambda match: aliases[match.group(0).casefold()][1], transcript)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--replacements", type=Path, required=True)
+    parser.add_argument("--dictionary", type=Path, required=True)
+    args = parser.parse_args()
+
+    try:
+        aliases, replacement_terms = load_replacements(args.replacements)
+        dictionary = load_dictionary(args.dictionary, replacement_terms)
+        transcript = apply_replacements(sys.stdin.read(), aliases)
+    except ConfigError as error:
+        print(error, file=sys.stderr)
+        return 2
+
+    json.dump(
+        {"transcript": transcript, "dictionary": dictionary},
+        sys.stdout,
+        ensure_ascii=False,
+    )
+    print()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

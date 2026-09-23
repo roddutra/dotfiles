@@ -33,7 +33,7 @@ gpu_isolation = false
 eager_processing = false
 
 [output]
-mode = "type"
+mode = "paste"
 fallback_to_clipboard = true
 type_delay_ms = 1
 auto_submit = false
@@ -89,7 +89,7 @@ source = "mic"
 [status]
 icon_theme = "emoji"
 
-# Opt-in cloud cleanup. Raw Omarchy shortcuts do not use this profile.
+# Opt-in cloud cleanup profile used by the primary Hyprland shortcuts.
 [profiles.groq_cleanup]
 post_process_command = "~/.local/bin/voxtype-groq-cleanup"
 post_process_timeout_ms = 15000

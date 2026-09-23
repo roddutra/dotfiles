@@ -52,7 +52,7 @@ The wrapper always applies `packages/common/`, then exactly one platform root:
 - Git Bash, MSYS, and Cygwin apply `packages/windows/`.
 - Other Linux distributions and unknown platforms are refused.
 
-The wrapper passes `--no-folding` so application-owned runtime directories remain real directories. Do not replace it with `stow */`; that can process documentation or packages for the wrong operating system.
+The wrapper normally passes `--no-folding` so application-owned runtime directories remain real directories. Voxtype is the deliberate exception: its configuration directory is folded because Voxtype atomically replaces individual config files. Do not replace the wrapper with `stow */`; that can process documentation or packages for the wrong operating system.
 
 ## Initial setup
 
@@ -91,7 +91,7 @@ On the workstation with the matching AMD CPU and NVIDIA GPU profile:
 ./scripts/bootstrap-omarchy --hardware
 ```
 
-Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configuration ownership, exclusions, recovery notes, and verified lessons.
+Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configuration ownership, exclusions, recovery notes, and verified lessons. See `docs/voxtype.md` for the dictation pipeline, vocabulary files, secret storage, and restore procedure.
 
 ### Windows packages
 
@@ -123,6 +123,7 @@ Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform 
 - `hypr`
 - `nvim`
 - `omarchy`
+- `voxtype`
 
 ### Windows
 

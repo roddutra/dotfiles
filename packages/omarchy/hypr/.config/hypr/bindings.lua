@@ -58,11 +58,18 @@ o.bind("SUPER + A", "Universal select all", function()
   send_select_all(active_window_is_terminal() and "CTRL + SHIFT" or "CTRL")
 end)
 
--- Omarchy provides raw Voxtype dictation on SUPER+CTRL+X and F9.
--- These matching shortcuts opt into the Groq cleanup profile.
-o.bind("SUPER + CTRL + SHIFT + X", "Toggle dictation with Groq cleanup", "voxtype record toggle --profile groq_cleanup")
-o.bind("F10", "Start dictation with Groq cleanup (push-to-talk)", "voxtype record start --profile groq_cleanup")
-o.bind("F10", "Stop dictation with Groq cleanup (push-to-talk)", "voxtype record stop", { release = true })
+-- Omarchy assigns raw Voxtype dictation to SUPER+CTRL+X and F9 by default.
+-- Override them so the primary shortcuts use Groq cleanup.
+hl.unbind("SUPER + CTRL + X")
+hl.unbind("F9")
+o.bind("SUPER + CTRL + X", "Toggle dictation with Groq cleanup", "voxtype record toggle --profile groq_cleanup")
+o.bind("F9", "Start dictation with Groq cleanup (push-to-talk)", "voxtype record start --profile groq_cleanup")
+o.bind("F9", "Stop dictation with Groq cleanup (push-to-talk)", "voxtype record stop", { release = true })
+
+-- Keep raw dictation available on the secondary shortcuts.
+o.bind("SUPER + CTRL + SHIFT + X", "Toggle raw dictation", "voxtype record toggle")
+o.bind("F10", "Start raw dictation (push-to-talk)", "voxtype record start")
+o.bind("F10", "Stop raw dictation (push-to-talk)", "voxtype record stop", { release = true })
 
 -- Logitech MX Keys examples:
 -- o.bind("SUPER + SHIFT + S", nil, "omarchy-capture-screenshot")

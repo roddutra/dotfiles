@@ -1,0 +1,36 @@
+# One preferred word, name, technical term, domain, or common phrase per line.
+# Entries guide Groq when context suggests a transcription error.
+# They are never inserted unless supported by the transcript.
+
+Altus Sea
+Altus Sea Pty Ltd
+Cherie
+Claude
+CLAUDE.md
+Coconut Bowls
+Codex
+dotfiles
+Dutra
+Groq
+Joust
+Kimai
+LiveKit
+LLM
+LoanDolphin
+Lydian
+n8n
+Omarchy
+OpenClaw
+PRD
+Procore
+R2MD
+SOUL.md
+TomoBroker
+tomobroker.com
+tomobroker.com.au
+True Fitout
+VoiceInk
+Voxtype
+Windmill
+worktree
+Xero

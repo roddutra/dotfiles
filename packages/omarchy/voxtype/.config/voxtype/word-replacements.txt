@@ -1,0 +1,22 @@
+# Format: comma-separated aliases => exact replacement
+# Matching is case-insensitive and uses word boundaries.
+# Longer aliases take precedence. Replacements do not cascade.
+
+Altus C => Altus Sea
+can-ban => kanban
+coconut balls => coconut bowls
+Jast, Jost, JASU => Joust
+LifeKit => LiveKit
+Lone Dolphin => LoanDolphin
+OpenClause => OpenClaw
+Sheree, Shuri, Shere, Shri, Sherry => Cherie
+sole.md, sol.md => SOUL.md
+TermoBroker, Termo Broker, Turmoil Broker => TomoBroker
+WinMule, WindMule => Windmill
+work-tree => worktree
+
+# Variants observed in current Voxtype transcripts.
+Voice n k, Voice Ink, VOCENK => VoiceInk
+Vox Type, VOXTYP E => Voxtype
+Groc, Groc G R O Q => Groq
+Omarji, Oh Marky, Oh Marchy => Omarchy

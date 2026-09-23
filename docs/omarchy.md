@@ -32,6 +32,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `hypr/` contains personal Hyprland overrides.
 - `nvim/` contains the Linux-specific Neovim override.
 - `omarchy/` contains selected shell and plugin preference files.
+- `voxtype/` contains managed dictation configuration, vocabulary, and Groq cleanup commands. See `docs/voxtype.md`.
 
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.
 
