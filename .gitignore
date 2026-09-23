@@ -92,3 +92,4 @@ packages/omarchy/hypr/.config/hypr/omasettings*
 packages/omarchy/omarchy/.config/omarchy/plugins/
 packages/omarchy/omarchy/.config/omarchy/themes/
 packages/omarchy/omarchy/.config/omarchy/hass.json
+packages/omarchy/voxtype/.config/voxtype/secrets/

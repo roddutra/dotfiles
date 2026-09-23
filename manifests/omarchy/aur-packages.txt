@@ -1,5 +1,4 @@
 # Curated packages installed from the AUR or another foreign source.
-blueferry-quickshell
 brave-bin
 claude-desktop
 dankcalendar-bin
@@ -9,9 +8,8 @@ grok-build
 hyprmoncfg
 hyprshell
 linear-bin
-openlogi-bin
-openwhispr-bin
 teams-for-linux
 trayscale
+voxtype-bin
 zapzap
 zen-browser-bin

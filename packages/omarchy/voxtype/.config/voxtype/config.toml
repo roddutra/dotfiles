@@ -1,0 +1,95 @@
+# Voxtype configuration managed by ~/dotfiles.
+state_file = "auto"
+engine = "parakeet"
+
+[hotkey]
+# Omarchy owns the global shortcuts, so Voxtype does not grab evdev input.
+enabled = false
+key = "HOME"
+mode = "push_to_talk"
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 300
+pause_media = true
+duck_media = false
+duck_media_volume_percent = 34
+duck_media_fade_ms = 150
+
+[audio.feedback]
+enabled = true
+theme = "default"
+volume = 0.7
+
+[whisper]
+model = "large-v3-turbo"
+language = "en"
+translate = false
+mode = "local"
+flash_attention = false
+on_demand_loading = true
+gpu_isolation = false
+eager_processing = false
+
+[output]
+mode = "type"
+fallback_to_clipboard = true
+type_delay_ms = 1
+auto_submit = false
+shift_enter_newlines = true
+pre_type_delay_ms = 0
+append_text = " "
+
+[output.notification]
+on_recording_start = false
+on_recording_stop = true
+on_transcription = true
+show_engine_icon = true
+
+[parakeet]
+model = "parakeet-tdt-0.6b-v3-int8"
+on_demand_loading = true
+streaming = false
+
+[osd]
+enabled = true
+frontend = "gtk4"
+style = "default"
+palette = "omarchy"
+layout = "compact"
+position = "bottom-center"
+width_px = 400
+height_px = 48
+margin_px = 24
+top_margin = 0.85
+opacity = 0.8
+waveform_window_secs = 3.0
+peak_decay_db_per_sec = 6.0
+waveform_gain = 10.0
+
+[text]
+spoken_punctuation = false
+smart_auto_submit = false
+
+[vad]
+enabled = true
+backend = "auto"
+threshold = 0.5
+
+[meeting]
+enabled = false
+
+[meeting.diarization]
+enabled = false
+
+[meeting.audio]
+source = "mic"
+
+[status]
+icon_theme = "emoji"
+
+# Opt-in cloud cleanup. Raw Omarchy shortcuts do not use this profile.
+[profiles.groq_cleanup]
+post_process_command = "~/.local/bin/voxtype-groq-cleanup"
+post_process_timeout_ms = 15000

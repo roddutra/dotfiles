@@ -4,10 +4,10 @@
     "layout": {
       "center": [
         {
-          "id": "omarchy.indicators"
+          "id": "omarchy.keyboard-layout"
         },
         {
-          "id": "omarchy.keyboard-layout"
+          "id": "omarchy.indicators"
         },
         {
           "format": "ddd d MMM h:mm AP",
@@ -21,27 +21,32 @@
           "device": "/dev/video0"
         },
         {
-          "id": "quickshell.spotify",
-          "deviceName": "Omarchy Spotify",
-          "idleShutdownMinutes": 15,
-          "showMiniPlayer": "On",
-          "shortcutPlayer": "Omarchy Music app",
-          "shortcutHints": "On",
-          "showTrackTitle": "On",
-          "showArtistName": "Off",
-          "scrollBarText": "Off",
-          "scrollSpeed": "1",
-          "maxBarTextWidth": "240",
-          "audioQuality": "320 kbps",
-          "showVinylRecord": "Off",
-          "showLyrics": "On",
-          "showPausedTrack": "On",
-          "fixedBarWidth": "Off",
-          "showArtwork": "On",
-          "clientId": ""
+          "id": "omarchy.system-update"
         },
         {
-          "id": "omarchy.system-update"
+          "id": "io.github.jeremylanger.omaspotify",
+          "deviceName": "OmaSpotify",
+          "idleShutdownMinutes": 15,
+          "showMiniPlayer": "On",
+          "showVinylRecord": "Off",
+          "shortcutPlayer": "Mini player",
+          "shortcutHints": "On",
+          "showLyrics": "On",
+          "showArtwork": "On",
+          "showTrackTitle": "On",
+          "showArtistName": "On",
+          "showPausedTrack": "Off",
+          "scrollBarText": "On",
+          "scrollSpeed": "1",
+          "maxBarTextWidth": "200",
+          "fixedBarWidth": "Off",
+          "audioQuality": "320 kbps",
+          "normalizeVolume": "On",
+          "volumeLevel": "Normal",
+          "clientId": "",
+          "librarySort": "library",
+          "libraryView": "list",
+          "libraryFilter": "all"
         }
       ],
       "left": [

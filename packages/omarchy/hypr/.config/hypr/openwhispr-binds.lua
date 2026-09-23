@@ -1,2 +1,0 @@
--- OpenWhispr keybinds (managed automatically)
--- If you delete this file, also remove the matching load line from your Hyprland config.

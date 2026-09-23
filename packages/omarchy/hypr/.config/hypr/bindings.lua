@@ -58,11 +58,16 @@ o.bind("SUPER + A", "Universal select all", function()
   send_select_all(active_window_is_terminal() and "CTRL + SHIFT" or "CTRL")
 end)
 
--- Use Handy transcription with LLM post-processing by default.
-o.bind("SUPER + H", "Handy post-processed transcription", "handy --toggle-post-process")
-o.bind("SUPER + SHIFT + H", "Handy transcription", "handy --toggle-transcription")
+-- Omarchy provides raw Voxtype dictation on SUPER+CTRL+X and F9.
+-- These matching shortcuts opt into the Groq cleanup profile.
+o.bind("SUPER + CTRL + SHIFT + X", "Toggle dictation with Groq cleanup", "voxtype record toggle --profile groq_cleanup")
+o.bind("F10", "Start dictation with Groq cleanup (push-to-talk)", "voxtype record start --profile groq_cleanup")
+o.bind("F10", "Stop dictation with Groq cleanup (push-to-talk)", "voxtype record stop", { release = true })
 
 -- Logitech MX Keys examples:
 -- o.bind("SUPER + SHIFT + S", nil, "omarchy-capture-screenshot")
 -- o.bind("SUPER + H", nil, "voxtype record toggle")
 -- o.bind("SUPER + PERIOD", nil, "omarchy-shell shell toggle omarchy.emojis")
+
+hl.unbind("SUPER + SHIFT + M") -- previously: Music
+o.bind("SUPER + SHIFT + M", "OmaSpotify", "omarchy shell -q io.github.jeremylanger.omaspotify.player togglePlayer")
