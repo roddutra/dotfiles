@@ -73,10 +73,10 @@
           "showTrayIcons": true
         },
         {
-          "id": "omarchy.tailscale"
+          "id": "omarchy.agents"
         },
         {
-          "id": "omarchy.agents"
+          "id": "omarchy.tailscale"
         },
         {
           "id": "io.weirdware.blueferry"
