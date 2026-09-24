@@ -95,7 +95,7 @@ Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configur
 
 ### Windows packages
 
-Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform wrapper can apply it from Git Bash, MSYS, or Cygwin when GNU Stow is available.
+Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied on every platform. The platform wrapper can run from Git Bash, MSYS, or Cygwin when GNU Stow is available.
 
 ## Package ownership
 
@@ -105,6 +105,7 @@ Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform 
 - `ccstatusline`
 - `claude`
 - `grok`
+- `ohmyposh`
 - `omp`
 - `pnpm`
 - `tmux`
@@ -127,7 +128,7 @@ Oh My Posh configuration lives under `packages/windows/ohmyposh/`. The platform 
 
 ### Windows
 
-- `ohmyposh`
+No platform-specific packages yet; the common packages apply.
 
 Ghostty remains platform-specific because the macOS and Omarchy configurations differ in theme integration, font sizing, keybindings, shell integration, and toolkit settings.
 

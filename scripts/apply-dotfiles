@@ -41,6 +41,7 @@ common_packages=(
   codex
   claude
   grok
+  ohmyposh
   omp
   pnpm
   tmux
@@ -55,7 +56,7 @@ case "$(uname -s)" in
     ;;
   MINGW*|MSYS*|CYGWIN*)
     platform=windows
-    platform_packages=(ohmyposh)
+    platform_packages=()
     ;;
   Linux)
     if [[ -x /usr/bin/omarchy || -d /usr/share/omarchy ]]; then
@@ -100,8 +101,10 @@ stow_folded_packages() {
 echo "Applying common dotfiles..."
 stow_packages "$repo_root/packages/common" "${common_packages[@]}"
 
-echo "Applying $platform dotfiles..."
-stow_packages "$repo_root/packages/$platform" "${platform_packages[@]}"
+if ((${#platform_packages[@]} > 0)); then
+  echo "Applying $platform dotfiles..."
+  stow_packages "$repo_root/packages/$platform" "${platform_packages[@]}"
+fi
 if ((${#platform_folded_packages[@]})); then
   echo "Applying folded $platform dotfiles..."
   stow_folded_packages "$repo_root/packages/$platform" "${platform_folded_packages[@]}"
