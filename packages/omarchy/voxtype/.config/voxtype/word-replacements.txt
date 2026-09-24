@@ -20,3 +20,4 @@ Voice n k, Voice Ink, VOCENK => VoiceInk
 Vox Type, VOXTYP E => Voxtype
 Groc, Groc G R O Q => Groq
 Omarji, Oh Marky, Oh Marchy => Omarchy
+Umge => Nudge

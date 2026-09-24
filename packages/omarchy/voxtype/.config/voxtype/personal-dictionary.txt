@@ -19,6 +19,7 @@ LLM
 LoanDolphin
 Lydian
 n8n
+Nudge
 Omarchy
 OpenClaw
 PRD
