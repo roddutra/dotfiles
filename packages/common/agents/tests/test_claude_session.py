@@ -277,5 +277,155 @@ class SessionManagementTest(unittest.TestCase):
                 MODULE.HOME = old_home
 
 
+def control_response(request_id, response=None, error=None):
+    body = {"request_id": request_id, "subtype": "error" if error else "success"}
+    if error:
+        body["error"] = error
+    else:
+        body["response"] = response
+    return json.dumps({"type": "control_response", "response": body})
+
+
+class ModelListTest(unittest.TestCase):
+    def run_models(self, stdout):
+        output = io.StringIO()
+        with mock.patch.object(MODULE, "run_claude", return_value=(stdout, "", 0)) as run, contextlib.redirect_stdout(output):
+            MODULE.list_models(argparse.Namespace(timeout=60))
+        return run, json.loads(output.getvalue())
+
+    def test_reports_effective_default_and_compact_models(self):
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "system", "subtype": "hook_started"}),
+                control_response(
+                    "models",
+                    {
+                        "models": [
+                            {"value": "default", "resolvedModel": "claude-opus-5-5[1m]", "displayName": "Default"},
+                            {
+                                "value": "sonnet",
+                                "resolvedModel": "claude-sonnet-5",
+                                "displayName": "Sonnet",
+                                "description": "Sonnet 5",
+                                "supportedEffortLevels": ["low", "high"],
+                                "supportsFastMode": True,
+                            },
+                            {"value": "haiku", "resolvedModel": "claude-haiku-4-5-20251001"},
+                        ]
+                    },
+                ),
+                control_response(
+                    "settings",
+                    {"applied": {"model": "claude-sonnet-5", "effort": "high"}, "effective": {"hooks": {}}},
+                ),
+            ]
+        )
+        run, result = self.run_models(stdout)
+
+        command, requests = run.call_args.args[:2]
+        self.assertIn("--no-session-persistence", command)
+        self.assertEqual(
+            [json.loads(line)["request"]["subtype"] for line in requests.splitlines()],
+            ["initialize", "get_settings"],
+        )
+        self.assertEqual(result["default"], {"model": "claude-sonnet-5", "effort": "high"})
+        self.assertEqual(
+            result["models"],
+            [
+                {
+                    "value": "sonnet",
+                    "resolves_to": "claude-sonnet-5",
+                    "efforts": "low,high",
+                    "description": "Sonnet 5",
+                },
+                {"value": "haiku", "resolves_to": "claude-haiku-4-5-20251001"},
+            ],
+        )
+
+    def test_rejected_control_request_fails(self):
+        stdout = "\n".join(
+            [
+                control_response("models", {"models": []}),
+                control_response("settings", error="Unsupported control request subtype: get_settings"),
+            ]
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            self.run_models(stdout)
+        self.assertIn("get_settings", stderr.getvalue())
+
+
+class EffortValidationTest(unittest.TestCase):
+    CATALOG = (
+        [
+            {"value": "sonnet", "supportedEffortLevels": ["low", "high"]},
+            {"value": "fable", "supportedEffortLevels": ["high", "ultra"]},
+            {"value": "haiku"},
+        ],
+        {},
+    )
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.home = Path(self.temporary.name) / "home"
+        self.repo = Path(self.temporary.name) / "repo"
+        self.repo.mkdir()
+        init_git_repo(self.repo)
+        self.old_home = MODULE.HOME
+        MODULE.HOME = self.home
+
+    def tearDown(self):
+        MODULE.HOME = self.old_home
+        self.temporary.cleanup()
+
+    def init(self, effort):
+        args = argparse.Namespace(
+            kind="review", title="t", project=None, force_project=None, model=None, effort=effort
+        )
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(MODULE, "harness_state", return_value=self.CATALOG) as harness, mock.patch.object(
+            MODULE.Path, "cwd", return_value=self.repo
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                MODULE.init_session(args)
+            except SystemExit:
+                pass
+        return harness, stdout.getvalue(), stderr.getvalue()
+
+    def test_level_supported_by_any_model_is_accepted(self):
+        harness, stdout, _ = self.init("ultra")
+
+        harness.assert_called_once()
+        session = Path(json.loads(stdout)["session"])
+        self.assertEqual(json.loads(session.read_text())["effort"], "ultra")
+
+    def test_unsupported_level_is_rejected_before_session_is_created(self):
+        _, stdout, stderr = self.init("bogus")
+
+        self.assertEqual(stdout, "")
+        self.assertIn("low, high, ultra", stderr)
+        self.assertFalse(MODULE.session_base("review").exists())
+
+    def test_omitted_effort_skips_harness_query(self):
+        harness, stdout, _ = self.init(None)
+
+        harness.assert_not_called()
+        self.assertIn("session", json.loads(stdout))
+
+    def test_run_rejects_unsupported_override_before_invoking_claude(self):
+        session = self.home / "session.json"
+        self.home.mkdir()
+        session.write_text(json.dumps({**metadata(), "round": 1, "project_dir": str(self.repo)}))
+        (session.parent / "r1-prompt.md").write_text("Review this")
+        args = argparse.Namespace(
+            session=str(session), kind="review", effort="bogus", rerun=False, timeout=60, skip_verify=False
+        )
+        with mock.patch.object(MODULE, "harness_state", return_value=self.CATALOG), mock.patch.object(
+            MODULE, "run_claude"
+        ) as run, contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            MODULE.run_round(args)
+        run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

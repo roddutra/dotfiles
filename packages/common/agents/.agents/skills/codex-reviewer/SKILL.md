@@ -55,6 +55,14 @@ Returns JSON with `session` (the only value you need to track) and `project_dir`
 
 If neither flag is passed, Codex uses whatever the local CLI is configured with (typically `model` and `model_reasoning_effort` in `~/.codex/config.toml`).
 
+**Optional: check available models.** Supported models and effort levels vary by Codex CLI version. Before passing `--model` or `--reasoning-effort`, run this when you need to confirm a value is supported or find out what the default is:
+
+```bash
+python <skill-path>/scripts/list_models.py [--include-hidden]
+```
+
+It returns compact JSON: `default` (the effective model and effort `codex exec` uses for this project when no flags are passed) and `models` (each `id` with its supported `efforts`, `default_effort`, and a short description). It sends no prompt and costs no tokens. By default, hidden models are excluded. Codex may still accept them, so pass `--include-hidden` to list them too.
+
 ### Step 2: Write the Prompt File
 
 Pipe prompt content via stdin using a heredoc:

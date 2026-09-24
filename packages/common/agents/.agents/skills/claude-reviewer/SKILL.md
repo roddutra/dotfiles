@@ -45,7 +45,7 @@ Session files live under `~/.claude-reviews/<project>/<date>/<HHMMSS-title>/`:
 ### Step 1: Initialize a Session
 
 ```bash
-python <skill-path>/scripts/review.py init --title <review-title> [--project <name>] [--force-project <name>] [--model <name>] [--effort <low|medium|high|xhigh|max>]
+python <skill-path>/scripts/review.py init --title <review-title> [--project <name>] [--force-project <name>] [--model <name>] [--effort <level>]
 ```
 
 Track the returned `session` path. `project_dir` is informational.
@@ -59,6 +59,14 @@ Model and effort behavior:
 - `--effort` seeds the effort level and applies it to every round.
 - `review.py run --effort <level>` changes the effort for that successful round and later rounds.
 - Do not raise effort on your own. Change it only when the user asks, or after poor output when you have explained the cost and received permission.
+
+Optional: supported models and effort levels vary by Claude Code version. Before passing `--model` or `--effort`, run this when you need to confirm a value is supported or find out what the default is:
+
+```bash
+python <skill-path>/scripts/review.py models
+```
+
+It returns compact JSON: `default` (the effective model and effort Claude Code uses for this project when no flags are passed) and `models` (each `--model` `value`, the model ID it `resolves_to`, its supported `efforts`, and a short description). It sends no prompt and costs no tokens. Full model IDs, such as `claude-sonnet-5`, are also accepted even when they are not listed. The wrapper checks any `--effort` against the installed version and rejects unsupported levels.
 
 ### Step 2: Write the Prompt
 

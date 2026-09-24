@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 HOME = Path.home()
-VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 VERIFY_TIMEOUT = 900
 VERIFY_PASS_MAX_LINES = 12
 VERIFY_FAIL_MAX_LINES = 30
@@ -194,6 +193,7 @@ def unique_session_directory(kind: str, project: str, title: str, now: datetime)
 
 def init_session(args: argparse.Namespace) -> None:
     root = project_root(Path.cwd())
+    require_supported_effort(args.effort, root)
     ensure_tmp(root)
     derived_project = stable_project_name(root)
     project = slug(args.force_project) if args.force_project else derived_project
@@ -562,6 +562,7 @@ def run_round(args: argparse.Namespace) -> None:
         output_file = session.parent / f"r{round_number}-output.md"
         if output_file.exists() and not args.rerun:
             fail("round already has output; use --rerun to run it again")
+        require_supported_effort(args.effort, Path(metadata["project_dir"]))
 
         active_pid = metadata.get("active_pid")
         if active_pid and process_alive(int(active_pid)):
@@ -727,6 +728,95 @@ def cleanup(args: argparse.Namespace) -> None:
     print(json.dumps({"cleaned": str(directory)}))
 
 
+def harness_state(cwd: Path, timeout: int = 60) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return the installed Claude Code's model catalog and applied settings.
+
+    Uses the stream-json control protocol (the Agent SDK's supportedModels and
+    settings calls), so no prompt is sent and no tokens are spent.
+    """
+    command = [
+        "claude",
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ]
+    requests = "".join(
+        json.dumps({"type": "control_request", "request_id": request_id, "request": {"subtype": subtype}}) + "\n"
+        for request_id, subtype in (("models", "initialize"), ("settings", "get_settings"))
+    )
+    try:
+        stdout, stderr, _ = run_claude(command, requests, cwd, timeout)
+    except ClaudeTimeout as error:
+        fail(str(error), 1)
+
+    responses: dict[str, dict[str, Any]] = {}
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "control_response":
+            response = event.get("response", {})
+            responses[response.get("request_id")] = response
+    for request_id in ("models", "settings"):
+        response = responses.get(request_id)
+        if response is None:
+            fail(f"Claude Code did not answer the {request_id} request: {stderr.strip()[-500:]}", 1)
+        if response.get("subtype") != "success":
+            fail(f"Claude Code rejected the {request_id} request: {response.get('error')}", 1)
+    return (
+        responses["models"].get("response", {}).get("models", []),
+        responses["settings"].get("response", {}).get("applied", {}),
+    )
+
+
+def require_supported_effort(effort: str | None, cwd: Path) -> None:
+    """Reject an effort level the installed Claude Code does not support.
+
+    Claude Code only warns about an unknown --effort and falls back to the
+    default, so a typo would otherwise run, and persist, silently.
+    """
+    if effort is None:
+        return
+    models, _ = harness_state(cwd)
+    supported = list(dict.fromkeys(level for model in models for level in model.get("supportedEffortLevels") or []))
+    if supported and effort not in supported:
+        fail(f"effort {effort!r} is not supported by this Claude Code version; supported: {', '.join(supported)}")
+
+
+def list_models(args: argparse.Namespace) -> None:
+    """Report the models this Claude Code version accepts and its effective default."""
+    root = run_git(["rev-parse", "--show-toplevel"], Path.cwd())
+    cwd = Path(root.stdout.strip()) if root.returncode == 0 else Path.cwd()
+    catalog, applied = harness_state(cwd, args.timeout)
+    models = []
+    for model in catalog:
+        # "default" is the built-in recommendation, not the user's configured
+        # default; omitting --model already selects the configured one.
+        if model.get("value") == "default":
+            continue
+        entry = {"value": model.get("value"), "resolves_to": model.get("resolvedModel")}
+        if model.get("supportedEffortLevels"):
+            entry["efforts"] = ",".join(model["supportedEffortLevels"])
+        if model.get("description"):
+            entry["description"] = model["description"]
+        models.append(entry)
+    print(
+        json.dumps(
+            {
+                "default": {"model": applied.get("model"), "effort": applied.get("effort")},
+                "models": models,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     actions = parser.add_subparsers(dest="action", required=True)
@@ -738,7 +828,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--project")
         command.add_argument("--force-project")
         command.add_argument("--model")
-        command.add_argument("--effort", choices=sorted(VALID_EFFORTS))
+        command.add_argument("--effort")
         if kind == "task":
             command.add_argument("--verify", action="append")
             command.add_argument("--verify-timeout", type=int, default=VERIFY_TIMEOUT)
@@ -755,7 +845,7 @@ def parser() -> argparse.ArgumentParser:
         command.set_defaults(handler=run_round, kind=kind)
         command.add_argument("--session", required=True)
         command.add_argument("--timeout", type=int, default=1800)
-        command.add_argument("--effort", choices=sorted(VALID_EFFORTS))
+        command.add_argument("--effort")
         command.add_argument("--rerun", action="store_true")
         command.add_argument("--skip-verify", action="store_true")
 
@@ -767,6 +857,10 @@ def parser() -> argparse.ArgumentParser:
     command = actions.add_parser("cleanup")
     command.set_defaults(handler=cleanup)
     command.add_argument("--session", required=True)
+
+    command = actions.add_parser("list-models")
+    command.set_defaults(handler=list_models)
+    command.add_argument("--timeout", type=int, default=60)
     return parser
 
 

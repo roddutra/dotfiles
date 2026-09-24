@@ -61,9 +61,11 @@ Returns JSON with `session` (the only value you need to track) and `project_dir`
 
 **Project name vs `project_dir`/`--cd`:** The project name affects **only** the grouping path `~/.grok-reviews/<project>/`. `project_dir` is resolved separately from the worktree's own root (`git rev-parse --show-toplevel`), persisted, and used as Grok's `--cwd` on every round (no need to pass `--cd`). The script creates `.tmp/` there and gitignores it. Pass `--cd <dir>` only to override.
 
-**Model is set once, here, and locked — only if you pass `--model`.** With `--model <name>` (see `grok models`), the value is persisted and used on every round; start a fresh session to change it. Without it, each round uses whatever the local Grok CLI defaults to (`~/.grok/config.toml`).
+**Model is set once, here, and locked - only if you pass `--model`.** With `--model <name>`, the value is persisted and used on every round; start a fresh session to change it. Without it, each round uses whatever the local Grok CLI defaults to (`~/.grok/config.toml`).
 
-**Reasoning effort is seeded here and may be adjusted per round.** `--reasoning-effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`, ...; a model only accepts the levels it advertises) is persisted; `run_review.py --reasoning-effort` changes it later (see Step 3).
+**Reasoning effort is seeded here and may be adjusted per round.** `--reasoning-effort <level>` is persisted; `run_review.py --reasoning-effort` changes it later (see Step 3). A model only accepts the levels it advertises.
+
+Optional: supported models vary by Grok CLI version and account. Before passing `--model`, run `python <skill-path>/scripts/list_models.py` when you need to confirm a model is available or find out what the default is. It returns compact JSON: `default` (the default model for this project) and `models` (available model IDs). It sends no prompt and costs no tokens. Grok does not list effort levels up front. It rejects an unsupported `--reasoning-effort` and names the levels the model accepts, so check the first round's error if you set one.
 
 ### Step 2: Write the Prompt File
 

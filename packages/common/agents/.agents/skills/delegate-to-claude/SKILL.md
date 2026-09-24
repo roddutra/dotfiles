@@ -57,7 +57,7 @@ Before initialization, identify:
 ### Step 2: Initialize One Session Per Task
 
 ```bash
-python <skill-path>/scripts/task.py init --title <task-title> [--verify "<command>"]... [--verify-timeout <seconds>] [--allow-git] [--project <name>] [--force-project <name>] [--model <model>] [--effort <low|medium|high|xhigh|max>]
+python <skill-path>/scripts/task.py init --title <task-title> [--verify "<command>"]... [--verify-timeout <seconds>] [--allow-git] [--project <name>] [--force-project <name>] [--model <model>] [--effort <level>]
 ```
 
 Track the returned `session` path. The wrapper persists the repository root as `project_dir`.
@@ -73,6 +73,14 @@ Options:
 - `--force-project`: deliberately override project grouping. Neither project option changes the repository Claude reads.
 
 Do not change model on your own initiative. Change effort only when the user asks, or after materially poor output when you have explained the trade-off and received permission.
+
+Optional: supported models and effort levels vary by Claude Code version. Before passing `--model` or `--effort`, run this when you need to confirm a value is supported or find out what the default is:
+
+```bash
+python <skill-path>/scripts/task.py models
+```
+
+It returns compact JSON: `default` (the effective model and effort Claude Code uses for this project when no flags are passed) and `models` (each `--model` `value`, the model ID it `resolves_to`, its supported `efforts`, and a short description). It sends no prompt and costs no tokens. Full model IDs, such as `claude-sonnet-5`, are also accepted even when they are not listed. The wrapper checks any `--effort` against the installed version and rejects unsupported levels.
 
 ### Step 3: Write the Brief
 

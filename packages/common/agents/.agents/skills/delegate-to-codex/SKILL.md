@@ -43,6 +43,7 @@ Returns `session` (track this) and `project_dir`. Inside a git repo the project 
 - `--network`: allow network inside the sandbox (package installs, API calls). Off by default.
 - `--allow-git`: let Codex commit on the current branch. Default: git is off-limits to Codex; you commit.
 - Model/effort: **omit both by default** so Codex uses the machine's configured defaults (`~/.codex/config.toml`) and new models roll in automatically. Pass `--model` only when the user asks; it is locked for the session. `--reasoning-effort` can be changed per round on `run_task.py` and is persisted on success.
+- Optional: supported models and effort levels vary by Codex CLI version. Before passing `--model` or `--reasoning-effort`, run `python <skill-path>/scripts/list_models.py [--include-hidden]` when you need to confirm a value is supported or find out what the default is. It returns compact JSON: `default` (the effective model and effort for this project when no flags are passed) and `models` (each `id` with its supported `efforts`, `default_effort`, and a short description). It sends no prompt and costs no tokens. By default, hidden models are excluded. Codex may still accept them, so pass `--include-hidden` to list them too.
 
 **A session is one task.** A "task" is a coherent, PR-sized unit: one feature slice, one bug, one refactor. Never reuse a session for a different task — a new task gets a new `init_task.py`. Follow-up rounds in the same session are only for iterating on *that* task (review feedback, fixes).
 

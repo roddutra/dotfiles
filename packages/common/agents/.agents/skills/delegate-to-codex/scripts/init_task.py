@@ -30,8 +30,6 @@ from generate_path import DELEGATE_DIR, resolve_git_project_name, to_kebab_case
 _DEFAULT_CONTEXT_WARN_PCT = 50
 _DEFAULT_CONTEXT_BLOCK_PCT = 70
 
-_VALID_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "ultra")
-
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess | None:
     try:
@@ -172,12 +170,6 @@ def init_task(
     DELEGATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     DELEGATE_DIR.chmod(0o700)
 
-    if reasoning_effort is not None and reasoning_effort not in _VALID_EFFORTS:
-        print(
-            f"Warning: unusual reasoning effort {reasoning_effort!r} (known: "
-            f"{', '.join(_VALID_EFFORTS)}); passing it through unchanged.",
-            file=sys.stderr,
-        )
     if not 0 < context_warn_pct <= context_block_pct <= 100:
         print("Error: need 0 < --context-warn-pct <= --context-block-pct <= 100", file=sys.stderr)
         sys.exit(1)
