@@ -30,6 +30,9 @@ hl.unbind("SUPER + TAB")
 -- 1Password Quick Access (Wayland requires a compositor-level shortcut).
 o.bind("CTRL + SHIFT + SPACE", "1Password Quick Access", "1password --quick-access")
 
+-- T3 Code snapshots use the app's global shortcut for window capture.
+o.bind("CTRL + SHIFT + 2", "T3 Code capture window", hl.dsp.global("com.t3tools.T3Code:capture-window"))
+
 -- Send the native Select All shortcut to the focused surface. Ghostty uses
 -- Ctrl+Shift+A, while conventional GUI applications use Ctrl+A.
 local function send_select_all(mods)
