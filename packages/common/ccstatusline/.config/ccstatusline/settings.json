@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "lines": [
     [
       {
@@ -29,7 +29,7 @@
         "id": "5cb4cad7-0c97-4223-a39c-678b4018510c",
         "type": "git-changes",
         "metadata": {
-          "hideNoGit": "true"
+          "hide": "no-git"
         }
       }
     ],
