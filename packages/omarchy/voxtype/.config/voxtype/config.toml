@@ -57,19 +57,19 @@ streaming = false
 
 [osd]
 enabled = true
-frontend = "gtk4"
+frontend = "quickshell"
 style = "default"
 palette = "omarchy"
 layout = "compact"
 position = "bottom-center"
-width_px = 400
+width_px = 320
 height_px = 48
-margin_px = 24
+margin_px = 80
 top_margin = 0.85
-opacity = 0.8
+opacity = 0.96
 waveform_window_secs = 3.0
 peak_decay_db_per_sec = 6.0
-waveform_gain = 10.0
+waveform_gain = 12.0
 
 [text]
 spoken_punctuation = false

@@ -130,6 +130,9 @@
     {
       "id": "io.github.sirjul1337.lock-explorer",
       "design": "split"
+    },
+    {
+      "id": "blizl.voxtype-osd"
     }
   ],
   "version": 1,
