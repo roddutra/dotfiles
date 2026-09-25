@@ -4,6 +4,31 @@ set -euo pipefail
 transcript=$(cat)
 [[ -n "$transcript" ]] || exit 0
 
+runtime_root=${XDG_RUNTIME_DIR:-/tmp}
+progress_command=${VOXTYPE_PROGRESS_COMMAND:-"$HOME/.local/bin/voxtype-progress"}
+request_dir=
+failure=
+
+progress() {
+  [[ ! -x "$progress_command" ]] || "$progress_command" mark "$@" 2>/dev/null || true
+}
+
+fail() {
+  failure=$2
+  printf '%s\n' "$failure" >&2
+  exit "$1"
+}
+
+# Voxtype outputs the raw transcript when this command fails, which would
+# otherwise look identical to a successful cleanup.
+finish() {
+  local status=$?
+  ((status == 0)) || progress failed "$failure"
+  [[ -z "$request_dir" ]] || rm -rf "$request_dir"
+}
+trap finish EXIT
+progress groq
+
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 key_file=${VOXTYPE_GROQ_API_KEY_FILE:-"$data_home/voxtype/secrets/groq-api-key"}
 api_url=${VOXTYPE_GROQ_API_URL:-"https://api.groq.com/openai/v1/chat/completions"}
@@ -14,42 +39,35 @@ dictionary_file=${VOXTYPE_DICTIONARY_FILE:-"$HOME/.config/voxtype/personal-dicti
 prepare_command=${VOXTYPE_PREPARE_COMMAND:-"$HOME/.local/bin/voxtype-prepare-transcript"}
 
 if [[ ! -r "$key_file" ]]; then
-  printf 'Groq API key is not readable at %s\n' "$key_file" >&2
-  exit 2
+  fail 2 "Groq API key is not readable at $key_file"
 fi
 
 api_key=$(<"$key_file")
 if [[ -z "$api_key" ]]; then
-  printf 'Groq API key file is empty: %s\n' "$key_file" >&2
-  exit 2
+  fail 2 "Groq API key file is empty: $key_file"
 fi
 if [[ ! -r "$prompt_file" ]]; then
-  printf 'Groq cleanup prompt is not readable at %s\n' "$prompt_file" >&2
-  exit 2
+  fail 2 "Groq cleanup prompt is not readable at $prompt_file"
 fi
 prompt_contents=$(<"$prompt_file")
 if [[ ! $prompt_contents =~ [^[:space:]] ]]; then
-  printf 'Groq cleanup prompt is empty: %s\n' "$prompt_file" >&2
-  exit 2
+  fail 2 "Groq cleanup prompt is empty: $prompt_file"
 fi
 unset prompt_contents
 
 if [[ ! -x "$prepare_command" ]]; then
-  printf 'Transcript preparation command is not executable at %s\n' "$prepare_command" >&2
-  exit 2
+  fail 2 "Transcript preparation command is not executable at $prepare_command"
 fi
 if [[ ! -r "$replacements_file" ]]; then
-  printf 'Word replacements are not readable at %s\n' "$replacements_file" >&2
-  exit 2
+  fail 2 "Word replacements are not readable at $replacements_file"
 fi
 if [[ ! -r "$dictionary_file" ]]; then
-  printf 'Personal dictionary is not readable at %s\n' "$dictionary_file" >&2
-  exit 2
+  fail 2 "Personal dictionary is not readable at $dictionary_file"
 fi
 
 prepared=$(printf '%s' "$transcript" | "$prepare_command" \
   --replacements "$replacements_file" \
-  --dictionary "$dictionary_file")
+  --dictionary "$dictionary_file") || fail 2 "Transcript preparation failed"
 
 payload=$(jq \
   --arg model "$model" \
@@ -94,9 +112,7 @@ payload=$(jq \
     )
   }' <<< "$prepared")
 
-runtime_root=${XDG_RUNTIME_DIR:-/tmp}
 request_dir=$(mktemp -d "$runtime_root/voxtype-groq.XXXXXX")
-trap 'rm -rf "$request_dir"' EXIT
 chmod 700 "$request_dir"
 printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$api_key" > "$request_dir/headers"
 printf '%s' "$payload" > "$request_dir/body"
@@ -110,6 +126,8 @@ response=$(curl \
   --max-time 12 \
   --header "@$request_dir/headers" \
   --data-binary "@$request_dir/body" \
-  "$api_url")
+  "$api_url" 2> "$request_dir/curl-error") || fail 3 "$(tail -n 1 "$request_dir/curl-error")"
 
-jq -er '.choices[0] | select(.finish_reason == "stop") | .message.content | select(type == "string" and length > 0)' <<< "$response"
+if ! jq -er '.choices[0] | select(.finish_reason == "stop") | .message.content | select(type == "string" and length > 0)' <<< "$response"; then
+  fail 3 "Groq returned an incomplete or malformed response"
+fi

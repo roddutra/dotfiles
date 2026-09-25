@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Keep one live notification on screen from the end of a recording until the
+# text is output. Voxtype's own "Transcribing..." toast has a fixed lifetime
+# that long recordings and post-processing outlast.
+#
+#   voxtype-progress                     Follow Voxtype and drive the notification.
+#   voxtype-progress mark groq           Post-processing has started.
+#   voxtype-progress mark failed REASON  Post-processing failed; raw text is used.
+#   voxtype-progress mark output         Voxtype is about to output the text.
+set -euo pipefail
+
+marks_dir=${VOXTYPE_PROGRESS_DIR:-"${XDG_RUNTIME_DIR:-/tmp}/voxtype-progress"}
+
+if [[ "${1:-}" == mark ]]; then
+  [[ -n "${2:-}" ]] || { printf 'Usage: voxtype-progress mark STAGE [DETAIL]\n' >&2; exit 2; }
+  [[ -d "$marks_dir" ]] || exit 0
+  printf '%s\n' "${3:-}" > "$marks_dir/$2"
+  exit 0
+fi
+
+mkdir -p -m 700 "$marks_dir"
+
+notification_id=0
+icon=
+state=idle
+started=0
+groq_started=
+shown=
+
+engine_icon() {
+  case $1 in
+    parakeet*) printf '🦜 ' ;;
+    tiny*|base*|small*|medium*|large*) printf '🗣️ ' ;;
+  esac
+}
+
+# Post or update the notification in place. The Omarchy shell restarts a
+# toast's countdown whenever its body changes, so the ticking counter keeps it
+# on screen for as long as the work runs.
+show() {
+  local urgency=$1 expire_ms=$2 summary=$3 body=$4
+  [[ "$urgency|$summary|$body" != "$shown" ]] || return 0
+  notification_id=$(notify-send \
+    --app-name=Voxtype \
+    --print-id \
+    --replace-id="$notification_id" \
+    --transient \
+    --urgency="$urgency" \
+    --expire-time="$expire_ms" \
+    "$summary" "$body") || notification_id=0
+  shown="$urgency|$summary|$body"
+}
+
+render() {
+  if [[ -z "$groq_started" && -e "$marks_dir/groq" ]]; then
+    groq_started=$SECONDS
+  fi
+
+  if [[ -n "$groq_started" ]]; then
+    show normal 0 "✨ Groq Cleanup" "Cleaning up transcript... $((SECONDS - groq_started))s"
+  else
+    show normal 0 "${icon}Recording Stopped" "Transcribing... $((SECONDS - started))s"
+  fi
+}
+
+# The shell ignores CloseNotification and leaves the toast up until its timer
+# runs out, so replace it with the outcome instead of closing it.
+finish() {
+  local failure=
+  [[ ! -s "$marks_dir/failed" ]] || failure=$(<"$marks_dir/failed")
+
+  if [[ -e "$marks_dir/failed" ]]; then
+    show normal 8000 "⚠️ Groq Cleanup Failed" "Used the raw transcript instead.${failure:+ $failure}"
+  elif [[ -e "$marks_dir/output" ]]; then
+    show low 3000 "✅ Done" "Finished in $((SECONDS - started))s."
+  else
+    show low 3000 "${icon}No Transcript" "No speech was detected."
+  fi
+
+  notification_id=0
+  shown=
+}
+
+exec {status_fd}< <(exec voxtype status --follow --format json --extended)
+
+while :; do
+  if IFS= read -r -t 0.25 -u "$status_fd" line; then
+    next=$(jq -r '.alt // .class // "idle"' <<< "$line" 2>/dev/null) || continue
+    if [[ "$next" == transcribing && "$state" != transcribing ]]; then
+      icon=$(engine_icon "$(jq -r '.model // ""' <<< "$line")")
+      started=$SECONDS
+      groq_started=
+      rm -f -- "$marks_dir"/*
+    elif [[ "$next" != transcribing && "$state" == transcribing ]]; then
+      finish
+    fi
+    state=$next
+  elif (($? <= 128)); then
+    # The status stream ended because the daemon went away. Exit so systemd
+    # restarts the watcher against the next daemon.
+    exit 1
+  fi
+
+  [[ "$state" != transcribing ]] || render
+done

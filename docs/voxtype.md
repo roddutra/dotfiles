@@ -25,6 +25,31 @@ The `groq_cleanup` profile follows this path:
 
 Raw dictation skips steps 2 through 4. The cloud path sends only the current transcript, cleanup prompt, and dictionary. It does not send audio or previous transcripts.
 
+## Progress notification
+
+`voxtype-progress` runs as `voxtype-progress.service`, a user unit bound to `voxtype.service`. It follows `voxtype status --follow` and keeps one notification on screen from recording stop until output:
+
+1. `🦜 Recording Stopped`, `Transcribing... Ns`
+2. `✨ Groq Cleanup`, `Cleaning up transcript... Ns` (Groq profile only)
+3. One outcome:
+   - `✅ Done`, shown when text was output
+   - `⚠️ Groq Cleanup Failed`, with the reason, shown when Groq failed and the raw transcript was used
+   - `No Transcript`, shown when nothing was transcribed
+
+Voxtype's own `on_recording_stop` and `on_transcription` notifications are disabled so toasts do not stack.
+
+Stages are marker files in `$XDG_RUNTIME_DIR/voxtype-progress`, written with `voxtype-progress mark <stage> [detail]`:
+
+- `groq`: written by `voxtype-groq-cleanup` when it starts
+- `failed`: written by `voxtype-groq-cleanup` on a nonzero exit, with the error as detail
+- `output`: written by Voxtype's `pre_output_command`
+
+Omarchy shell constraints:
+
+- Voxtype 1.0.1 posts `Transcribing...` with a 2 second expiry, which the shell raises to its 8 second minimum. Long recordings take longer than that to transcribe.
+- The shell restarts a toast's countdown when its body changes. The per-second counter keeps the progress toast visible.
+- The shell ignores `CloseNotification` and keeps the toast until its countdown ends. The watcher replaces the toast with the outcome instead of closing it.
+
 ## Tracked files
 
 | File | Responsibility |
@@ -35,6 +60,8 @@ Raw dictation skips steps 2 through 4. The cloud path sends only the current tra
 | `packages/omarchy/voxtype/.config/voxtype/groq-cleanup-prompt.txt` | Cleanup behavior and output contract |
 | `packages/omarchy/voxtype/.local/bin/voxtype-prepare-transcript` | Local replacement and dictionary preparation |
 | `packages/omarchy/voxtype/.local/bin/voxtype-groq-cleanup` | Groq request, validation, and cleaned output |
+| `packages/omarchy/voxtype/.local/bin/voxtype-progress` | Progress notification watcher and stage markers |
+| `packages/omarchy/voxtype/.config/systemd/user/voxtype-progress.service` | User unit that runs the watcher alongside Voxtype |
 
 `voxtype-bin` is restored from `manifests/omarchy/aur-packages.txt`.
 
@@ -90,7 +117,7 @@ Current request defaults:
 - Curl deadline: `12` seconds
 - Voxtype post-processing deadline: `15` seconds
 
-The cleanup command accepts output only when Groq returns a non-empty string with `finish_reason` equal to `stop`. Missing files, invalid replacement configuration, transport errors, truncated responses, and malformed responses return a nonzero status. Voxtype then retains the raw transcript instead of inserting partial or unverified output.
+The cleanup command accepts output only when Groq returns a non-empty string with `finish_reason` equal to `stop`. Missing files, invalid replacement configuration, transport errors, truncated responses, and malformed responses return a nonzero status. Voxtype then retains the raw transcript instead of inserting partial or unverified output, and the progress notification reports the failure.
 
 The request headers and body use mode `600` files inside a mode `700` runtime directory. The directory is removed on exit. The API key and transcript are not passed in process arguments.
 
@@ -122,7 +149,7 @@ On an Omarchy workstation:
 1. Run `./scripts/bootstrap-omarchy` to install `voxtype-bin` and the other curated packages.
 2. Run `./scripts/apply-dotfiles` to link the managed Voxtype directory and helper commands.
 3. Restore the Groq key at the machine-local path above.
-4. Run `systemctl --user enable --now voxtype.service`.
+4. Run `systemctl --user enable --now voxtype.service voxtype-progress.service`.
 5. Run `hyprctl reload` and confirm `hyprctl configerrors` is empty.
 
 ## Validation
@@ -145,9 +172,9 @@ printf '%s' 'um check voice ink and lone dolphin' | ~/.local/bin/voxtype-groq-cl
 Check runtime and linking:
 
 ```sh
-systemctl --user status voxtype.service
+systemctl --user status voxtype.service voxtype-progress.service
 stat -c '%F %N' ~/.config/voxtype
 omarchy menu keybindings --print
 ```
 
-After changing `config.toml`, restart with `systemctl --user restart voxtype.service`. Prompt, replacement, and dictionary changes apply on the next Groq-cleaned transcription.
+After changing `config.toml`, restart with `systemctl --user restart voxtype.service`; the progress watcher restarts with it. Prompt, replacement, and dictionary changes apply on the next Groq-cleaned transcription.

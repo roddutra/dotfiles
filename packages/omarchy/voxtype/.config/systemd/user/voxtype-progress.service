@@ -1,0 +1,13 @@
+[Unit]
+Description=Voxtype transcription progress notification
+PartOf=voxtype.service
+After=voxtype.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/voxtype-progress
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=voxtype.service
