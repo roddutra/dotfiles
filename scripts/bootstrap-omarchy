@@ -96,6 +96,13 @@ while IFS='|' read -r plugin_id plugin_url || [[ -n ${plugin_id:-} ]]; do
   fi
 done < "$manifest_root/plugins.txt"
 
+# The Voxtype OSD plugin's own setup refuses config files that resolve into this
+# repository. Tracked config owns its [osd] settings and keybindings, so install
+# only its Quickshell files.
+echo "Installing the Voxtype OSD HUD..."
+voxtype_osd_dir="$HOME/.config/omarchy/plugins/blizl.voxtype-osd"
+run bash -c 'source "$1/lib/qml-installer.sh" && qml_install "$1" "$(qml_target_dir)"' _ "$voxtype_osd_dir"
+
 theme_url=$(<"$manifest_root/theme.txt")
 if [[ -d "$HOME/.config/omarchy/themes/rose-pine-moon" ]]; then
   echo "  Rose Pine Moon already installed"

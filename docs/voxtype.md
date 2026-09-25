@@ -50,6 +50,17 @@ Omarchy shell constraints:
 - The shell restarts a toast's countdown when its body changes. The per-second counter keeps the progress toast visible.
 - The shell ignores `CloseNotification` and keeps the toast until its countdown ends. The watcher replaces the toast with the outcome instead of closing it.
 
+## OSD HUD
+
+The [`blizl.voxtype-osd`](https://github.com/Blizl/Omarchy-VoxType-OSD) plugin replaces Voxtype's GTK overlay with a Quickshell HUD. Voxtype launches it from `~/.local/share/voxtype/quickshell/` because `[osd] frontend = "quickshell"`.
+
+The plugin's `bin/setup` and `bin/uninstall` are not used. Setup refuses `config.toml` because the linked Voxtype directory resolves into this repository. Its changes are tracked here instead:
+
+- `[osd]` settings in `config.toml`
+- `SUPER + E` (engine picker) and `SUPER + M` (meeting controls) in `bindings.lua`
+
+`scripts/bootstrap-omarchy` installs the HUD files with the plugin's `lib/qml-installer.sh`. Do not use `voxtype setup quickshell --source` for this plugin: its fixed file list omits `ThemeReveal.qml`, `VadGate.qml`, and `WaveformMeter.qml`. Re-run the bootstrap after `omarchy plugin update` to refresh the installed HUD files.
+
 ## Tracked files
 
 | File | Responsibility |
@@ -146,7 +157,7 @@ chmod 600 "$data_home/voxtype/secrets/groq-api-key"
 
 On an Omarchy workstation:
 
-1. Run `./scripts/bootstrap-omarchy` to install `voxtype-bin` and the other curated packages.
+1. Run `./scripts/bootstrap-omarchy` to install `voxtype-bin`, the other curated packages, the OSD plugin, and its HUD files.
 2. Run `./scripts/apply-dotfiles` to link the managed Voxtype directory and helper commands.
 3. Restore the Groq key at the machine-local path above.
 4. Run `systemctl --user enable --now voxtype.service voxtype-progress.service`.
