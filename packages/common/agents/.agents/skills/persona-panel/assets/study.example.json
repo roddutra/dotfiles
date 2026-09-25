@@ -1,0 +1,52 @@
+{
+  "study": "homepage-concepts-round-1",
+  "product": "Acme Books",
+  "product_phrase": "a bookkeeping product called **Acme Books**",
+  "artefact_plural": "draft homepage designs",
+  "arrival": "a colleague, your accountant or a LinkedIn ad sent you there",
+  "context_notes": [
+    "Every design shows a made-up example business called \"Harbour Cafe\". Its people and numbers are fictitious.",
+    "**Prices shown are placeholders.** Don't judge the amounts or let them move your scores. Judge only whether pricing is clear and answers how you would pay."
+  ],
+  "concepts": [
+    {"id": "01-problem-first", "path": "../concepts/01-problem-first"},
+    {"id": "02-before-after", "path": "../concepts/02-before-after"},
+    {"id": "03-one-week", "path": "../concepts/03-one-week"}
+  ],
+  "label_style": "letters",
+  "shuffle_labels": true,
+  "models": ["opus", "fable"],
+  "seed": 20260925,
+  "segments": {
+    "owner": "Owners and principals",
+    "staff": "Staff and users",
+    "gatekeeper": "Advisers and gatekeepers"
+  },
+  "find_the_answer": [
+    "Does it work with the software I already use?",
+    "What does it cost to start?",
+    "How long does setup take and who does it?",
+    "Who owns my data and where is it kept?"
+  ],
+  "extra_yes_bullets": [],
+  "leak_terms": ["tenant", "internal-codename"],
+  "forbidden_terms": ["future-state concept", "todo", "lorem ipsum"],
+  "fit_factors": ["relevance", "why_care", "next_step"],
+  "capture": {"desktop": [1440, 900], "mobile": [390, 844], "max_screens": 20},
+  "personas": [
+    {
+      "id": "P01",
+      "name": "Dana Kowalski",
+      "slug": "dana-kowalski",
+      "role": "Owner of a 2-site cafe, does the books on Sunday nights",
+      "personality": "Curious sceptic: open to new tools but burned before, needs proof and specifics",
+      "segment": "owner",
+      "bio": [
+        "Age 41. Runs two cafes with 14 staff; their partner handles rostering.",
+        "Uses a spreadsheet and a shoebox of receipts; their accountant charges extra to tidy it up.",
+        "Reads on their phone between services and will close a page that doesn't say what it does in 5 seconds.",
+        "Will sign up only if the page answers \"does it work with my point-of-sale\" and \"what does it cost\"."
+      ]
+    }
+  ]
+}
