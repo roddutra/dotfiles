@@ -143,6 +143,28 @@ A coding app accessed from the Mac required an explicit LAN rule because UFW den
 
 Network addresses and interfaces may change after reinstalling. Confirm the current interface, subnet, host address, listening process, and threat boundary before recreating the rule. Firewall state is documented rather than applied automatically.
 
+### SSH to a LAN IP times out with Tailscale running
+
+Before adding a UFW rule, check the listener, firewall, and return route. Replace `<client-lan-ip>` with the Mac or phone's address on the local network:
+
+```sh
+ss -ltn '( sport = :22 )'
+sudo ufw status verbose
+ip -4 route get <client-lan-ip>
+ip -4 route show table 52
+```
+
+If `sshd` listens on port 22 and UFW already allows or limits `22/tcp`, but `ip route get` selects `tailscale0` instead of the LAN interface, Tailscale may have accepted an advertised subnet route that overlaps the local LAN. The incoming SSH connection reaches this machine, but its replies take the wrong path. A local route in the main table does not override Tailscale's higher-priority policy-routing table.
+
+If this machine does not need advertised Tailscale subnet routes, disable their acceptance for the current Tailscale profile:
+
+```sh
+tailscale set --accept-routes=false
+ip -4 route get <client-lan-ip>
+```
+
+The route should now use the LAN interface. This preference survives disconnects and restarts, but check it again after switching Tailscale profiles or explicitly changing Tailscale settings. Disabling route acceptance also removes access to any other subnet routes advertised to that profile; do not use this fix if those routes are needed.
+
 ## Hyprland checks
 
 Hyprland normally reloads after configuration changes. Validate explicitly:
