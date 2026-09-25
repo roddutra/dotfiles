@@ -161,6 +161,34 @@ class PersonaPanelTest(unittest.TestCase):
         out = run("check_runs.py", self.sd, check=False).stdout
         self.assertIn("ranking puts", out)
 
+    def test_mark_and_resume(self):
+        r0, r1 = self.runs[0], self.runs[1]
+        run("runs.py", self.sd, "mark", r0["run"], "agent-123")
+        f = self.sd / r0["file"]
+        f.write_text(f.read_text() + filled_section(self.labels_for("01-plain"), [8] * FACTORS))
+        out = run("runs.py", self.sd, "resume").stdout
+        self.assertIn(f"=== {r0['run']} (started, agent: agent-123)", out)
+        self.assertIn(f"Already written: {self.labels_for('01-plain')}", out)
+        self.assertIn(f"=== {r1['run']} (pending, agent: not recorded", out)
+        nxt = run("runs.py", self.sd, "next", "--limit", "20").stdout
+        self.assertNotIn(f"=== {r0['run']}", nxt)
+
+    def test_persona_model_agreement(self):
+        for r in self.runs:
+            if r["model"] == "opus":
+                self.fill(r, {"01-plain": [9] * FACTORS, "02-story": [5] * FACTORS, "03-console": [7] * FACTORS},
+                          ["01-plain", "03-console", "02-story"])
+            else:
+                self.fill(r, {"01-plain": [5] * FACTORS, "02-story": [9] * FACTORS, "03-console": [7] * FACTORS},
+                          ["02-story", "03-console", "01-plain"])
+        run("extract_scores.py", self.sd)
+        run("analyze.py", self.sd)
+        q = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+        agree = q["models"]["persona_agreement"]
+        self.assertTrue(all(not a["same_top"] for a in agree))
+        self.assertAlmostEqual(agree[0]["spearman"], -1.0)
+        self.assertIn("Unsettled personas", self.sd.joinpath("analysis/quant.md").read_text())
+
     def test_extract_agent_reply(self):
         t = Path(self.tmp.name) / "out.jsonl"
         doc = "Here it is.\n\n# Round 1 synthesis\n\n- point\n"

@@ -18,10 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
 
+# Calibrated against Claude haiku-4-5 (Sept 2026): with a ~200k window it ran out of context on a
+# 14-concept panel (runs peaked near 150k), abbreviated late concepts, and mislabelled concepts.
 DEFAULT_MODEL_NOTES = {
     "haiku": [
         "Your context is limited: for each concept view only `desktop-sheet-01.png`, `mobile-first-screens.png` and at most two more sheets, rely on `page-text.txt` for the rest, and never open raw/ files.",
-        "Every concept has complete materials. If something seems missing, read `page-text.txt` again rather than skipping the concept.",
+        "Refer to each concept only by the label in its folder name, exactly as written, and check the label before writing each section.",
         "For the final score summary, re-read your own persona file to collect your scores.",
     ],
 }

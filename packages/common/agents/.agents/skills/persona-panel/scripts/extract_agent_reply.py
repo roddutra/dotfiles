@@ -56,7 +56,7 @@ def main():
     body = "\n".join(lines[start:]).strip()
     body = re.sub(r"\n```\s*$", "", body)
     args.out.write_text(body + "\n")
-    dashes = sum(body.count(d) for d in ("–", "—"))
+    dashes = sum(body.count(d) for d in ("\u2013", "\u2014"))
     print(f"Wrote {args.out} ({len(body)} chars, {dashes} em/en dashes)")
 
 

@@ -9,13 +9,32 @@
     "**Prices shown are placeholders.** Don't judge the amounts or let them move your scores. Judge only whether pricing is clear and answers how you would pay."
   ],
   "concepts": [
-    {"id": "01-problem-first", "path": "../concepts/01-problem-first"},
-    {"id": "02-before-after", "path": "../concepts/02-before-after"},
-    {"id": "03-one-week", "path": "../concepts/03-one-week"}
+    {
+      "id": "01-problem-first",
+      "path": "../concepts/01-problem-first",
+      "states": [
+        {
+          "name": "retail",
+          "page": "index",
+          "js": "document.querySelector('[data-audience=retail]').click()"
+        }
+      ]
+    },
+    {
+      "id": "02-before-after",
+      "path": "../concepts/02-before-after"
+    },
+    {
+      "id": "03-one-week",
+      "path": "../concepts/03-one-week"
+    }
   ],
   "label_style": "letters",
   "shuffle_labels": true,
-  "models": ["opus", "fable"],
+  "models": [
+    "opus",
+    "fable"
+  ],
   "seed": 20260925,
   "segments": {
     "owner": "Owners and principals",
@@ -29,10 +48,32 @@
     "Who owns my data and where is it kept?"
   ],
   "extra_yes_bullets": [],
-  "leak_terms": ["tenant", "internal-codename"],
-  "forbidden_terms": ["future-state concept", "todo", "lorem ipsum"],
-  "fit_factors": ["relevance", "why_care", "next_step"],
-  "capture": {"desktop": [1440, 900], "mobile": [390, 844], "max_screens": 20},
+  "leak_terms": [
+    "tenant",
+    "internal-codename"
+  ],
+  "forbidden_terms": [
+    "future-state concept",
+    "todo",
+    "lorem ipsum"
+  ],
+  "fit_factors": [
+    "relevance",
+    "why_care",
+    "next_step"
+  ],
+  "capture": {
+    "desktop": [
+      1440,
+      900
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "max_screens": 20,
+    "media": "light"
+  },
   "personas": [
     {
       "id": "P01",

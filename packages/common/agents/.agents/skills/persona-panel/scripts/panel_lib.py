@@ -56,7 +56,7 @@ DEFAULT_FACTORS = [
 ]
 
 DEFAULT_FIT_FACTORS = ["relevance", "why_care", "next_step"]
-DASHES = ("–", "—")
+DASHES = ("\u2013", "\u2014")
 FINAL_MARKER = "## Out of character"
 
 
@@ -293,7 +293,7 @@ class Browser:
     def __init__(self, session: str):
         if not shutil.which("agent-browser"):
             raise SystemExit("agent-browser CLI is required")
-        self.session = session
+        self.session = re.sub(r"[^A-Za-z0-9_-]", "-", session)
 
     def run(self, *args: str, check: bool = False) -> str:
         r = subprocess.run(["agent-browser", "--session", self.session, *args],
@@ -309,8 +309,10 @@ class Browser:
         except (json.JSONDecodeError, ValueError):
             return out
 
-    def open(self, url: str, width: int, height: int, settle_ms: int = 2500):
+    def open(self, url: str, width: int, height: int, settle_ms: int = 2500, media: str = ""):
         self.run("set", "viewport", str(width), str(height))
+        if media:  # e.g. "light" or "light reduced-motion": stops captures landing mid-animation
+            self.run("set", "media", *media.split())
         self.run("open", url, check=True)
         self.run("wait", str(settle_ms))
 

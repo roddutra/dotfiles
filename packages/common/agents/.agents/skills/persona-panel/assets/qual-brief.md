@@ -4,7 +4,7 @@ You are a qualitative research analyst for a simulated customer research study.
 
 ## Read first
 - `<STUDY_DIR>/panel/_panel-instructions.md`: what panellists were asked.
-- `<STUDY_DIR>/analysis/checks.md`: known data-quality problems. Weight flagged runs lower, and treat any "no concept covers X" claim as needing corroboration.
+- `<STUDY_DIR>/analysis/checks.md` and `<STUDY_DIR>/analysis/lead-notes.md`: known data-quality problems and claims the lead checked. Weight flagged runs lower, and treat any "no concept covers X" claim as needing corroboration.
 - `<STUDY_DIR>/analysis/quant.md`: the leaderboard, for orientation only.
 <EXTRA_CONTEXT_FILES>
 - Then read every model file for each of your personas in `<STUDY_DIR>/panel/personas/`.

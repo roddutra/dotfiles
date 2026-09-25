@@ -8,6 +8,12 @@ For each panel/sites/concept-<L>/<page>.html writes panel/materials/concept-<L>/
   mobile-first-screens.png
   page-text.txt           innerText after expanding <details>, aria-expanded buttons and reveals
 
+A concept's "states" in study.json (e.g. a toggle switched to another audience) are captured
+as extra page folders named <page>@<state>, so every reviewer sees every variant instead of
+depending on whether their model thought to click it:
+  {"id": "03-x", "path": "...", "states": [{"name": "insurance", "page": "index",
+   "js": "document.querySelector('[data-industry=insurance]').click()"}]}
+
 Then scans page text for study.json "forbidden_terms" (build notes, internal terms) and
 reports any hit, because panellists read everything literally.
 
@@ -26,12 +32,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
 
 
-def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str) -> str:
+def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: dict | None = None) -> str:
     dw, dh = cap.get("desktop", [1440, 900])
     mw, mh = cap.get("mobile", [390, 844])
     max_screens = cap.get("max_screens", 20)
-    name = page[:-5]
+    name = page[:-5] + (f"@{state['name']}" if state else "")
     pdir = out / name
+    media = cap.get("media", "")
+    setup_js = state["js"] + ";1" if state else ""
     raw = pdir / "raw"
     raw.mkdir(parents=True, exist_ok=True)
     for old in list(raw.glob("*.png")) + list(pdir.glob("desktop-sheet-*.png")):
@@ -39,7 +47,10 @@ def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str) -> str:
     url = f"file://{site / page}"
 
     b = pl.Browser(f"cap-{tag}-{name}")
-    b.open(url, dw, dh)
+    b.open(url, dw, dh, media=media)
+    if setup_js:
+        b.eval(setup_js)
+        b.run("wait", "1000")
     total = b.scroll_height()
     step = dh - 60
     i = pos = 0
@@ -57,9 +68,12 @@ def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str) -> str:
     (pdir / "page-text.txt").write_text(text if isinstance(text, str) else str(text))
     b.close()
 
-    n_mobile = cap.get("mobile_screens_home", 4) if name == "index" else cap.get("mobile_screens_other", 2)
+    n_mobile = cap.get("mobile_screens_home", 4) if page == "index.html" else cap.get("mobile_screens_other", 2)
     m = pl.Browser(f"cap-{tag}-{name}-m")
-    m.open(url, mw, mh)
+    m.open(url, mw, mh, media=media)
+    if setup_js:
+        m.eval(setup_js)
+        m.run("wait", "1000")
     for j in range(n_mobile):
         m.run("screenshot", str(raw / f"m-{j}.png"))
         for _ in range(3):
@@ -101,12 +115,17 @@ def main():
         for page in sorted(p.name for p in site.glob("*.html")):
             if args.page and page[:-5] not in args.page:
                 continue
-            jobs.append((site, page, sd / "panel" / "materials" / site.name, label))
+            jobs.append((site, page, sd / "panel" / "materials" / site.name, label, None))
+        concept = pl.label_map(cfg)[label]
+        for st in concept.get("states", []):
+            page = st.get("page", "index") + ".html"
+            if (site / page).exists() and not (args.page and page[:-5] not in args.page):
+                jobs.append((site, page, sd / "panel" / "materials" / site.name, label, st))
     if not jobs:
         raise SystemExit("Nothing to capture. Run init_study.py first.")
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:
-        for line in ex.map(lambda j: capture_page(j[0], j[1], j[2], cap, j[3]), jobs):
+        for line in ex.map(lambda j: capture_page(j[0], j[1], j[2], cap, j[3], j[4]), jobs):
             print(line)
 
     terms = [t.lower() for t in cfg.get("forbidden_terms", []) + cfg["leak_terms"]]

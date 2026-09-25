@@ -7,7 +7,13 @@ A run is "done" when its persona file has a scored section for every concept and
 Usage:
   runs.py <study-dir> status
   runs.py <study-dir> next [--limit 20] [--running P01-opus,P02-fable]   # prompts to launch now
-  runs.py <study-dir> prompt <run-id>                                    # one prompt, for a resume
+  runs.py <study-dir> prompt <run-id>                                    # the run's launch prompt
+  runs.py <study-dir> mark <run-id> <agent-id>                           # record the subagent id
+  runs.py <study-dir> resume [<run-id>]                                  # resume messages for unfinished runs
+
+Record each subagent id with "mark" as soon as you launch it. runs.json survives context
+compaction, so an interrupted run (usage limit, crash) can be resumed with SendMessage to the
+same agent instead of relaunched, which would duplicate sections or lose its reading.
 """
 
 from __future__ import annotations
@@ -35,15 +41,32 @@ def run_states(sd: Path, cfg: dict) -> list[dict]:
             state = "started"
         else:
             state = "pending"
-        out.append({**r, "state": state, "scored": scored, "of": len(labels)})
+        out.append({**r, "state": state, "scored": scored, "of": len(labels),
+                    "written": sorted(p["sections"]) if p else [], "has_final": bool(p and p["has_final"])})
     return out
+
+
+def resume_message(s: dict) -> str:
+    if s["state"] == "pending":
+        return ("Your run was interrupted before any concept was written. Start again from step 1 of your "
+                "original instructions.")
+    done = ", ".join(s["written"])
+    if s["scored"] == s["of"] and not s["has_final"]:
+        todo = "All concept sections are written. Re-read your persona file, then append the final sections."
+    else:
+        todo = ("Re-read your persona file, review the remaining concepts in your listed order, append each "
+                "section as you finish it, then append the final sections.")
+    return (f"Your run was cut off before it finished. Pick up where you left off.\n"
+            f"- Already written: {done}. Do not rewrite or repeat those sections.\n"
+            f"- {todo}\n- All the original rules still apply. When done, reply with the summary the instructions ask for.")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
-    ap.add_argument("cmd", choices=["status", "next", "prompt"])
+    ap.add_argument("cmd", choices=["status", "next", "prompt", "mark", "resume"])
     ap.add_argument("run", nargs="?")
+    ap.add_argument("agent", nargs="?")
     ap.add_argument("--limit", type=int, default=20, help="concurrent subagent cap (Claude Code allows 20)")
     ap.add_argument("--running", default="", help="comma-separated run ids already running")
     ap.add_argument("--json", action="store_true")
@@ -64,6 +87,9 @@ def main():
     elif args.cmd == "next":
         running = {x.strip() for x in args.running.split(",") if x.strip()}
         slots = max(0, args.limit - len(running))
+        # A pending run with a recorded agent id was launched and hasn't written yet: count it as running.
+        running |= {s["run"] for s in states if s["state"] != "done" and s.get("agent")}
+        slots = max(0, args.limit - len(running))
         todo = [s for s in states if s["state"] == "pending" and s["run"] not in running][:slots]
         if args.json:
             print(json.dumps([{**s, "prompt_text": (sd / s["prompt"]).read_text()} for s in todo], indent=2))
@@ -72,6 +98,22 @@ def main():
             print(f"=== {s['run']} (model: {s['model']}, description: Panel {s['run']})")
             print((sd / s["prompt"]).read_text())
         print(f"{len(todo)} to launch; {sum(s['state'] == 'pending' for s in states) - len(todo)} left queued.")
+    elif args.cmd == "mark":
+        if not (args.run and args.agent):
+            raise SystemExit("usage: runs.py <study> mark <run-id> <agent-id>")
+        data = json.loads((sd / "runs.json").read_text())
+        hit = [r for r in data if r["run"] == args.run]
+        if not hit:
+            raise SystemExit(f"No run {args.run}")
+        hit[0]["agent"] = args.agent
+        (sd / "runs.json").write_text(json.dumps(data, indent=2) + "\n")
+        print(f"{args.run} -> {args.agent}")
+    elif args.cmd == "resume":
+        todo = [s for s in states if s["state"] != "done" and (not args.run or s["run"] == args.run)]
+        for s in todo:
+            print(f"=== {s['run']} ({s['state']}, agent: {s.get('agent') or 'not recorded: relaunch with runs.py prompt'})")
+            print(resume_message(s))
+        print(f"{len(todo)} unfinished runs.")
     else:
         match = [s for s in states if s["run"] == args.run]
         if not match:

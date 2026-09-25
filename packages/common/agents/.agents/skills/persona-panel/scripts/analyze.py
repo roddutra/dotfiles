@@ -141,6 +141,25 @@ def main():
                 if v == v:
                     vals.append(v)
         pair_agree[f"{a}-{b}"] = mean(vals) if vals else None
+    persona_agree = []
+    for pid in sorted({r["persona_id"] for r in rows}):
+        per = {m: {r["concept"]: r["overall"] for r in rows if r["persona_id"] == pid and r["model"] == m}
+               for m in models}
+        per = {m: v for m, v in per.items() if v}
+        vals = []
+        for a, b in itertools.combinations(per, 2):
+            common = [c for c in labels if c in per[a] and c in per[b]]
+            if len(common) >= 3:
+                v = pl.spearman([per[a][c] for c in common], [per[b][c] for c in common])
+                if v == v:
+                    vals.append(v)
+        tops = {}
+        for m, v in per.items():
+            ranked = [r["concept"] for r in ranks if r["persona_id"] == pid and r["model"] == m and r["rank"] == 1]
+            best = max(v.values())
+            tops[m] = ranked[0] if ranked else "=".join(c for c in labels if v.get(c) == best)
+        persona_agree.append({"persona": pid, "spearman": mean(vals) if vals else None, "tops": tops,
+                              "same_top": len(set(tops.values())) == 1})
     full_order = [d["mean"] for d in sorted(lb, key=lambda d: d["concept"])]
     sens = {}
     for m in models:
@@ -149,7 +168,8 @@ def main():
         if len(models) > 1:
             win = sorted(labels)[max(range(len(means)), key=lambda i: means[i])]
             sens[m] = {"winner": win, "rho_vs_full": pl.spearman(full_order, means)}
-    res["models"] = {"level": level, "per_model": per_model, "pair_spearman": pair_agree, "drop_one": sens}
+    res["models"] = {"level": level, "per_model": per_model, "pair_spearman": pair_agree, "drop_one": sens,
+                     "persona_agreement": persona_agree}
 
     # Persona matrix
     pids = sorted({r["persona_id"] for r in rows})
@@ -233,6 +253,19 @@ def main():
         md += ["Sensitivity (leaderboard without one model):", "",
                table(["Dropped", "Winner", "Spearman vs full"],
                      [[m, s["winner"], fmt(s["rho_vs_full"])] for m, s in sens.items()]), ""]
+
+    if len(models) > 1:
+        weak = [d["persona"] for d in persona_agree
+                if not d["same_top"] and (d["spearman"] is None or d["spearman"] < 0.3)]
+        md += ["## Model agreement by persona", "",
+               "Spearman across a persona's model runs, and each run's first-ranked concept (ties shown as 12=13 when a run has no ranking). A persona whose models disagree "
+               "tells you about model taste, not the persona: report its result as unsettled.", "",
+               table(["Persona", "Spearman", *models, "Same top"],
+                     [[f"{d['persona']} {names.get(d['persona'], '')}", fmt(d["spearman"]),
+                       *[d["tops"].get(m, "-") for m in models], "yes" if d["same_top"] else "no"]
+                      for d in persona_agree]), ""]
+        if weak:
+            md += [f"Unsettled personas (different top concepts and Spearman under 0.3): {', '.join(weak)}.", ""]
 
     md += ["## Persona x concept (mean Overall across models)", "", table(
         ["Persona", *labels],
