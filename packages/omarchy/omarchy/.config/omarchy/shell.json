@@ -125,9 +125,6 @@
       "id": "omadock"
     },
     {
-      "id": "io.github.twiking.omasettings"
-    },
-    {
       "id": "io.github.sirjul1337.lock-explorer",
       "design": "split"
     },

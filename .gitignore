@@ -88,7 +88,6 @@ packages/common/omp/.omp/agent/*
 packages/omarchy/hypr/.config/hypr/*.bak.*
 packages/omarchy/hypr/.config/hypr/hyprmoncfg-monitors.lua
 packages/omarchy/hypr/.config/hypr/monitors.local.lua
-packages/omarchy/hypr/.config/hypr/omasettings*
 packages/omarchy/omarchy/.config/omarchy/plugins/
 packages/omarchy/omarchy/.config/omarchy/themes/
 packages/omarchy/omarchy/.config/omarchy/hass.json

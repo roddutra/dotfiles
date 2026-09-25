@@ -36,7 +36,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.
 
-Generated monitor files, OmaSettings state, backups, secrets, downloaded plugins, and downloaded themes are intentionally excluded. Plugins and the theme are restored from `manifests/omarchy/`.
+Generated monitor files, backups, secrets, downloaded plugins, and downloaded themes are intentionally excluded. Plugins and the theme are restored from `manifests/omarchy/`.
 
 ## OMP updates blocked by mise
 
@@ -130,8 +130,6 @@ A system-tray application must publish a StatusNotifierItem over D-Bus. Omarchy 
 - Unpin places a tray item in the expandable drawer.
 - Hide removes a tray item from the tray.
 - A separate Omarchy bar widget cannot be moved into the tray drawer.
-
-OmaSettings is a bar widget plus a service. Its gear can be removed from `bar.layout.right` while keeping `io.github.twiking.omasettings` enabled in the top-level plugin list so the launcher entry remains available.
 
 ## LAN access and UFW
 
