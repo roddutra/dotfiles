@@ -25,6 +25,8 @@ npx skills update <name> --project --yes
 
 Shared-agent installs belong in `.agents/skills/`. Remove agent-specific directories generated inside this package. Add links through the existing dedicated packages instead, such as `packages/common/claude/.claude/skills/` for Claude Code.
 
+`test-audit` is imported from OpenClaw. Its validation and PR commands in `SKILL.md` and default-branch references in `CAMPAIGN.md` are adapted to work across repositories; reapply those local changes after `npx skills update test-audit --project --yes`.
+
 ## Herdr
 
 The Herdr binary manages its skill and integration hooks. They remain untracked because updates rewrite them.

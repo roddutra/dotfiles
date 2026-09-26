@@ -1,6 +1,6 @@
 ---
 name: lerd
-description: Manage the lerd local PHP development environment via MCP tools: run framework console commands (artisan, bin/console, etc.), manage services, start/stop queue workers, run composer, manage Node.js versions, and inspect site status. Also the way to diagnose and optimize a slow site: find N+1 and slow queries, read per-site response-time and slow-route timings, profile requests, and run site health checks, from real captured traffic rather than reading code.
+description: "Manage the lerd local PHP development environment via MCP tools: run framework console commands (artisan, bin/console, etc.), manage services, start/stop queue workers, run composer, manage Node.js versions, and inspect site status. Also the way to diagnose and optimize a slow site: find N+1 and slow queries, read per-site response-time and slow-route timings, profile requests, and run site health checks, from real captured traffic rather than reading code."
 ---
 ## Lerd, a local PHP development environment
 
