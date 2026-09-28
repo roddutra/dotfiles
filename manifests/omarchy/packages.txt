@@ -16,6 +16,7 @@ php-pgsql
 php-sqlite
 podman
 rclone
+socat
 spotify
 spotifyd
 stow

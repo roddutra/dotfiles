@@ -85,3 +85,11 @@ o.bind("SUPER + M", "VoxType meeting controls", "mkdir -p $XDG_RUNTIME_DIR/voxty
 
 hl.unbind("SUPER + SHIFT + M") -- previously: Music
 o.bind("SUPER + SHIFT + M", "OmaSpotify", "omarchy shell -q io.github.jeremylanger.omaspotify.player togglePlayer")
+
+-- Load omalt-tab's Alt+Tab bindings when the plugin is installed.
+local omalt_tab_bindings = (os.getenv("HOME") or "") .. "/.config/omarchy/plugins/io.github.codesmith28.omalt-tab/hypr/bindings.lua"
+local omalt_tab_file = io.open(omalt_tab_bindings, "r")
+if omalt_tab_file then
+  omalt_tab_file:close()
+  dofile(omalt_tab_bindings)
+end

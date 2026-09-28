@@ -2,6 +2,7 @@
 blizl.voxtype-osd|https://github.com/Blizl/Omarchy-VoxType-OSD.git
 crmne.hyprmoncfg|https://github.com/crmne/omarchy-hyprmoncfg.git
 hass|https://github.com/konradk/hass.git
+io.github.codesmith28.omalt-tab|https://github.com/Codesmith28/omalt-tab.git
 io.github.jeremylanger.omaspotify|https://github.com/jeremylanger/omaspotify.git
 io.github.kristoferlund.webcam|https://github.com/kristoferlund/omarchy-webcam.git
 io.github.sirjul1337.lock-explorer|https://github.com/SirJul1337/omarchy-lock-explorer.git
