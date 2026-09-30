@@ -76,7 +76,7 @@ payload=$(jq \
     model: $model,
     temperature: 0,
     reasoning_effort: "low",
-    max_completion_tokens: 4096,
+    max_completion_tokens: 16384,
     messages: (
       [
         {
@@ -123,7 +123,7 @@ response=$(curl \
   --silent \
   --show-error \
   --connect-timeout 3 \
-  --max-time 12 \
+  --max-time 45 \
   --header "@$request_dir/headers" \
   --data-binary "@$request_dir/body" \
   "$api_url" 2> "$request_dir/curl-error") || fail 3 "$(tail -n 1 "$request_dir/curl-error")"

@@ -11,7 +11,7 @@ mode = "push_to_talk"
 [audio]
 device = "default"
 sample_rate = 16000
-max_duration_secs = 300
+max_duration_secs = 900
 pause_media = true
 duck_media = false
 duck_media_volume_percent = 34
@@ -95,4 +95,4 @@ icon_theme = "emoji"
 # Opt-in cloud cleanup profile used by the primary Hyprland shortcuts.
 [profiles.groq_cleanup]
 post_process_command = "~/.local/bin/voxtype-groq-cleanup"
-post_process_timeout_ms = 15000
+post_process_timeout_ms = 60000

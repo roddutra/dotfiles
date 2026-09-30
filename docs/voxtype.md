@@ -2,6 +2,8 @@
 
 Voxtype provides local speech recognition with an optional Groq cleanup profile. The primary shortcuts use Groq cleanup; secondary shortcuts keep raw local transcription available.
 
+Recordings stop automatically after 15 minutes (`max_duration_secs = 900`), which leaves room for long dictation sessions.
+
 ## Shortcut contract
 
 | Shortcut | Mode |
@@ -124,9 +126,9 @@ Current request defaults:
 - Model: `openai/gpt-oss-120b`
 - Temperature: `0`
 - Reasoning effort: `low`
-- Completion limit: `4096` tokens
-- Curl deadline: `12` seconds
-- Voxtype post-processing deadline: `15` seconds
+- Completion limit: `16384` tokens
+- Curl deadline: `45` seconds
+- Voxtype post-processing deadline: `60` seconds
 
 The cleanup command accepts output only when Groq returns a non-empty string with `finish_reason` equal to `stop`. Missing files, invalid replacement configuration, transport errors, truncated responses, and malformed responses return a nonzero status. Voxtype then retains the raw transcript instead of inserting partial or unverified output, and the progress notification reports the failure.
 
