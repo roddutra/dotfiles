@@ -1,9 +1,9 @@
 modelRoles:
-  default: openai-codex/gpt-6-sol:high
   smol: openai-codex/gpt-6-luna:high
-  plan: openai-codex/gpt-6-sol:xhigh
-  task: openai-codex/gpt-6-sol:high
-  designer: openai-codex/gpt-6-sol:high
+  plan: openai-codex/gpt-6-astra
+  task: openai-codex/gpt-6.1-sol:high
+  designer: openai-codex/gpt-6.1-sol:high
+  default: openai-codex/gpt-6.1-sol
 symbolPreset: unicode
 composer:
   shape: box
