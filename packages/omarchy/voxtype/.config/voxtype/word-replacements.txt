@@ -2,7 +2,7 @@
 # Matching is case-insensitive and uses word boundaries.
 # Longer aliases take precedence. Replacements do not cascade.
 
-Altus C => Altus Sea
+Altus C, Autus CPTY LTD => Altus Sea
 can-ban => kanban
 coconut balls => coconut bowls
 Jast, Jost, JASU => Joust
