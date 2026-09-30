@@ -12,6 +12,7 @@ Codex
 dotfiles
 Dutra
 Groq
+Qwen
 Joust
 Kimai
 LiveKit
