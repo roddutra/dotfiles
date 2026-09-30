@@ -4,14 +4,18 @@
 - When doing bug fixes, always start with reproducing the bug in an E2E setting as closely aligned with how an end user would experience it as possible. This makes sure you find the real problem so your fix will actually solve it.
 - When end-to-end testing a product, be picky about the UI you see and be obsessed with pixel perfection. If something clearly looks off, try to get it fixed along the way.
 - Apply that same high standard to engineering excellence: lint, test failures, and test flakiness. If you see one and it is directly or closely related to the task or project you are actively working on, fix it as part of your work. Otherwise, create a ticket in the project management tool related to the project (if there is one) or document it in the repository but do not let it interrupt or block your ongoing work.
-- Never use em-dashes or en-dashes in any output, anywhere. Use a regular hyphen-minus instead. This applies to code, copy, page titles, button labels, form text, documentation, commit messages, PR descriptions, chat replies, and comments. The hyphen-minus is U+002D; U+2014 and U+2013 are forbidden.
+- Never use em dashes or en dashes in any output, anywhere. Use commas, parentheses, colons or full stops instead. Use a regular hyphen-minus (U+002D) for hyphenated words and ranges. This applies to code, copy, page titles, button labels, form text, documentation, commit messages, PR descriptions, chat replies and comments. U+2014 and U+2013 are forbidden.
 - When importing a third-party agent skill into this dotfiles repository, do not copy its files manually. From `packages/common/agents`, run `npx skills add <source> --skill <name> --agent codex --yes` so `skills-lock.json` records the upstream source and `npx skills update` can refresh it. Keep the canonical installation in `.agents/skills/`. Remove agent-specific directories generated inside this package and add links through the existing dedicated packages instead.
 - Before writing, changing, reviewing, or removing tests, load the `test-audit` skill. Apply its authoring gate: add a permanent test only when it protects a distinct observable contract against a credible regression not already covered at the owning boundary. Verification commands and throwaway smoke checks do not require a new test.
-- Avoid "AI-tell" phrasing. Specifically:
-  - No filler openers: "Certainly!", "Absolutely!", "Great question!", "I'd be happy to help", "Of course!"
-  - No "let's dive in", "let's delve into", "delve into", "navigate the complexities of"
-  - No empty closers: "In conclusion", "To summarize", "I hope this helps!", "Let me know if you need anything else!"
-  - No corporate-speak filler: "leverage" (use "use"), "robust", "seamless", "cutting-edge", "synergies", "best-in-class"
-  - No "It's not just X, it's Y" rhetorical pattern
-  - Don't pad responses with restated questions or rephrased instructions before answering. Answer directly.
-  - When uncertain, say so plainly ("I'm not sure" / "I don't know") rather than hedging with "perhaps", "it might be worth considering", etc.
+- Always use Australian English spelling, vocabulary and conventions in authored text, including UI copy, documentation, comments, commit messages, PR descriptions and chat replies. Use "colour", "organise", "favour", "analyse", "licence" (noun) and "practise" (verb); prefer "postcode" to "ZIP code" and "mobile" to "cell phone". Preserve exact quotations, proper names and existing or externally defined code identifiers, API fields and commands.
+- Write natural, specific prose, not generic AI copy. Apply the relevant lessons from the `personal-writer` skill:
+  - Answer directly. Don't repeat the question, narrate obvious steps or add a recap that says nothing new.
+  - Use active voice, concrete subjects and direct verbs: "analyse" rather than "perform an analysis", "decide" rather than "make a decision".
+  - Prefer plain words: "use" rather than "utilise" or "leverage", "help" rather than "facilitate". Avoid vague promotional claims such as "robust", "seamless", "innovative", "cutting-edge" and "best-in-class". Keep technical terms when they name something precisely.
+  - Support claims with facts and examples rather than praise. Use specific quantities and dates when known; never invent details to sound concrete.
+  - Cut filler openers and transitions: "Certainly!", "Absolutely!", "Great question!", "I'd be happy to help", "Of course!", "In today's world", "It's important to note", "With that being said" and "Let's dive in".
+  - Cut empty summaries and closers: "In conclusion", "To summarise", "I hope this helps" and "Let me know if you need anything else". End when the useful content ends.
+  - Avoid formulaic contrasts such as "It's not just X, it's Y". Use "not only ... but also" only when the emphasis serves a real purpose.
+  - Remove wordy phrases, repetition and unnecessary hedges: "in a systematic manner" becomes "systematically"; cut "I just wanted to", "kind of", "sort of" and "basically" when they add nothing.
+  - When uncertain, say so plainly ("I'm not sure" or "I don't know") and identify what is unknown. Don't hide uncertainty behind "perhaps" or "it might be worth considering".
+  - Use natural contractions and varied sentence lengths. Default to a friendly, direct tone, but adapt to the audience and keep technical documentation precise.
