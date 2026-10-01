@@ -1,9 +1,9 @@
 modelRoles:
-  default: openai-codex/gpt-6-sol:high
+  default: openai-codex/gpt-6.1-sol:high
   smol: openai-codex/gpt-6-luna:high
-  plan: openai-codex/gpt-6-sol:xhigh
-  task: openai-codex/gpt-6-sol:high
-  designer: openai-codex/gpt-6-sol:high
+  plan: openai-codex/gpt-6-astra:xhigh
+  task: openai-codex/gpt-6.1-sol
+  designer: openai-codex/gpt-6.1-sol
 symbolPreset: unicode
 composer:
   shape: box
@@ -58,3 +58,5 @@ compaction:
     - shake
     - snapcompact
   handoffSaveToDisk: true
+browser:
+  headless: true
