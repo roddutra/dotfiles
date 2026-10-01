@@ -12,6 +12,7 @@ Codex
 dotfiles
 Dutra
 Groq
+Qwen
 Joust
 Kimai
 LiveKit
@@ -30,7 +31,6 @@ TomoBroker
 tomobroker.com
 tomobroker.com.au
 True Fitout
-VoiceInk
 Voxtype
 Windmill
 worktree

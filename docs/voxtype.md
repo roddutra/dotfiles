@@ -2,6 +2,8 @@
 
 Voxtype provides local speech recognition with an optional Groq cleanup profile. The primary shortcuts use Groq cleanup; secondary shortcuts keep raw local transcription available.
 
+Recordings stop automatically after 15 minutes (`max_duration_secs = 900`), which leaves room for long dictation sessions.
+
 ## Shortcut contract
 
 | Shortcut | Mode |
@@ -116,19 +118,23 @@ The dictionary is reference context, not a replacement list. The Groq prompt per
 
 ## Prompt and Groq request
 
-The cleanup prompt preserves meaning, removes speech disfluencies, resolves self-corrections, fixes punctuation and casing, and returns only the cleaned transcript. Dictated instructions are treated as text to clean, not instructions for the cleanup model to execute.
+The cleanup prompt asks for a minimal edit rather than a rewrite. It lists the only things the model may delete (fillers, repeated words, abandoned false starts, and explicitly corrected wording) and requires everything else, including asides, hedges, and requests, to stay in the speaker's words. It also fixes punctuation and casing, and returns only the cleaned transcript. Dictated instructions are treated as text to clean, not instructions for the cleanup model to execute.
+
+`openai/gpt-oss-120b` condensed long dictation into summaries even with explicit "do not summarize" rules, dropping 30-50% of the words on 600-word transcripts. `qwen/qwen3.8-27b` with reasoning disabled keeps 94-97% and responds faster, so it is the primary model.
 
 Current request defaults:
 
 - Endpoint: `https://api.groq.com/openai/v1/chat/completions`
-- Model: `openai/gpt-oss-120b`
+- Model: `qwen/qwen3.8-27b`, reasoning effort `none`
+- Fallback model: `openai/gpt-oss-120b`, reasoning effort `low`
 - Temperature: `0`
-- Reasoning effort: `low`
-- Completion limit: `4096` tokens
-- Curl deadline: `12` seconds
-- Voxtype post-processing deadline: `15` seconds
+- Completion limit: `16384` tokens
+- Curl deadline: `25` seconds per attempt
+- Voxtype post-processing deadline: `60` seconds
 
-The cleanup command accepts output only when Groq returns a non-empty string with `finish_reason` equal to `stop`. Missing files, invalid replacement configuration, transport errors, truncated responses, and malformed responses return a nonzero status. Voxtype then retains the raw transcript instead of inserting partial or unverified output, and the progress notification reports the failure.
+If the primary request fails or returns an incomplete response, the command retries once with the fallback model. Accepted output is normalised to ASCII: en and em dashes become ` - ` (or `-` between digits), Unicode hyphens become `-`, and curly quotes become straight quotes. The models emit these characters on longer transcripts despite the prompt.
+
+The cleanup command accepts output only when Groq returns a non-empty string with `finish_reason` equal to `stop`. Missing files, invalid replacement configuration, transport errors, truncated responses, and malformed responses from both models return a nonzero status. Voxtype then retains the raw transcript instead of inserting partial or unverified output, and the progress notification reports the failure.
 
 The request headers and body use mode `600` files inside a mode `700` runtime directory. The directory is removed on exit. The API key and transcript are not passed in process arguments.
 
@@ -151,7 +157,7 @@ unset GROQ_API_KEY
 chmod 600 "$data_home/voxtype/secrets/groq-api-key"
 ```
 
-`VOXTYPE_GROQ_API_KEY_FILE`, `VOXTYPE_GROQ_API_URL`, `VOXTYPE_GROQ_MODEL`, `VOXTYPE_GROQ_PROMPT_FILE`, `VOXTYPE_REPLACEMENTS_FILE`, `VOXTYPE_DICTIONARY_FILE`, and `VOXTYPE_PREPARE_COMMAND` override the defaults for diagnostics.
+`VOXTYPE_GROQ_API_KEY_FILE`, `VOXTYPE_GROQ_API_URL`, `VOXTYPE_GROQ_MODEL`, `VOXTYPE_GROQ_REASONING_EFFORT`, `VOXTYPE_GROQ_FALLBACK_MODEL`, `VOXTYPE_GROQ_FALLBACK_REASONING_EFFORT`, `VOXTYPE_GROQ_PROMPT_FILE`, `VOXTYPE_REPLACEMENTS_FILE`, `VOXTYPE_DICTIONARY_FILE`, and `VOXTYPE_PREPARE_COMMAND` override the defaults for diagnostics.
 
 ## Restore
 

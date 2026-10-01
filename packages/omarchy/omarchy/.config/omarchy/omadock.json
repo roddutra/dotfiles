@@ -17,5 +17,17 @@
   "urgentSound": true,
   "urgentSoundName": "bell",
   "revealDelay": 160,
-  "tooltipDelay": 450
+  "tooltipDelay": 450,
+  "alignment": "center",
+  "showRemovableDrives": true,
+  "appGroups": [],
+  "showMinimizedTiles": true,
+  "folderColor": "theme",
+  "pinnedFolders": [
+    {
+      "path": "~/Downloads",
+      "name": "Downloads",
+      "icon": "folder-download"
+    }
+  ]
 }
