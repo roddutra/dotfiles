@@ -5,6 +5,11 @@ config-file = ?"~/.local/state/omarchy/current/theme/ghostty.conf"
 font-family = "JetBrainsMono Nerd Font"
 font-style = Regular
 font-size = 9
+# Ghostty falls back to its built-in monochrome Noto Emoji for these, which draws
+# boxed or heavy shapes for Claude Code's macOS bullet (U+23FA), plan mode (U+23F8) and a
+# spinner frame (U+2733). A codepoint map also stops their VS16 emoji forms from
+# rendering, so only map symbols that tools print without VS16.
+font-codepoint-map = U+23F8,U+23FA,U+2733=Noto Sans Symbols 2
 
 # Window
 window-theme = ghostty

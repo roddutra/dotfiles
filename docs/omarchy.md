@@ -171,6 +171,24 @@ ip -4 route get <client-lan-ip>
 
 The route should now use the LAN interface. This preference survives disconnects and restarts, but check it again after switching Tailscale profiles or explicitly changing Tailscale settings. Disabling route acceptance also removes access to any other subnet routes advertised to that profile; do not use this fix if those routes are needed.
 
+## Symbols render as boxes in Ghostty
+
+When JetBrains Mono lacks a symbol, Ghostty falls back to its built-in monochrome Noto Emoji. That font draws some symbols as boxed or heavy shapes that spill over the next cell. Claude Code shows three of them:
+
+- `⏺` (U+23FA): message bullet, sent only by Claude Code running on macOS, so it appears in SSH and remote Herdr sessions to a Mac.
+- `⏸` (U+23F8): plan mode indicator, on every platform.
+- `✳` (U+2733): spinner frame, sent only when `TERM=xterm-ghostty`.
+
+`packages/omarchy/ghostty/.config/ghostty/config` maps these to Noto Sans Symbols 2 with `font-codepoint-map`. Herdr and SSH do not change these symbols; the same text renders the same way in a local Ghostty pane.
+
+Check which font draws a symbol:
+
+```sh
+ghostty +show-face --cp=0x23fa
+```
+
+Only map symbols that tools print without the emoji selector VS16. A mapped codepoint followed by VS16 (`❤️`, `✔️`) renders as a replacement mark instead of a colour emoji, so a blanket mapping of every Noto Emoji fallback breaks emoji in ordinary text. Reload Ghostty with `pkill -USR2 -x ghostty` after editing the map.
+
 ## Hyprland checks
 
 Hyprland normally reloads after configuration changes. Validate explicitly:
