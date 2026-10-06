@@ -171,6 +171,42 @@ ip -4 route get <client-lan-ip>
 
 The route should now use the LAN interface. This preference survives disconnects and restarts, but check it again after switching Tailscale profiles or explicitly changing Tailscale settings. Disabling route acceptance also removes access to any other subnet routes advertised to that profile; do not use this fix if those routes are needed.
 
+## Internet drops when switching or disconnecting Tailscale
+
+Symptom: public sites stop resolving after switching to a work tailnet or running `tailscale down`, then recover the moment the personal tailnet reconnects.
+
+Check what the LAN interface and lerd's dnsmasq use as upstream:
+
+```sh
+resolvectl dns
+cat ~/.local/share/lerd/dnsmasq/lerd.conf
+```
+
+If the LAN interface lists `100.100.100.100` or `fd7a:115c:a1e0::53`, or `lerd.conf` has `server=100.100.100.100`, public DNS depends on Tailscale's resolver. That works only on a tailnet whose DNS settings forward public names. A tailnet with split DNS only returns SERVFAIL (`journalctl -u tailscaled` logs `no upstream resolvers set`), and with Tailscale down the address is unreachable.
+
+Cause: lerd's DNS repair (watcher log `DNS resolution broken, repairing`, or `lerd dns:repair`) takes the first nameservers in `/run/systemd/resolve/resolv.conf` as the upstream. While MagicDNS is active, those are Tailscale's.
+
+Fix: pin lerd's upstream to the LAN resolvers in `~/.config/lerd/config.yaml`, then re-apply:
+
+```yaml
+dns:
+    upstream:
+        - <lan-dns-1>
+        - <lan-dns-2>
+```
+
+```sh
+lerd dns:repair --no-pull
+```
+
+Both the repair and lerd's NetworkManager dispatcher prefer `dns.upstream` over detection, so a later repair keeps the LAN resolvers. Verify by switching tailnets and running `tailscale down`: `getent ahostsv4 google.com.au` and `lerd.test` should still resolve.
+
+`lerd dns:repair` re-runs lerd's whole installer, which rewrites tracked files in this repository: it appends an absolute-path `PATH` line to `packages/omarchy/bash/.bashrc` and strips the quotes from the lerd skill's `description`, which makes its frontmatter invalid YAML. Revert both afterwards:
+
+```sh
+git checkout -- packages/omarchy/bash/.bashrc packages/common/agents/.agents/skills/lerd/SKILL.md
+```
+
 ## Symbols render as boxes in Ghostty
 
 When JetBrains Mono lacks a symbol, Ghostty falls back to its built-in monochrome Noto Emoji. That font draws some symbols as boxed or heavy shapes that spill over the next cell. Claude Code shows three of them:
