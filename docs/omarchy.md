@@ -28,11 +28,13 @@ Use `--dry-run` to inspect bootstrap commands. Omit `--hardware` on a machine wi
 
 Tracked Omarchy packages live under `packages/omarchy/`:
 
+- `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `claude-desktop/` contains Claude Desktop launch flags. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `ghostty/` contains the Linux Ghostty configuration.
 - `hypr/` contains personal Hyprland overrides.
 - `nvim/` contains the Linux-specific Neovim override.
 - `omarchy/` contains selected shell and plugin preference files.
+- `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `voxtype/` contains managed dictation configuration, vocabulary, and Groq cleanup commands. See `docs/voxtype.md`.
 
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.

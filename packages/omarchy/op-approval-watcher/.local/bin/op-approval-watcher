@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Start the 1Password approval watcher (a windowless Quickshell instance)
+# against the live Hyprland instance. Run by op-approval-watcher.service.
+#
+# The signature in the systemd user environment goes stale when Hyprland
+# restarts, and an updated environment never reaches a running process, so
+# rediscover the live instance from $XDG_RUNTIME_DIR/hypr/ on every start.
+# The watcher exits when Hyprland stops answering, and systemd starts it again.
+set -euo pipefail
+
+config_dir=${OP_APPROVAL_WATCHER_DIR:-"$HOME/.local/share/op-approval-watcher"}
+
+die() {
+  printf 'op-approval-watcher: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ -n ${XDG_RUNTIME_DIR:-} && -d $XDG_RUNTIME_DIR ]] || die "XDG_RUNTIME_DIR is not set"
+command -v qs >/dev/null 2>&1 || die "Quickshell (qs) is not installed"
+command -v hyprctl >/dev/null 2>&1 || die "hyprctl is not installed"
+command -v jq >/dev/null 2>&1 || die "jq is not installed"
+
+# omarchy-hyprland-session-locked lives here; a bare systemd environment may
+# not have it on PATH.
+omarchy_bin="${OMARCHY_PATH:-/usr/share/omarchy}/bin"
+case ":$PATH:" in
+  *":$omarchy_bin:"*) ;;
+  *) PATH="$omarchy_bin:$PATH" ;;
+esac
+export PATH
+
+instance_answers() {
+  [[ -S "$XDG_RUNTIME_DIR/hypr/$1/.socket2.sock" ]] \
+    && HYPRLAND_INSTANCE_SIGNATURE=$1 hyprctl version -j >/dev/null 2>&1
+}
+
+signature=''
+wayland_display=''
+
+# Preferred: Hyprland's own list of live instances, newest first.
+while IFS=$'\t' read -r sig wl; do
+  if [[ -n $sig ]] && instance_answers "$sig"; then
+    signature=$sig
+    wayland_display=$wl
+    break
+  fi
+done < <(hyprctl instances -j 2>/dev/null \
+  | jq -r 'if type == "array" then sort_by(-(.time // 0))[] | [.instance // "", .wl_socket // ""] | @tsv else empty end' 2>/dev/null || true)
+
+# Fallback: the newest instance directory whose sockets answer.
+if [[ -z $signature ]]; then
+  while IFS= read -r dir; do
+    sig=${dir%/}
+    sig=${sig##*/}
+    if instance_answers "$sig"; then
+      signature=$sig
+      break
+    fi
+  done < <(ls -1dt -- "$XDG_RUNTIME_DIR"/hypr/*/ 2>/dev/null || true)
+fi
+
+[[ -n $signature ]] || die "no live Hyprland instance in $XDG_RUNTIME_DIR/hypr"
+export HYPRLAND_INSTANCE_SIGNATURE=$signature
+if [[ -n $wayland_display && -S "$XDG_RUNTIME_DIR/$wayland_display" ]]; then
+  export WAYLAND_DISPLAY=$wayland_display
+fi
+
+# The presence feed and its directory must be private (mode 600 in 700).
+umask 077
+feed_dir="$XDG_RUNTIME_DIR/op-approval"
+[[ ! -L $feed_dir ]] || die "refusing to use $feed_dir: it is a symlink"
+mkdir -p -- "$feed_dir"
+chmod 700 -- "$feed_dir"
+[[ ! -e $feed_dir/presence.json ]] || chmod 600 -- "$feed_dir/presence.json"
+
+exec qs --no-color -p "$config_dir"

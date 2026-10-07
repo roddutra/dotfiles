@@ -1,0 +1,317 @@
+#!/bin/sh
+# Work out where a coding agent runs, so an alert says where to go.
+#
+# Usage:  locate [--pid PID] [--harness NAME]
+#
+# Walks the process ancestry from PID (default: the caller, i.e. the parent of
+# this process) and prints one compact JSON object:
+#   {"machine":..,"harness":..,"project":..,"location":..}
+#
+#   machine   config "machine", else the hostname
+#   harness   NAME if it is a known harness (claude codex pi omp opencode
+#             grok), else the first known harness among the ancestors, else
+#             "agent"
+#   project   project alias for the basename of the harness's working
+#             directory (else PID's, else $PWD)
+#   location  comma-separated parts, each omitted when its tool is missing or
+#             fails: the Hyprland window (first ancestor owning a client),
+#             then Herdr workspace/tab, else tmux, else Zellij. May be "".
+#
+# Every value is sanitised to [A-Za-z0-9 ._:/@+-], at most 40 bytes per label.
+#
+# Exit codes:
+#   0   printed (missing pieces are left out, never fatal)
+#   64  bad usage
+
+set -eu
+
+OPA_LIB_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$OPA_LIB_DIR/common.sh"
+
+usage() {
+  printf 'usage: locate [--pid PID] [--harness NAME]\n' >&2
+  exit 64
+}
+
+start_pid=$PPID
+pid_given=''
+wanted=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --pid)
+      [ "$#" -ge 2 ] || usage
+      case "$2" in
+        '' | *[!0-9]*) usage ;;
+      esac
+      start_pid=$2
+      pid_given=1
+      shift 2
+      ;;
+    --harness)
+      [ "$#" -ge 2 ] || usage
+      wanted=$2
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
+
+opa_config_load
+
+# ---------------------------------------------------------------------------
+# Ancestry: one "pid comm" line per process, starting with start_pid.
+
+chain=''
+pids=' '
+pid=$start_pid
+depth=0
+while [ "$pid" -gt 1 ] && [ "$depth" -lt 64 ]; do
+  line=$(ps -o ppid= -o comm= -p "$pid" 2>/dev/null) || break
+  line=${line#"${line%%[! ]*}"}
+  [ -n "$line" ] || break
+  ppid=${line%% *}
+  comm=${line#* }
+  comm=${comm#"${comm%%[! ]*}"}
+  comm=${comm##*/}
+  case "$ppid" in
+    '' | *[!0-9]*) break ;;
+  esac
+  chain="$chain$pid $comm
+"
+  pids="$pids$pid "
+  pid=$ppid
+  depth=$((depth + 1))
+done
+
+in_ancestry() {
+  case "$pids" in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Harness and project
+
+opa_is_harness "$wanted" || wanted=''
+detected=''
+detected_pid=''
+wanted_pid=''
+while IFS=' ' read -r apid acomm; do
+  [ -n "$apid" ] || continue
+  if [ -z "$detected" ] && opa_is_harness "$acomm"; then
+    detected=$acomm
+    detected_pid=$apid
+  fi
+  if [ -n "$wanted" ] && [ -z "$wanted_pid" ] && [ "$acomm" = "$wanted" ]; then
+    wanted_pid=$apid
+  fi
+done <<EOF
+$chain
+EOF
+
+harness=${wanted:-${detected:-agent}}
+harness_pid=${wanted_pid:-$detected_pid}
+
+proc_cwd() {
+  [ -n "$1" ] && readlink "/proc/$1/cwd" 2>/dev/null
+}
+
+cwd=$(proc_cwd "$harness_pid" || true)
+[ -n "$cwd" ] || cwd=$(proc_cwd "$start_pid" || true)
+[ -n "$cwd" ] || cwd=${PWD:-}
+cwd=${cwd%/}
+base=${cwd##*/}
+project=''
+[ -z "$base" ] || project=$(opa_project_alias "$base")
+
+# ---------------------------------------------------------------------------
+# Environment of the target process (multiplexer variables)
+
+target_env() {
+  if [ -n "$pid_given" ] && [ -r "/proc/$start_pid/environ" ]; then
+    tr '\0' '\n' <"/proc/$start_pid/environ" 2>/dev/null | sed -n "s/^$1=//p" | sed -n 1p
+  else
+    case "$1" in
+      HERDR_ENV) printf '%s\n' "${HERDR_ENV:-}" ;;
+      HERDR_PANE_ID) printf '%s\n' "${HERDR_PANE_ID:-}" ;;
+      HERDR_SOCKET_PATH) printf '%s\n' "${HERDR_SOCKET_PATH:-}" ;;
+      TMUX) printf '%s\n' "${TMUX:-}" ;;
+      TMUX_PANE) printf '%s\n' "${TMUX_PANE:-}" ;;
+      ZELLIJ_SESSION_NAME) printf '%s\n' "${ZELLIJ_SESSION_NAME:-}" ;;
+      ZELLIJ_PANE_ID) printf '%s\n' "${ZELLIJ_PANE_ID:-}" ;;
+    esac
+  fi
+}
+
+# Identifiers handed to other tools as arguments: no option look-alikes.
+safe_id() {
+  case "$1" in
+    '' | -* | *[!A-Za-z0-9:_%.-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+location=''
+add_part() {
+  [ -n "$1" ] || return 0
+  if [ -n "$location" ]; then
+    location="$location, $1"
+  else
+    location=$1
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Hyprland window
+
+hyprland_part() {
+  command -v hyprctl >/dev/null 2>&1 || return 0
+  clients=$(hyprctl clients -j 2>/dev/null) || return 0
+  pid_list=$(printf '%s' "$chain" | jq -Rsc '[split("\n")[] | split(" ")[0] | tonumber? ]') || return 0
+  found=$(printf '%s\n' "$clients" | jq -r --argjson pids "$pid_list" '
+    def short:
+      if . == "com.mitchellh.ghostty" then "Ghostty"
+      elif . == "com.anthropic.Claude" then "Claude Desktop"
+      else (split(".") | map(select(length > 0)) | last // "") end;
+    def line: tostring | gsub("[\\r\\n]"; " ");
+    if type != "array" then empty else
+      . as $c
+      | (first($pids[] as $p | [$c[] | select(type == "object" and .pid == $p)] | select(length > 0)) // null) as $own
+      | if $own == null then empty
+        else
+          (if ($own | length) == 1 then ($own[0].workspace.name // "" | line) else "" end),
+          ($own[0].class // "" | line | short)
+        end
+    end' 2>/dev/null) || return 0
+  [ -n "$found" ] || return 0
+  {
+    IFS= read -r ws || true
+    IFS= read -r cls || true
+  } <<EOF
+$found
+EOF
+  ws=$(opa_sanitise "$ws")
+  cls=$(opa_sanitise "$cls")
+  if [ -n "$ws" ] && [ -n "$cls" ]; then
+    add_part "ws $ws $cls"
+  elif [ -n "$cls" ]; then
+    add_part "$cls"
+  elif [ -n "$ws" ]; then
+    add_part "ws $ws"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Herdr pane
+
+herdr_sock=$(target_env HERDR_SOCKET_PATH)
+
+hd() {
+  if [ -n "$herdr_sock" ]; then
+    HERDR_SOCKET_PATH=$herdr_sock herdr "$@" 2>/dev/null
+  else
+    herdr "$@" 2>/dev/null
+  fi
+}
+
+# True when PANE's shell is one of our ancestors. HERDR_PANE_ID goes stale
+# when a pane moves; this check does not.
+herdr_pane_matches() {
+  safe_id "$1" || return 1
+  shell_pid=$(hd pane process-info --pane "$1" | jq -r '.result.process_info.shell_pid // empty' 2>/dev/null) || return 1
+  case "$shell_pid" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  in_ancestry "$shell_pid"
+}
+
+herdr_part() {
+  herdr_env=$(target_env HERDR_ENV)
+  herdr_pane=$(target_env HERDR_PANE_ID)
+  [ "$herdr_env" = 1 ] || [ -n "$herdr_pane" ] || return 1
+  command -v herdr >/dev/null 2>&1 || return 1
+
+  pane=''
+  if [ -n "$herdr_pane" ] && herdr_pane_matches "$herdr_pane"; then
+    pane=$herdr_pane
+  else
+    all_panes=$(hd pane list | jq -r '.result.panes[]?.pane_id // empty' 2>/dev/null) || all_panes=''
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] && [ "$candidate" != "$herdr_pane" ] || continue
+      if herdr_pane_matches "$candidate"; then
+        pane=$candidate
+        break
+      fi
+    done <<EOF
+$all_panes
+EOF
+  fi
+  [ -n "$pane" ] || pane=$herdr_pane
+  safe_id "$pane" || return 1
+
+  info=$(hd pane get "$pane") || return 1
+  ws_id=$(printf '%s\n' "$info" | jq -r '.result.pane.workspace_id // empty' 2>/dev/null) || ws_id=''
+  tab_id=$(printf '%s\n' "$info" | jq -r '.result.pane.tab_id // empty' 2>/dev/null) || tab_id=''
+  ws_label=''
+  tab_label=''
+  if safe_id "$ws_id"; then
+    ws_label=$(hd workspace get "$ws_id" | jq -r '.result.workspace.label // empty' 2>/dev/null) || ws_label=''
+  fi
+  if safe_id "$tab_id"; then
+    tab_label=$(hd tab get "$tab_id" | jq -r '.result.tab.label // empty' 2>/dev/null) || tab_label=''
+  fi
+  agent_name=$(hd agent get "$pane" | jq -r '.result.agent.name // empty | strings' 2>/dev/null) || agent_name=''
+
+  ws_label=$(opa_sanitise "$ws_label")
+  tab_label=$(opa_sanitise "$tab_label")
+  agent_name=$(opa_sanitise "$agent_name")
+  [ -n "$ws_label" ] || ws_label=$(opa_sanitise "$ws_id")
+  if [ -n "$ws_label" ] && [ -n "$tab_label" ]; then
+    part="herdr $ws_label/$tab_label"
+  elif [ -n "$ws_label" ]; then
+    part="herdr $ws_label"
+  else
+    part="herdr $(opa_sanitise "$pane")"
+  fi
+  add_part "$part${agent_name:+ $agent_name}"
+}
+
+# ---------------------------------------------------------------------------
+# tmux and Zellij
+
+tmux_part() {
+  tmux_env=$(target_env TMUX)
+  [ -n "$tmux_env" ] || return 1
+  command -v tmux >/dev/null 2>&1 || return 1
+  tmux_socket=${tmux_env%%,*}
+  tmux_pane=$(target_env TMUX_PANE)
+  case "$tmux_pane" in
+    %[0-9]*)
+      out=$(tmux -S "$tmux_socket" display-message -p -t "$tmux_pane" '#S:#I.#P' 2>/dev/null) || return 1
+      ;;
+    *)
+      out=$(tmux -S "$tmux_socket" display-message -p '#S:#I.#P' 2>/dev/null) || return 1
+      ;;
+  esac
+  out=$(opa_sanitise "$out")
+  [ -n "$out" ] || return 1
+  add_part "tmux $out"
+}
+
+zellij_part() {
+  session=$(opa_sanitise "$(target_env ZELLIJ_SESSION_NAME)")
+  [ -n "$session" ] || return 1
+  zpane=$(opa_sanitise "$(target_env ZELLIJ_PANE_ID)")
+  add_part "zellij $session${zpane:+ pane $zpane}"
+}
+
+hyprland_part || true
+herdr_part || tmux_part || zellij_part || true
+
+jq -nc \
+  --arg machine "$(opa_machine)" \
+  --arg harness "$harness" \
+  --arg project "$project" \
+  --arg location "$location" \
+  '{machine: $machine, harness: $harness, project: $project, location: $location}'

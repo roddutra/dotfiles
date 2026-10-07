@@ -1,0 +1,137 @@
+#!/bin/sh
+# Local index of agent steps blocked on a 1Password approval, at
+# ${XDG_STATE_HOME:-$HOME/.local/state}/op-approval/blocked.jsonl
+# (file 600, directory 700).
+#
+# Usage:
+#   blocked list
+#   blocked add --ref REF --category CATEGORY --state STATE --result RESULT
+#               [--identity JSON]
+#
+# list prints one line per recorded step, oldest first, and skips lines that
+# are not complete JSON (such as a write cut short).
+#
+# add is used by notify. It appends one JSON line {ref, time, machine,
+# harness, project, location, category, state, result} under the shared lock.
+# JSON is the object printed by `locate`. CATEGORY is ssh, git, op-cli, unlock
+# or unknown; STATE is continuing or stopped; RESULT is a notify result (sent,
+# present, excluded_by_config, suppressed, skipped_by_config, not_configured
+# or failed).
+#
+# Exit codes:
+#   0   done
+#   1   the index could not be read or written
+#   64  bad usage
+
+set -eu
+
+usage() {
+  printf 'usage: blocked list\n       blocked add --ref REF --category CATEGORY --state STATE --result RESULT [--identity JSON]\n' >&2
+  exit 64
+}
+
+lib=${OP_APPROVAL_LIB:-$HOME/.agents/lib/op-approval}
+if [ ! -r "$lib/common.sh" ]; then
+  printf 'blocked: op-approval library not found at %s\n' "$lib" >&2
+  exit 1
+fi
+. "$lib/common.sh"
+
+index="$OPA_STATE_DIR/blocked.jsonl"
+
+[ "$#" -ge 1 ] || usage
+command=$1
+shift
+
+if [ "$command" = list ]; then
+  [ "$#" -eq 0 ] || usage
+  if [ ! -s "$index" ]; then
+    printf 'No blocked steps recorded.\n' >&2
+    exit 0
+  fi
+  # Every field is printed through the label allowlist, so a tampered index
+  # cannot send control sequences to the terminal.
+  jq -Rr '
+    def s: if . == null then "" else tostring | gsub("[^A-Za-z0-9 ._:/@+,-]"; "") end;
+    fromjson? | select(type == "object")
+    | (.harness | s) as $h | (.project | s) as $p | (.location | s) as $l
+    | "\(.time | s)  \(.ref | s)  [\(.machine | s)] \($h)\(if $p != "" then " in " + $p else "" end)\(if $l != "" then ", " + $l else "" end)  \(.category | s), \(.state | s), \(.result | s)"
+  ' "$index" || exit 1
+  exit 0
+fi
+
+[ "$command" = add ] || usage
+
+ref=''
+category=''
+state=''
+result=''
+identity='{}'
+while [ "$#" -gt 0 ]; do
+  [ "$#" -ge 2 ] || usage
+  case "$1" in
+    --ref) ref=$2 ;;
+    --category) category=$2 ;;
+    --state) state=$2 ;;
+    --result) result=$2 ;;
+    --identity) identity=$2 ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+case "$ref" in
+  [a-z0-9][a-z0-9][a-z0-9][a-z0-9]) ;;
+  *) usage ;;
+esac
+case "$category" in
+  ssh | git | op-cli | unlock | unknown) ;;
+  *) usage ;;
+esac
+case "$state" in
+  continuing | stopped) ;;
+  *) usage ;;
+esac
+case "$result" in
+  sent | present | excluded_by_config | suppressed | skipped_by_config | not_configured | failed) ;;
+  *) usage ;;
+esac
+
+fields=$(printf '%s\n' "$identity" | jq -r '
+  if type != "object" then error("not an object") else . end
+  | [.machine, .harness, .project, .location]
+  | map(if type == "string" then gsub("[\\r\\n]"; " ") else "" end)
+  | .[]' 2>/dev/null) || usage
+{
+  IFS= read -r id_machine || true
+  IFS= read -r id_harness || true
+  IFS= read -r id_project || true
+  IFS= read -r id_location || true
+} <<EOF
+$fields
+EOF
+
+machine=$(opa_sanitise "$id_machine")
+[ -n "$machine" ] || machine=$(opa_machine)
+
+line=$(jq -nc \
+  --arg ref "$ref" \
+  --arg time "$(opa_iso_now)" \
+  --arg machine "$machine" \
+  --arg harness "$(opa_sanitise "$id_harness")" \
+  --arg project "$(opa_sanitise "$id_project")" \
+  --arg location "$(opa_sanitise_location "$id_location")" \
+  --arg category "$category" \
+  --arg state "$state" \
+  --arg result "$result" \
+  '{ref: $ref, time: $time, machine: $machine, harness: $harness, project: $project,
+    location: $location, category: $category, state: $state, result: $result}')
+
+opa_ensure_dir "$OPA_STATE_DIR" || exit 1
+opa_lock_acquire || exit 1
+# Start on a fresh line if an earlier write was cut short.
+if [ -s "$index" ] && [ -n "$(tail -c 1 "$index")" ]; then
+  printf '\n' >>"$index" || exit 1
+fi
+printf '%s\n' "$line" >>"$index" || exit 1
+chmod 600 "$index" 2>/dev/null || true
+opa_lock_release
