@@ -1,6 +1,7 @@
 # Curated packages beyond the Omarchy defaults.
 1password
 1password-cli
+bambustudio-bin
 composer
 ghostty
 github-cli
