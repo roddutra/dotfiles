@@ -5,3 +5,5 @@
 # Maintainer notes, not part of any skill
 ^/README\.md$
 ^/skills-lock\.json$
+# Repository test suite, not part of any skill
+^/tests$
