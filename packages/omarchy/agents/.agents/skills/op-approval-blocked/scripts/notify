@@ -1,0 +1,183 @@
+#!/bin/sh
+# Tell Rod that an agent step is blocked on a 1Password approval: one ntfy
+# push when he is not at the machine, at most one per absence.
+#
+# Usage:
+#   notify --harness NAME --category ssh|git|op-cli|unlock|unknown
+#          --state continuing|stopped
+#
+# NAME is the agent's harness (claude, codex, pi, omp, opencode, grok); any
+# other value is replaced with the harness found in the process tree, or
+# "agent". Machine, project and location are worked out by `locate`.
+#
+# Decides, in order:
+#   1. Rod is present                           -> present (chat only)
+#   2. presence state not in alerts.presence_states -> excluded_by_config
+#   3. alerts.when is "stopped" and --state continuing -> skipped_by_config
+#   4. the shared alert claim is refused        -> suppressed
+#   5. publish                                  -> sent, not_configured or failed
+# While the watcher is still confirming input that may be Rod's return (the
+# feed carries activity_pending_until, typically for about 5 s after a prompt
+# closes), notify waits for the marker to go, at most 7 s and never while
+# holding the lock, then decides. Steps 1 and 2 are checked again under the claim's lock, immediately
+# before the claim is recorded, so a return while notify waits still counts;
+# input still unconfirmed at that point counts as present (nothing sent).
+# A failed publish still uses the claim. Every call is recorded with its
+# reference in the local index (`blocked list`).
+#
+# Prints one JSON line: {"result":..,"ref":..,"presence":..,"reason":..},
+# plus "index":"failed" if the index could not be written. reason is null
+# unless there is something to explain.
+#
+# Exit codes:
+#   0   sent
+#   10  present: Rod is at the machine, nothing sent
+#   11  suppressed: already alerted during this absence, or rate limited
+#   12  skipped_by_config: alerts.when is "stopped" and the agent continues
+#   13  excluded_by_config: alerts.presence_states skips the current state
+#   2   not_configured: no ntfy URL, topic or valid token on this machine
+#   1   failed: the push could not be sent, or a local error
+#   64  bad usage
+
+set -eu
+
+usage() {
+  printf 'usage: notify --harness NAME --category ssh|git|op-cli|unlock|unknown --state continuing|stopped\n' >&2
+  exit 64
+}
+
+harness=''
+category=''
+state=''
+while [ "$#" -gt 0 ]; do
+  [ "$#" -ge 2 ] || usage
+  case "$1" in
+    --harness) harness=$2 ;;
+    --category) category=$2 ;;
+    --state) state=$2 ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+[ -n "$harness" ] || usage
+case "$category" in
+  ssh | git | op-cli | unlock | unknown) ;;
+  *) usage ;;
+esac
+case "$state" in
+  continuing | stopped) ;;
+  *) usage ;;
+esac
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+lib=${OP_APPROVAL_LIB:-$HOME/.agents/lib/op-approval}
+if [ ! -r "$lib/common.sh" ] || ! command -v jq >/dev/null 2>&1; then
+  printf '{"result":"failed","ref":null,"presence":"unknown","reason":"op-approval library or jq not found"}\n'
+  exit 1
+fi
+. "$lib/common.sh"
+
+opa_config_load
+# The helpers below load the config again; one set of warnings is enough.
+OPA_CONFIG_WARNED=1
+export OPA_CONFIG_WARNED
+
+ref=$(opa_random 4)
+case "$ref" in
+  [a-z0-9][a-z0-9][a-z0-9][a-z0-9]) ;;
+  *)
+    printf '{"result":"failed","ref":null,"presence":"unknown","reason":"cannot generate a reference"}\n'
+    exit 1
+    ;;
+esac
+
+identity=$("$lib/locate" --harness "$harness" 2>/dev/null) || identity='{}'
+presence=$(opa_presence_wait_settled | jq -r '.state') || presence='unknown'
+
+result=''
+reason=''
+code=1
+if [ "$presence" = present ] && ! opa_cfg_has_state alerts.presence_states present; then
+  result=present
+  code=10
+elif ! opa_cfg_has_state alerts.presence_states "$presence"; then
+  result=excluded_by_config
+  reason="presence state $presence is excluded by alerts.presence_states"
+  code=13
+elif [ "$(opa_cfg alerts.when)" = stopped ] && [ "$state" = continuing ]; then
+  result=skipped_by_config
+  reason='alerts.when is stopped'
+  code=12
+else
+  claim_status=0
+  claim_out=$("$lib/claim" take --source skill --require-away 2>/dev/null) || claim_status=$?
+  if [ "$claim_status" -eq 3 ]; then
+    result=suppressed
+    reason=$claim_out
+    code=11
+  elif [ "$claim_status" -eq 4 ]; then
+    presence=present
+    result=present
+    code=10
+  elif [ "$claim_status" -eq 6 ]; then
+    result=present
+    reason=$claim_out
+    code=10
+  elif [ "$claim_status" -eq 5 ]; then
+    presence=$(opa_presence_read | jq -r '.state') || presence='unknown'
+    result=excluded_by_config
+    reason=$claim_out
+    code=13
+  elif [ "$claim_status" -ne 0 ]; then
+    result=failed
+    reason="alert claim unavailable${claim_out:+: ${claim_out#error: }}"
+    code=1
+  else
+    publish_status=0
+    publish_out=$("$lib/publish" --template blocked --identity "$identity" \
+      --category "$category" --state "$state" --ref "$ref" 2>/dev/null) || publish_status=$?
+    case "$publish_status" in
+      0)
+        result=sent
+        code=0
+        ;;
+      2)
+        result=not_configured
+        reason=$(printf '%s\n' "$publish_out" | jq -r '.reason // empty' 2>/dev/null || true)
+        reason=${reason:-not configured}
+        code=2
+        ;;
+      *)
+        result=failed
+        curl_exit=$(printf '%s\n' "$publish_out" | jq -r '.curl_exit // empty' 2>/dev/null || true)
+        http_status=$(printf '%s\n' "$publish_out" | jq -r '.http_status // empty' 2>/dev/null || true)
+        reason="publish failed${curl_exit:+ (curl exit $curl_exit}${http_status:+, HTTP $http_status}${curl_exit:+)}"
+        code=1
+        ;;
+    esac
+  fi
+fi
+
+index_ok=1
+"$script_dir/blocked" add --ref "$ref" --category "$category" --state "$state" \
+  --result "$result" --identity "$identity" >/dev/null 2>&1 || index_ok=''
+
+jq -nc \
+  --arg result "$result" \
+  --arg ref "$ref" \
+  --arg presence "$presence" \
+  --arg reason "$reason" \
+  --arg index "${index_ok:+ok}" \
+  '{result: $result, ref: $ref, presence: $presence, reason: (if $reason == "" then null else $reason end)}
+   + (if $index == "" then {index: "failed"} else {} end)'
+
+case "$result" in
+  sent) printf 'notify: alert sent, ref %s\n' "$ref" >&2 ;;
+  present) printf 'notify: Rod is at the machine; tell him in the chat (ref %s)\n' "$ref" >&2 ;;
+  excluded_by_config) printf 'notify: skipped, %s (ref %s)\n' "$reason" "$ref" >&2 ;;
+  suppressed) printf 'notify: alert suppressed (%s); say so in the chat (ref %s)\n' "$reason" "$ref" >&2 ;;
+  skipped_by_config) printf 'notify: skipped, alerts are only sent when the agent stops (ref %s)\n' "$ref" >&2 ;;
+  not_configured) printf 'notify: alerts are not configured on this machine (%s)\n' "$reason" >&2 ;;
+  failed) printf 'notify: alert failed (%s)\n' "$reason" >&2 ;;
+esac
+exit "$code"

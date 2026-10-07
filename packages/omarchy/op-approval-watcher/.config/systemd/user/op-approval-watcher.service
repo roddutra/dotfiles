@@ -1,0 +1,16 @@
+[Unit]
+Description=1Password approval watcher (presence feed and fallback alert)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/op-approval-watcher
+Restart=on-failure
+RestartSec=2
+RestartSteps=5
+RestartMaxDelaySec=30
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

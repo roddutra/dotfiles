@@ -2,11 +2,19 @@
 
 The `agents` package links `.agents/` into `~/.agents/`. `AGENTS.md` is the canonical global instruction file. Claude Code reads the same instructions through `packages/common/claude/.claude/CLAUDE.md`.
 
+Codex and Pi read it through links too: `packages/common/codex/.codex/AGENTS.md` and `packages/common/pi/.pi/agent/AGENTS.md`. OMP loads `~/.agents/AGENTS.md` by itself, so a link would load the rules twice. OpenCode is not linked: by its docs it falls back to `~/.claude/CLAUDE.md`. lerd writes through these links; see the lerd check in `docs/op-approval.md`.
+
 Shared skills live in `.agents/skills/`. The dedicated Codex and Claude packages expose them as whole-directory symlinks. Codex requires this layout because it ignores a symlinked `SKILL.md` file inside a real skill directory. Grok reads the canonical directories through `[skills].paths` in `packages/common/grok/.grok/config.toml`.
 
 Skills that invoke the Claude Code CLI, including `claude-reviewer`, `delegate-to-claude`, and workflows built on them, are `.agents`-only, as is `codex-delegation-policy` (its Claude counterpart is `claude-delegation-policy` in the Claude package). Never link them into `.claude/skills/`: Claude Code would discover skills that delegate back to itself. Their shared wrapper library lives in `.agents/lib/`, outside the skill discovery directory.
 
 This maintainer file is excluded through `.stow-local-ignore`.
+
+## Platform-specific skills
+
+Skills and libraries that only work on one platform live in `packages/<platform>/agents`, linked from `packages/<platform>/claude` and `packages/<platform>/codex`, mirroring this package and its Claude and Codex counterparts. This package does not contain them.
+
+The first is `op-approval-blocked` with its library `.agents/lib/op-approval/`, in `packages/omarchy/agents/`, used by the skill and the Omarchy approval watcher. See `docs/op-approval.md`.
 
 ## Third-party skills
 

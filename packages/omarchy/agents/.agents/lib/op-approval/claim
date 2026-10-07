@@ -1,0 +1,178 @@
+#!/bin/sh
+# Shared alert claim for the 1Password approval alerts: at most one push per
+# absence, whichever component (skill or watcher) asks first.
+#
+# Usage:
+#   claim take --source skill|watcher [--expired-at EPOCH] [--require-away]
+#   claim status
+#
+# take, under the per-user lock:
+#   - --require-away: refuse unless the current presence state is one of
+#     alerts.presence_states (checked here, under the lock, immediately before
+#     the claim is recorded, so a return just before the claim counts), and
+#     refuse while the fresh feed carries activity_pending_until, even past
+#     its time (the watcher is still confirming input that may be Rod's
+#     return, and removes the marker once it decides)
+#   - presence feed fresh and alerts.once_per_absence: grant only if no alert
+#     was sent since Rod was last present (last-alert < last_present_at)
+#   - otherwise: grant only if the last alert is at least
+#     alerts.rate_limit_seconds old
+#   - --expired-at E (watcher fallback): also refuse if an alert was sent at or
+#     after E, or (feed fresh) Rod was present at or after E
+# A grant records the current time in ${runtime}/last-alert before exiting, so
+# a publish that later fails still uses the claim.
+#
+# status prints the inputs of that decision as one JSON object.
+#
+# Exit codes:
+#   0   granted (take) or printed (status)
+#   3   suppressed; one line on stdout says why
+#   4   --require-away: Rod is present
+#   5   --require-away: the current presence state is excluded by
+#       alerts.presence_states; stdout names the state
+#   6   --require-away: activity is still being confirmed; Rod may be back
+#   1   error: the lock could not be taken within about 5 s (a live holder
+#       is waited on, never evicted) or last-alert could not be written. No
+#       claim was recorded and the caller must not publish.
+#   64  bad usage
+
+set -eu
+
+OPA_LIB_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$OPA_LIB_DIR/common.sh"
+
+usage() {
+  printf 'usage: claim take --source skill|watcher [--expired-at EPOCH] [--require-away]\n       claim status\n' >&2
+  exit 64
+}
+
+read_last_alert() {
+  _last=$(cat "$OPA_RUNTIME_DIR/last-alert" 2>/dev/null || true)
+  case "$_last" in
+    '' | *[!0-9]*) printf 'null\n' ;;
+    *)
+      # A timestamp in the future (clock moved back) would block alerts for
+      # an unknown time; treat it as absent.
+      if [ "$_last" -gt "$(opa_now)" ]; then printf 'null\n'; else printf '%s\n' "$_last"; fi
+      ;;
+  esac
+}
+
+once_per_absence() {
+  opa_cfg alerts.once_per_absence
+}
+
+rate_limit() {
+  opa_cfg alerts.rate_limit_seconds
+}
+
+[ "$#" -ge 1 ] || usage
+command=$1
+shift
+
+case "$command" in
+  status)
+    [ "$#" -eq 0 ] || usage
+    opa_config_load
+    jq -nc \
+      --argjson now "$(opa_now)" \
+      --argjson presence "$(opa_presence_read)" \
+      --argjson last_alert "$(read_last_alert)" \
+      --argjson once "$(once_per_absence)" \
+      --argjson limit "$(rate_limit)" \
+      '{now: $now, presence: $presence, last_alert: $last_alert,
+        once_per_absence: $once, rate_limit_seconds: $limit}'
+    exit 0
+    ;;
+  take) ;;
+  *) usage ;;
+esac
+
+source_name=''
+expired_at=null
+require_away=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --source)
+      [ "$#" -ge 2 ] || usage
+      source_name=$2
+      shift 2
+      ;;
+    --expired-at)
+      [ "$#" -ge 2 ] || usage
+      case "$2" in
+        '' | *[!0-9]*) usage ;;
+      esac
+      expired_at=$2
+      shift 2
+      ;;
+    --require-away)
+      require_away=1
+      shift
+      ;;
+    *) usage ;;
+  esac
+done
+case "$source_name" in
+  skill | watcher) ;;
+  *) usage ;;
+esac
+
+opa_config_load
+if ! opa_lock_acquire; then
+  printf 'error: lock unavailable\n'
+  exit 1
+fi
+
+now=$(opa_now)
+presence=$(opa_presence_read)
+
+if [ -n "$require_away" ]; then
+  if opa_presence_pending "$presence"; then
+    opa_lock_release
+    printf 'activity pending: Rod may be back\n'
+    exit 6
+  fi
+  state=$(printf '%s\n' "$presence" | jq -r '.state')
+  if ! opa_cfg_has_state alerts.presence_states "$state"; then
+    opa_lock_release
+    if [ "$state" = present ]; then
+      printf 'present\n'
+      exit 4
+    fi
+    printf 'presence state %s is excluded by alerts.presence_states\n' "$state"
+    exit 5
+  fi
+fi
+
+decision=$(jq -nr \
+  --argjson now "$now" \
+  --argjson p "$presence" \
+  --argjson last "$(read_last_alert)" \
+  --argjson exp "$expired_at" \
+  --argjson once "$(once_per_absence)" \
+  --argjson limit "$(rate_limit)" '
+  if $exp != null and $last != null and $last >= $exp then "suppressed\talready alerted after the expiry"
+  elif $exp != null and $p.fresh and $p.last_present_at >= $exp then "suppressed\tpresent since the expiry"
+  elif $p.fresh and $once then
+    (if $last != null and $last >= $p.last_present_at then "suppressed\talready alerted during this absence"
+     else "granted\t" end)
+  elif $last != null and ($now - $last) < $limit then "suppressed\trate limited"
+  else "granted\t" end')
+
+case "$decision" in
+  granted*)
+    if ! opa_write_atomic "$OPA_RUNTIME_DIR/last-alert" "$now"; then
+      printf 'error: cannot record the alert\n'
+      exit 1
+    fi
+    opa_lock_release
+    printf 'granted\n'
+    exit 0
+    ;;
+  *)
+    opa_lock_release
+    printf '%s\n' "${decision#*	}"
+    exit 3
+    ;;
+esac
