@@ -120,10 +120,13 @@ Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied 
 
 ### Omarchy
 
+- `bash`
+- `claude-desktop`
 - `ghostty`
 - `hypr`
 - `nvim`
 - `omarchy`
+- `starship`
 - `voxtype`
 
 ### Windows
