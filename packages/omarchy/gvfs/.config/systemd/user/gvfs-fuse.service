@@ -1,0 +1,17 @@
+[Unit]
+Description=GVFS filesystem bridge for local applications
+Requires=gvfs-daemon.service
+After=gvfs-daemon.service
+PartOf=gvfs-daemon.service graphical-session.target
+
+[Service]
+Type=exec
+ExecStartPre=/usr/bin/mkdir -p %t/gvfs
+ExecStart=/usr/lib/gvfsd-fuse %t/gvfs -f -o auto_unmount
+# gvfsd-fuse returns the signal number after handling SIGTERM on shutdown.
+SuccessExitStatus=15
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=gvfs-daemon.service

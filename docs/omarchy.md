@@ -31,6 +31,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `claude-desktop/` contains Claude Desktop launch flags. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `ghostty/` contains the Linux Ghostty configuration.
+- `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
 - `hypr/` contains personal Hyprland overrides.
 - `nvim/` contains the Linux-specific Neovim override.
 - `omarchy/` contains selected shell and plugin preference files.
@@ -122,6 +123,31 @@ A system-tray application must publish a StatusNotifierItem over D-Bus. Omarchy 
 - Unpin places a tray item in the expandable drawer.
 - Hide removes a tray item from the tray.
 - A separate Omarchy bar widget cannot be moved into the tray drawer.
+
+## Network files browse but will not play
+
+On 8 October 2026, `gvfs-daemon.service` was active but `gvfsd-fuse` and its local FUSE mount were absent, matching the earlier playback failure. MPV rejects raw `smb://` URLs; the bridge exposes file-manager mounts as filesystem paths that MPV and VLC can read. The logs did not establish why the helper disappeared, and the package history showed no GVFS upgrade since installation.
+
+`packages/omarchy/gvfs/` gives systemd ownership of the bridge. The daemon drop-in uses [`--no-fuse`](https://man.archlinux.org/man/gvfsd.1.en) to prevent a second, unsupervised helper. `gvfs-fuse.service` runs [`gvfsd-fuse`](https://man.archlinux.org/man/gvfsd-fuse.1.en) in the foreground, restarts it after unexpected exits, and follows GVFS restarts and graphical-session shutdown. `auto_unmount` removes the stale FUSE mount if the helper dies.
+
+After restoring the dotfiles, enable the bridge once:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now gvfs-fuse.service
+```
+
+The daemon drop-in takes effect on its next start. To apply it immediately, `systemctl --user restart gvfs-daemon.service` disconnects existing GVFS mounts, so reconnect them yourself afterward.
+
+Check the local service without listing or opening any share:
+
+```sh
+systemctl --user status gvfs-fuse.service
+systemctl --user is-enabled gvfs-fuse.service
+findmnt --kernel --types fuse.gvfsd-fuse
+```
+
+Verification: a forced helper failure recovered automatically; restarting GVFS restored exactly one helper and one FUSE mount. MPV decoded generated local HEVC media. No Samba share files or directories were accessed, so playback from the private share still needs a user check. This restores the existing file-manager connection workflow without storing credentials or configuring a new network mount.
 
 ## LAN access and UFW
 
