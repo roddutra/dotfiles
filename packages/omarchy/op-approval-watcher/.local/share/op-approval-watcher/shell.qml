@@ -1,57 +1,48 @@
 // 1Password approval watcher: a standalone Quickshell instance with no
-// windows, run by op-approval-watcher.service. It
-//   1. publishes Rod's presence to ${XDG_RUNTIME_DIR}/op-approval/presence.json
-//      for the op-approval-blocked skill and the shared alert claim, and
-//   2. sends one fallback alert when a 1Password approval prompt expired while
-//      Rod was away and he has not come back within the grace period. The agent
-//      that hit the prompt normally alerts first through the skill; the shared
-//      claim then suppresses this one.
-// It never alerts while a prompt is pending. Decision rules live in Policy.js.
+// windows, run by op-approval-watcher.service.
+//
+// This is the Omarchy host of the shared engine (Engine.js and Policy.js,
+// installed next to this file from packages/common/op-approval-watcher). It
+// turns Hyprland, idle, lock and 1Password log signals into engine events
+// and carries out the effects the engine returns: see Engine.js for the
+// contract. It decides nothing itself, so a behaviour change made in the
+// shared files applies here and on macOS alike.
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
-import "Policy.js" as Policy
+import "Policy.js" as PolicyJs
+import "Engine.js" as EngineJs
 
 ShellRoot {
     id: root
 
-    // A changed file on disk must not reload the watcher and drop its state.
+    // A changed file on disk must not reload the watcher and drop its state;
+    // the engine asks for the shared files and restarts on new code.
     settings.watchFiles: false
 
     readonly property string home: Quickshell.env("HOME") || ""
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
     readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (home + "/.config")
+    readonly property string configPath: configHome + "/op-approval/config.json"
     readonly property string libDir: Quickshell.env("OP_APPROVAL_LIB") || (home + "/.agents/lib/op-approval")
-    readonly property string feedDir: runtimeDir + "/op-approval"
-    readonly property string requestersPath: Quickshell.shellPath("requesters")
+    readonly property string feedDir: Quickshell.env("OP_APPROVAL_RUNTIME_DIR") || (runtimeDir + "/op-approval")
+    readonly property string onePasswordLog: home + "/.config/1Password/logs/1Password_rCURRENT.log"
     readonly property string runId: Math.random().toString(36).slice(2, 6)
 
-    property var cfg: Policy.defaults()
-    property string configText: "\u0000unloaded"
-    property string hostname: ""
+    readonly property var policy: PolicyJs.POLICY
+    readonly property var engine: EngineJs.createEngine(PolicyJs.POLICY)
+    property var engineState: engine.initial()
+    property var queue: []
+    property bool draining: false
 
-    // Observations (see Policy.derivePresence)
-    property bool hyprlandUp: true
-    property string lockState: "unknown"
-    property var activity: Policy.activityReset(Date.now(), null)
     property int monitorGeneration: 0
     property var idleMonitor: null
-    property string presenceState: "unknown"
-    property var lastPresentAt: null
-    property var publishedPendingUntil: null
-
-    // Episodes, keyed by a per-window generation so a reused address can never
-    // satisfy a check meant for an earlier window.
-    property int generation: 0
-    property int episodeSeq: 0
-    property var candidates: ({})
-    property var addressGen: ({})
-    property var graces: ({})
     property var processes: []
-    property bool lockPollRunning: false
-    property bool healthRunning: false
+    property var timers: ({})
+    // 1Password windows reported to the engine, by address.
+    property var windows: ({})
 
     function log(message) {
         console.info("op-approval-watcher: " + message);
@@ -59,6 +50,145 @@ ShellRoot {
 
     function warn(message) {
         console.warn("op-approval-watcher: " + message);
+    }
+
+    // -----------------------------------------------------------------------
+    // Engine: events are queued so an effect answered at once is handled
+    // after the effects of the step that asked for it.
+
+    function send(event) {
+        if (event.atMs === undefined)
+            event.atMs = Date.now();
+        queue.push(event);
+        if (draining)
+            return;
+        draining = true;
+        while (queue.length > 0) {
+            const next = queue.shift();
+            let result;
+            try {
+                result = engine.step(engineState, next);
+            } catch (e) {
+                warn("engine error on a " + next.type + " event: " + e);
+                continue;
+            }
+            engineState = result.state;
+            result.effects.forEach(effect => apply(effect));
+        }
+        draining = false;
+    }
+
+    function apply(effect) {
+        switch (effect.type) {
+        case "log":
+            if (effect.level === "warn")
+                warn(effect.message);
+            else
+                log(effect.message);
+            break;
+        case "write_feed":
+            feedFile.setText(JSON.stringify(effect.document) + "\n");
+            break;
+        case "run":
+            runHelper(effect);
+            break;
+        case "observe":
+            observe(effect);
+            break;
+        case "reset_input":
+            createMonitor();
+            break;
+        case "set_timer":
+            timers[effect.id] = after(effect.delayMs, () => {
+                delete timers[effect.id];
+                send({ type: "timer_fired", id: effect.id });
+            });
+            break;
+        case "cancel_timer":
+            cancelTimer(timers[effect.id]);
+            delete timers[effect.id];
+            break;
+        case "exit":
+            log("exiting (" + effect.code + ")");
+            Qt.exit(effect.code);
+            break;
+        default:
+            warn("unknown effect " + effect.type);
+        }
+    }
+
+    function answer(id, result) {
+        send({ type: "observed", id: id, result: result });
+    }
+
+    function parseJson(code, text) {
+        if (code !== 0)
+            return null;
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function observe(effect) {
+        switch (effect.what) {
+        case "candidate":
+            confirmWindow(effect.id, effect.key);
+            break;
+        case "open_candidates":
+            reconcile(effect.id);
+            break;
+        case "lock":
+            // omarchy-hyprland-session-locked exits 0 locked, 1 unlocked,
+            // 2 undetermined.
+            run(["omarchy-hyprland-session-locked"], 5000, code => {
+                answer(effect.id, { state: code === 0 ? "locked" : code === 1 ? "unlocked" : "unknown" });
+            });
+            break;
+        case "session":
+            run(["hyprctl", "version", "-j"], 5000, (code, text) => {
+                // hyprctl exits 0 with no output when the socket closes unanswered.
+                const ok = parseJson(code, text) !== null;
+                answer(effect.id, ok ? { state: "up" } : { state: "lost", detail: "hyprctl version exit " + code + (code === 0 ? ", no valid reply" : "") });
+            });
+            break;
+        case "config":
+            run(["cat", "--", configPath], 5000, (code, text) => answer(effect.id, { text: code === 0 ? text : null }));
+            break;
+        case "code":
+            readCode(code => answer(effect.id, code));
+            break;
+        default:
+            answer(effect.id, null);
+        }
+    }
+
+    function readCode(callback) {
+        run(["cat", "--", Quickshell.shellPath("Policy.js")], 5000, (pcode, policyText) => {
+            run(["cat", "--", Quickshell.shellPath("Engine.js")], 5000, (ecode, engineText) => {
+                callback({ policy: pcode === 0 ? policyText : null, engine: ecode === 0 ? engineText : null });
+            });
+        });
+    }
+
+    function helperPath(name) {
+        if (name === "requesters")
+            return Quickshell.shellPath("requesters");
+        if (name === "locate" || name === "claim" || name === "publish")
+            return libDir + "/" + name;
+        return null;
+    }
+
+    function runHelper(effect) {
+        const path = helperPath(effect.helper);
+        if (!path) {
+            send({ type: "helper_done", id: effect.id, code: -1, output: "" });
+            return;
+        }
+        run([path].concat(effect.args), effect.deadlineMs, (code, text) => {
+            send({ type: "helper_done", id: effect.id, code: code, output: text });
+        });
     }
 
     // -----------------------------------------------------------------------
@@ -132,7 +262,7 @@ ShellRoot {
         });
     }
 
-    // One-shot timers (confirmation delay, grace period).
+    // One-shot timers for the engine.
     Component {
         id: timerComponent
         Timer {
@@ -163,70 +293,20 @@ ShellRoot {
         Qt.callLater(() => t.destroy());
     }
 
-    // -----------------------------------------------------------------------
-    // Configuration: ${XDG_CONFIG_HOME:-$HOME/.config}/op-approval/config.json,
-    // re-read on change and every 30 s (an editor that replaces the file, or a
-    // file created after start, is not always seen by the watch).
-
-    FileView {
-        id: configFile
-        path: root.configHome + "/op-approval/config.json"
-        watchChanges: true
-        blockLoading: true
-        printErrors: false
-        // Wait for a writer to finish before reading.
-        onFileChanged: configSettle.restart()
-        onLoaded: root.applyConfigText(text())
-        onLoadFailed: root.applyConfigText(null)
-    }
-
     Timer {
-        id: configSettle
-        interval: 500
-        onTriggered: configFile.reload()
-    }
-
-    function applyConfigText(text) {
-        const key = text === null ? "\u0000missing" : text;
-        if (key === configText)
-            return;
-        configText = key;
-        let raw;
-        let parseError = false;
-        if (text !== null && text.trim() !== "") {
-            try {
-                raw = JSON.parse(text);
-            } catch (e) {
-                parseError = true;
-            }
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: {
+            const now = Date.now();
+            root.expireProcesses(now);
+            root.send({ type: "tick", atMs: now });
         }
-        const result = Policy.normaliseConfig(raw, parseError);
-        result.warnings.forEach(w => warn(w));
-        cfg = result.config;
-        const w = cfg.watcher;
-        log("config " + (text === null ? "missing, using the defaults" : "loaded") + ": present " + cfg.presence.present_seconds + " s, away " + cfg.presence.away_seconds + " s, fallback " + w.fallback + ", grace " + w.fallback_grace_seconds + " s, expired after " + w.expired_min_seconds + " s, confirm after " + w.confirm_seconds + " s, alert states " + cfg.alerts.presence_states.join("/"));
-        recompute();
-    }
-
-    FileView {
-        id: hostnameFile
-        path: "/proc/sys/kernel/hostname"
-        blockLoading: true
-        printErrors: false
-    }
-
-    function machineLabel() {
-        const configured = cfg.machine ? Policy.sanitiseLabel(cfg.machine) : "";
-        return configured || Policy.sanitiseLabel(hostname) || "unknown";
     }
 
     // -----------------------------------------------------------------------
-    // Idle observation: one 5 s monitor (ext-idle-notify v2 input idleness,
-    // inhibitors ignored). Idle and away come from the wall clock since the
-    // last real input; activity right next to a window or layer close is held
-    // until it proves real (Policy.activityReduce). The monitor is re-created
-    // on start and resume, and observations stay invalid until it reports
-    // idle once.
+    // Input: one 5 s monitor (ext-idle-notify v2 input idleness, inhibitors
+    // ignored), re-created whenever the engine asks.
 
     Component {
         id: monitorComponent
@@ -236,98 +316,48 @@ ShellRoot {
         }
     }
 
-    function createMonitors(reason) {
+    function createMonitor() {
         const old = idleMonitor;
         monitorGeneration += 1;
         const gen = monitorGeneration;
-        activity = Policy.activityReset(Date.now(), activity.lastCloseMs);
         const m = monitorComponent.createObject(root);
-        m.isIdleChanged.connect(() => root.onIdleChanged(gen, m));
+        m.isIdleChanged.connect(() => {
+            if (gen === root.monitorGeneration)
+                root.send({ type: "input", state: m.isIdle ? "idle" : "active" });
+        });
         idleMonitor = m;
         if (old)
             old.destroy();
-        log("idle monitor (re)created (" + reason + "); observations invalid until 5 s of idleness");
-        recompute();
-    }
-
-    function onIdleChanged(gen, monitor) {
-        if (gen !== monitorGeneration)
-            return;
-        const now = Date.now();
-        applyActivity({ type: monitor.isIdle ? "idle" : "active", atMs: now });
-        if (!monitor.isIdle) {
-            // Resolve the pending activity on time rather than on the 1 s tick.
-            after(Policy.CLOSE_WINDOW_MS + 20, () => applyActivity({ type: "tick", atMs: Date.now() }));
-            after(Policy.CONFIRM_MS + 20, () => applyActivity({ type: "tick", atMs: Date.now() }));
-        }
-        pollLock();
-    }
-
-    function applyActivity(event) {
-        const wasValid = activity.valid;
-        const result = Policy.activityReduce(activity, event);
-        activity = result.state;
-        if (result.note === "resume") {
-            // Qt timers stop during suspend; the wall clock does not. The
-            // reducer has already dropped anything held before the gap.
-            log("wall clock jumped (resume or clock change)");
-            cancelGraces("resume");
-            createMonitors("resume");
-            pollLock();
-            return;
-        }
-        if (!wasValid && activity.valid)
-            log("observations valid");
-        if (result.note === "suspect")
-            log("activity within " + Policy.CLOSE_WINDOW_MS + " ms of a window or layer close: held until confirmed");
-        else if (result.note === "discarded")
-            log("held activity discarded as synthetic (idle again within " + Policy.CONFIRM_MS / 1000 + " s)");
-        else if (result.note === "confirmed")
-            log("held activity confirmed as real input");
-        recompute();
     }
 
     // -----------------------------------------------------------------------
-    // Lock state from the compositor's ext-session-lock (D4):
-    // omarchy-hyprland-session-locked exits 0 locked, 1 unlocked, 2 undetermined.
+    // Files
 
-    function anyPending() {
-        return Object.keys(candidates).length > 0 || Object.keys(graces).length > 0;
+    // Re-read on change, once a writer has finished; the engine also asks
+    // every 30 s (an editor that replaces the file is not always seen).
+    FileView {
+        id: configFile
+        path: root.configPath
+        watchChanges: true
+        blockLoading: true
+        printErrors: false
+        onFileChanged: configSettle.restart()
+        onLoaded: root.send({ type: "config", text: text() })
+        onLoadFailed: root.send({ type: "config", text: null })
     }
 
     Timer {
-        id: lockTimer
-        interval: 10000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: root.pollLock()
+        id: configSettle
+        interval: 500
+        onTriggered: configFile.reload()
     }
 
-    // Every 2 s while a candidate, episode or grace period is pending.
-    function updateLockInterval() {
-        const wanted = anyPending() ? 2000 : 10000;
-        if (lockTimer.interval !== wanted)
-            lockTimer.interval = wanted;
+    FileView {
+        id: hostnameFile
+        path: "/proc/sys/kernel/hostname"
+        blockLoading: true
+        printErrors: false
     }
-
-    function pollLock() {
-        if (lockPollRunning)
-            return;
-        lockPollRunning = true;
-        run(["omarchy-hyprland-session-locked"], 5000, code => {
-            lockPollRunning = false;
-            const next = code === 0 ? "locked" : code === 1 ? "unlocked" : "unknown";
-            if (next !== lockState) {
-                log("lock state " + lockState + " -> " + next);
-                lockState = next;
-            }
-            recompute();
-        });
-    }
-
-    // -----------------------------------------------------------------------
-    // Presence feed
 
     FileView {
         id: feedFile
@@ -341,403 +371,95 @@ ShellRoot {
         }
     }
 
-    function recompute() {
-        const now = Date.now();
-        const previous = presenceState;
-        const state = Policy.derivePresence({
-            hyprlandUp: hyprlandUp,
-            lock: lockState,
-            activity: activity,
-            nowMs: now
-        }, cfg);
-        lastPresentAt = Policy.nextLastPresentAt(previous, state, lastPresentAt, Math.floor(now / 1000));
-        presenceState = state;
-        const pendingUntil = Policy.activityPendingUntil(activity);
-        if (state !== previous) {
-            log("presence " + previous + " -> " + state);
-            writeFeed(now);
-        } else if (pendingUntil !== publishedPendingUntil) {
-            // Readers wait while activity is held; tell them at once.
-            writeFeed(now);
+    // 1Password's log, followed by name across rotation. Each new line goes
+    // to the engine, which matches signatures and never logs the content.
+    Process {
+        id: logFollower
+        command: ["tail", "-n", "0", "-F", root.onePasswordLog]
+        stdout: SplitParser {
+            onRead: line => root.send({ type: "log_line", line: line })
         }
-    }
-
-    function writeFeed(nowMs) {
-        publishedPendingUntil = Policy.activityPendingUntil(activity);
-        const doc = Policy.presenceDocument(machineLabel(), presenceState, nowMs, lastPresentAt, publishedPendingUntil);
-        feedFile.setText(JSON.stringify(doc) + "\n");
+        onExited: logRestart.restart()
     }
 
     Timer {
+        id: logRestart
         interval: 10000
-        running: true
-        repeat: true
-        onTriggered: {
-            root.recompute();
-            root.writeFeed(Date.now());
-        }
+        onTriggered: logFollower.running = true
     }
 
     // -----------------------------------------------------------------------
-    // Housekeeping tick: process deadlines, thresholds and resume detection.
-
-    Timer {
-        interval: 1000
-        running: true
-        repeat: true
-        onTriggered: {
-            const now = Date.now();
-            root.expireProcesses(now);
-            root.updateLockInterval();
-            // Also moves presence across the idle and away thresholds, and
-            // detects a resume (Policy.activityReduce).
-            root.applyActivity({ type: "tick", atMs: now });
-        }
-    }
-
-    Timer {
-        interval: 30000
-        running: true
-        repeat: true
-        onTriggered: configFile.reload()
-    }
-
-    // -----------------------------------------------------------------------
-    // Hyprland health: on failure, give up so systemd restarts the watcher
-    // against the live Hyprland instance.
-
-    Timer {
-        interval: 10000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: root.checkHealth()
-    }
-
-    function checkHealth() {
-        if (healthRunning)
-            return;
-        healthRunning = true;
-        run(["hyprctl", "version", "-j"], 5000, (code, text) => {
-            healthRunning = false;
-            let ok = code === 0;
-            if (ok) {
-                try {
-                    JSON.parse(text);
-                } catch (e) {
-                    ok = false;
-                }
-            }
-            // hyprctl exits 0 with no output when the socket closes unanswered.
-            if (!ok)
-                fail("Hyprland is not answering (hyprctl version exit " + code + (code === 0 ? ", no valid reply" : "") + ")");
-        });
-    }
-
-    function fail(reason) {
-        warn(reason + "; clearing episodes and exiting");
-        cancelGraces("Hyprland lost");
-        candidates = ({});
-        addressGen = ({});
-        hyprlandUp = false;
-        activity = Policy.activityReset(Date.now(), null);
-        recompute();
-        writeFeed(Date.now());
-        Qt.exit(1);
-    }
-
-    // -----------------------------------------------------------------------
-    // Episodes (D2): a 1Password window whose title is still exactly
-    // "1Password" confirm_seconds after it opened, with a requester (D3).
+    // Hyprland windows. Every window of the 1Password class is a candidate;
+    // the engine asks for the confirmation check, which requires the exact
+    // title "1Password" and no title change once the check has started (the
+    // main window renames itself within about 0.3 s; Quick Access and
+    // Settings have other titles).
 
     Connections {
         target: Hyprland
         function onRawEvent(event) {
             if (event.name === "closewindow" || event.name === "closelayer")
-                root.applyActivity({ type: "close", atMs: Date.now() });
-            const e = Policy.parseWindowEvent(event.name, event.data);
+                root.send({ type: "surface_closed" });
+            const e = root.policy.parseWindowEvent(event.name, event.data);
             if (!e)
                 return;
-            if (e.type === "open")
-                root.onWindowOpen(e);
-            else if (e.type === "title")
-                root.onWindowTitle(e);
-            else if (e.type === "close")
-                root.onWindowClose(e);
+            if (e.type === "open" && root.policy.isApprovalClass(e.windowClass)) {
+                root.windows[e.address] = { address: e.address, closed: false, titleChanged: false, checkStarted: false };
+                root.send({ type: "candidate_open", key: e.address, openedAtMs: Date.now(), reconciled: false, source: "approval" });
+            } else if (e.type === "title") {
+                const w = root.windows[e.address];
+                if (w && w.checkStarted && !root.policy.isApprovalTitle(e.title))
+                    w.titleChanged = true;
+            } else if (e.type === "close" && root.windows[e.address]) {
+                root.windows[e.address].closed = true;
+                delete root.windows[e.address];
+                root.send({ type: "candidate_closed", key: e.address, closedAtMs: Date.now() });
+            }
         }
     }
 
-    // Every window of the 1Password class is a candidate; its title is judged
-    // at the delayed check, so a window that gains the title late still counts.
-    function onWindowOpen(e) {
-        if (!Policy.isApprovalClass(e.windowClass))
-            return;
-        addCandidate(e.address, Date.now(), false);
-    }
-
-    // Once the check has started, any change away from "1Password"
-    // disqualifies the window.
-    function onWindowTitle(e) {
-        const c = candidates[addressGen[e.address]];
-        if (c && !c.closed && c.checkStarted && !Policy.isApprovalTitle(e.title) && !c.titleChanged) {
-            c.titleChanged = true;
-            if (c.episodeId)
-                log("episode " + c.episodeId + ": window title changed");
-        }
-    }
-
-    function addCandidate(address, openedAtMs, reconciled) {
-        generation += 1;
-        const c = {
-            gen: generation,
-            address: address,
-            openedAtMs: openedAtMs,
-            reconciled: reconciled,
-            checkStarted: false,
-            titleChanged: false,
-            closed: false,
-            episodeId: null,
-            requesterCount: 0,
-            identity: "{}",
-            timer: null
-        };
-        candidates[c.gen] = c;
-        addressGen[address] = c.gen;
-        updateLockInterval();
-        c.timer = after(cfg.watcher.confirm_seconds * 1000, () => {
-            c.timer = null;
-            confirm(c);
-        });
-    }
-
-    function current(c) {
-        return !c.closed && candidates[c.gen] === c && addressGen[c.address] === c.gen;
-    }
-
-    function drop(c, reason, titleMatched) {
-        log("1Password window (class matched, title matched: " + titleMatched + (c.reconciled ? ", reconciled" : "") + ") is not an approval: " + reason);
-        delete candidates[c.gen];
-        if (addressGen[c.address] === c.gen)
-            delete addressGen[c.address];
-    }
-
-    function confirm(c) {
-        if (!current(c))
-            return;
-        c.checkStarted = true;
+    function confirmWindow(id, address) {
+        const w = windows[address] || { address: address, closed: true, titleChanged: false };
+        w.checkStarted = true;
         run(["hyprctl", "clients", "-j"], 5000, (code, text) => {
-            if (!current(c))
-                return;
-            let clients = null;
-            if (code === 0) {
-                try {
-                    clients = JSON.parse(text);
-                } catch (err) {
-                    clients = null;
-                }
-            }
-            const check = Policy.confirmCandidate(c, clients);
-            if (!check.confirmed) {
-                drop(c, check.reason, check.reason === "title differs" ? false : check.reason === "title changed" ? true : "unknown");
-                return;
-            }
-            findRequesters(c);
+            const check = policy.confirmCandidate(w, parseJson(code, text));
+            answer(id, { confirmed: check.confirmed, reason: check.reason });
         });
     }
 
-    function findRequesters(c) {
-        const args = c.reconciled ? ["--reconciled"] : ["--opened-at", (c.openedAtMs / 1000).toFixed(3)];
-        run([requestersPath].concat(args), 10000, (code, text) => {
-            if (!current(c))
-                return;
-            if (c.titleChanged) {
-                drop(c, "title changed during the requester check", true);
-                return;
-            }
-            let result = null;
-            if (code === 0) {
-                try {
-                    result = JSON.parse(text);
-                } catch (err) {
-                    result = null;
-                }
-            }
-            if (!result) {
-                drop(c, "requester check failed (exit " + code + ")", true);
-                return;
-            }
-            const outcome = Policy.requesterOutcome(result);
-            if (!outcome.episode) {
-                drop(c, "no requester candidate", true);
-                return;
-            }
-            startEpisode(c, outcome, result);
-        });
-    }
-
-    function startEpisode(c, outcome, result) {
-        episodeSeq += 1;
-        c.episodeId = runId + "-" + episodeSeq;
-        c.requesterCount = outcome.count;
-        const sources = {};
-        result.candidates.forEach(r => sources[r.source] = (sources[r.source] || 0) + 1);
-        log("episode " + c.episodeId + " started" + (c.reconciled ? " (reconciled, never fallback-eligible)" : "") + ": " + outcome.count + " requester candidate(s) " + JSON.stringify(sources));
-        if (outcome.pid === null) {
-            log("episode " + c.episodeId + ": several requesters, the fallback names the machine only");
-            return;
-        }
-        // Identify now: the requester may exit before the fallback is due.
-        run([libDir + "/locate", "--pid", String(outcome.pid)], 15000, (code, text) => {
-            let identity = null;
-            if (code === 0) {
-                try {
-                    identity = JSON.parse(text);
-                } catch (err) {
-                    identity = null;
-                }
-            }
-            if (identity && typeof identity === "object" && !Array.isArray(identity)) {
-                c.identity = JSON.stringify(identity);
-                log("episode " + c.episodeId + ": requester identified");
-            } else {
-                log("episode " + c.episodeId + ": requester not identified (locate exit " + code + "), the fallback names the machine only");
-            }
-        });
-    }
-
-    function onWindowClose(e) {
-        const gen = addressGen[e.address];
-        if (gen === undefined)
-            return;
-        delete addressGen[e.address];
-        const c = candidates[gen];
-        if (!c)
-            return;
-        delete candidates[gen];
-        c.closed = true;
-        cancelTimer(c.timer);
-        c.timer = null;
-        const closedAtMs = Date.now();
-        c.closedAtMs = closedAtMs;
-        if (!c.episodeId) {
-            log("1Password window (class matched" + (c.reconciled ? ", reconciled" : "") + ") closed before confirmation");
-            return;
-        }
-        const lifetime = ((closedAtMs - c.openedAtMs) / 1000).toFixed(1);
-        const classification = Policy.classifyEnd(c, closedAtMs, cfg);
-        log("episode " + c.episodeId + " ended: " + classification + (c.reconciled ? "" : " after " + lifetime + " s"));
-        const grace = Policy.graceEligible(c, classification, presenceState, cfg);
-        if (!grace.eligible) {
-            if (classification === "expired")
-                log("episode " + c.episodeId + ": no fallback (" + grace.reason + ")");
-            return;
-        }
-        c.expiredAt = Math.floor(closedAtMs / 1000);
-        log("episode " + c.episodeId + ": " + grace.reason + ", fallback in " + cfg.watcher.fallback_grace_seconds + " s unless Rod returns");
-        graces[c.gen] = c;
-        c.timer = after(cfg.watcher.fallback_grace_seconds * 1000, () => {
-            c.timer = null;
-            delete graces[c.gen];
-            fireFallback(c);
-        });
-    }
-
-    function cancelGraces(reason) {
-        Object.keys(graces).forEach(gen => {
-            const c = graces[gen];
-            cancelTimer(c.timer);
-            c.timer = null;
-            log("episode " + c.episodeId + ": fallback cancelled (" + reason + ")");
-        });
-        graces = ({});
-    }
-
-    function fireFallback(c) {
-        if (activity.pending) {
-            // Wait until held activity is confirmed or discarded.
-            log("episode " + c.episodeId + ": fallback waits for held activity to resolve");
-            graces[c.gen] = c;
-            c.timer = after(Policy.CONFIRM_MS + 500, () => {
-                c.timer = null;
-                delete graces[c.gen];
-                fireFallback(c);
-            });
-            return;
-        }
-        recompute();
-        const decision = Policy.fallbackDecision(c, presenceState, lastPresentAt, cfg);
-        if (!decision.send) {
-            log("episode " + c.episodeId + ": no fallback (" + decision.reason + ")");
-            return;
-        }
-        // At most one attempt per episode, whatever happens next. No retry.
-        c.fallbackAttempted = true;
-        run([libDir + "/claim", "take", "--source", "watcher", "--expired-at", String(c.expiredAt), "--require-away"], 15000, (code, text) => {
-            const answer = (text || "").trim().split("\n")[0];
-            if (code !== 0) {
-                log("episode " + c.episodeId + ": claim refused (exit " + code + (answer ? ": " + answer : "") + "), no fallback");
-                return;
-            }
-            log("episode " + c.episodeId + ": claim granted, publishing the fallback");
-            run([libDir + "/publish", "--template", "fallback", "--identity", c.identity], 20000, (pcode, ptext) => {
-                let out = null;
-                try {
-                    out = JSON.parse((ptext || "").trim());
-                } catch (err) {
-                    out = null;
-                }
-                const result = out && out.result ? out.result : "failed";
-                const detail = out ? (out.reason || (out.http_status !== undefined ? "HTTP " + out.http_status + (out.curl_exit ? ", curl exit " + out.curl_exit : "") : "")) : "no output";
-                log("episode " + c.episodeId + ": fallback " + result + " (exit " + pcode + (detail ? ", " + detail : "") + ")");
-            });
-        });
-    }
-
-    // Approval windows already open at start: candidates of unknown age that
-    // go through the same re-check and requester check, never fallback-eligible.
-    function reconcile() {
+    // Approval windows already open at start: unknown age, confirmed the
+    // same way, never fallback-eligible.
+    function reconcile(id) {
         run(["hyprctl", "clients", "-j"], 5000, (code, text) => {
-            let clients = [];
-            if (code === 0) {
-                try {
-                    clients = JSON.parse(text);
-                } catch (err) {
-                    clients = [];
-                }
-            }
+            let clients = parseJson(code, text);
             if (!Array.isArray(clients))
                 clients = [];
-            let found = 0;
+            const found = [];
             clients.forEach(client => {
-                if (!client || !Policy.isApprovalClass(client["class"]) || !Policy.isApprovalTitle(client.title))
+                if (!client || !policy.isApprovalClass(client["class"]) || !policy.isApprovalTitle(client.title))
                     return;
-                const address = Policy.addressKey(client.address);
-                if (!address || addressGen[address] !== undefined)
+                const address = policy.addressKey(client.address);
+                if (!address || windows[address])
                     return;
-                found += 1;
-                addCandidate(address, Date.now(), true);
+                windows[address] = { address: address, closed: false, titleChanged: false, checkStarted: false };
+                found.push({ key: address, source: "approval" });
             });
-            log("reconciled " + found + " open 1Password window(s) titled 1Password" + (code === 0 ? "" : " (hyprctl clients exit " + code + ")"));
+            answer(id, { candidates: found, detail: code === 0 ? "" : "hyprctl clients exit " + code });
         });
     }
 
     Component.onCompleted: {
-        if (!runtimeDir) {
+        if (!runtimeDir && !Quickshell.env("OP_APPROVAL_RUNTIME_DIR")) {
             console.error("op-approval-watcher: XDG_RUNTIME_DIR is not set");
             Qt.exit(1);
             return;
         }
-        hostname = (hostnameFile.text() || "").trim();
-        try {
-            lastPresentAt = Policy.restoredLastPresentAt(JSON.parse(feedFile.text()), Math.floor(Date.now() / 1000));
-        } catch (e) {
-            lastPresentAt = null;
-        }
-        if (!configFile.loaded)
-            applyConfigText(configFile.text() || null);
-        log("started (run " + runId + "), last present " + (lastPresentAt === null ? "unknown" : Policy.isoWithOffset(new Date(lastPresentAt * 1000))));
-        createMonitors("start");
-        writeFeed(Date.now());
-        reconcile();
+        const previousFeed = feedFile.text() || null;
+        const config = configFile.text() || null;
+        const hostname = (hostnameFile.text() || "").trim();
+        readCode(code => {
+            send({ type: "start", previousFeed: previousFeed, config: config, hostname: hostname, runId: runId, code: code });
+            logFollower.running = true;
+        });
     }
 }

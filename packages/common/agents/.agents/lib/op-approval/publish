@@ -1,0 +1,198 @@
+#!/bin/sh
+# Publish a 1Password approval alert to ntfy from a fixed template.
+#
+# Usage:
+#   publish --template blocked --identity JSON
+#           --category ssh|git|op-cli|environment|unlock|unknown
+#           --state continuing|stopped --ref REF
+#   publish --template fallback --identity JSON [--category CATEGORY]
+#
+# JSON is the object printed by `locate` ({machine, harness, project,
+# location}), plus "process" (the requester's command name) from the
+# watcher; every field is optional and sanitised again here. REF is four
+# lowercase letters or digits. No free text reaches the notification.
+#
+# The fallback names the agent when the requester ran under a known harness;
+# otherwise it names the approval type and whatever is known of the process,
+# without claiming an agent was involved.
+#
+# Needs ntfy.url and ntfy.topic in
+# ${XDG_CONFIG_HOME:-$HOME/.config}/op-approval/config.json and a token
+# (tk_...) in ${XDG_DATA_HOME:-$HOME/.local/share}/op-approval/secrets/ntfy-token.
+# The token goes to curl on stdin, never in arguments or the environment.
+#
+# Prints one JSON line: {"result":"sent"|"not_configured"|"failed", ...}.
+#
+# Exit codes:
+#   0   sent
+#   1   failed (connection error or any answer other than HTTP 2xx, including
+#       a redirect; curl's exit code and the HTTP status are reported)
+#   2   not configured (no ntfy URL or topic, or no valid token)
+#   64  bad usage
+
+set -eu
+set +x
+
+OPA_LIB_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+. "$OPA_LIB_DIR/common.sh"
+
+usage() {
+  printf 'usage: publish --template blocked --identity JSON --category ssh|git|op-cli|environment|unlock|unknown --state continuing|stopped --ref REF\n       publish --template fallback --identity JSON [--category ssh|git|op-cli|environment|unlock|unknown]\n' >&2
+  exit 64
+}
+
+template=''
+identity=''
+category=''
+state=''
+ref=''
+while [ "$#" -gt 0 ]; do
+  [ "$#" -ge 2 ] || usage
+  case "$1" in
+    --template) template=$2 ;;
+    --identity) identity=$2 ;;
+    --category) category=$2 ;;
+    --state) state=$2 ;;
+    --ref) ref=$2 ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+
+category_label() {
+  case "$1" in
+    ssh) printf 'SSH' ;;
+    git) printf 'Git over SSH' ;;
+    op-cli) printf '1Password CLI' ;;
+    environment) printf 'Environment' ;;
+    unlock) printf 'Unlock' ;;
+    unknown) printf '1Password' ;;
+    *) return 1 ;;
+  esac
+}
+
+case "$template" in
+  blocked)
+    category_label=$(category_label "$category") || usage
+    case "$state" in
+      continuing) state_label='Continuing other work' ;;
+      stopped) state_label='Stopped' ;;
+      *) usage ;;
+    esac
+    case "$ref" in
+      [a-z0-9][a-z0-9][a-z0-9][a-z0-9]) ;;
+      *) usage ;;
+    esac
+    tag='lock'
+    ;;
+  fallback)
+    [ -z "$state$ref" ] || usage
+    category_label=$(category_label "${category:-unknown}") || usage
+    tag='key'
+    ;;
+  *) usage ;;
+esac
+
+[ -n "$identity" ] || usage
+fields=$(printf '%s\n' "$identity" | jq -r '
+  if type != "object" then error("not an object") else . end
+  | [.machine, .harness, .project, .location, .process]
+  | map(if type == "string" then gsub("[\\r\\n]"; " ") else "" end)
+  | .[]' 2>/dev/null) || usage
+{
+  IFS= read -r id_machine || true
+  IFS= read -r id_harness || true
+  IFS= read -r id_project || true
+  IFS= read -r id_location || true
+  IFS= read -r id_process || true
+} <<EOF
+$fields
+EOF
+
+opa_config_load
+machine=$(opa_sanitise "$id_machine")
+[ -n "$machine" ] || machine=$(opa_machine)
+harness=$(opa_sanitise "$id_harness")
+[ -z "$harness" ] || [ "$harness" = agent ] || opa_is_harness "$harness" || harness='agent'
+project=$(opa_sanitise "$id_project")
+location=$(opa_sanitise_location "$id_location")
+process=$(opa_sanitise "$id_process")
+
+title="[$machine] Agent blocked on 1Password"
+if [ "$template" = blocked ]; then
+  who=${harness:-agent}${project:+ in $project}
+  message="$who${location:+, $location}. $state_label. $category_label approval not given. Ref $ref"
+elif opa_is_harness "$harness"; then
+  who=$harness${project:+ in $project}
+  message="$who${location:+, $location}, or check the machine. 1Password prompt expired with no report from the agent."
+else
+  title="[$machine] 1Password approval not given"
+  who=$process${project:+ in $project}
+  who=${who# }
+  message="$category_label approval not given, with no report from an agent${who:+, $who}${location:+, $location}."
+fi
+
+not_configured() {
+  jq -nc --arg r "$1" '{result: "not_configured", reason: $r}'
+  exit 2
+}
+
+url=$(opa_cfg ntfy.url)
+topic=$(opa_cfg ntfy.topic)
+[ -n "$url" ] && [ -n "$topic" ] || not_configured "ntfy.url or ntfy.topic missing from config.json"
+
+body=$(jq -nac \
+  --arg topic "$topic" \
+  --arg title "$title" \
+  --arg message "$message" \
+  --arg tag "$tag" \
+  '{topic: $topic, title: $title, message: $message, priority: 3, tags: [$tag]}')
+
+# The token lives only in opa_secret. unset drops any export attribute the
+# caller gave that name, so no child process inherits the token.
+unset opa_secret
+[ -f "$OPA_TOKEN_FILE" ] && [ -r "$OPA_TOKEN_FILE" ] || not_configured "token file missing or unreadable"
+opa_secret=$(cat "$OPA_TOKEN_FILE") || {
+  unset opa_secret
+  not_configured "token file unreadable"
+}
+case "$opa_secret" in
+  tk_*) ;;
+  *)
+    unset opa_secret
+    not_configured "token is not a valid ntfy access token"
+    ;;
+esac
+case "${opa_secret#tk_}" in
+  '' | *[!A-Za-z0-9]*)
+    unset opa_secret
+    not_configured "token is not a valid ntfy access token"
+    ;;
+esac
+
+# printf is a shell builtin, so the token never appears in a process argument
+# list; curl reads the header from its config on stdin (-K -). -q skips
+# ~/.curlrc. No -v or tracing: they would print the header. No -L: a redirect
+# is a failure, and the token is never sent anywhere else.
+status=0
+http_code=$(printf 'header = "Authorization: Bearer %s"\n' "$opa_secret" \
+  | curl -q -K - -s -o /dev/null -w '%{http_code}' --fail --max-redirs 0 \
+    --proto '=http,https' --connect-timeout 5 --max-time 10 \
+    -H 'Content-Type: application/json' --data-binary "$body" \
+    -- "$url") || status=$?
+unset opa_secret
+
+case "$http_code" in
+  [0-9][0-9][0-9]) ;;
+  *) http_code=000 ;;
+esac
+
+# Only a 2xx answer counts as sent; curl exits 0 for a 3xx it does not follow.
+case "$status:$http_code" in
+  0:2[0-9][0-9])
+    jq -nc --arg h "$http_code" '{result: "sent", http_status: ($h | tonumber)}'
+    exit 0
+    ;;
+esac
+jq -nc --argjson c "$status" --arg h "$http_code" '{result: "failed", curl_exit: $c, http_status: ($h | tonumber)}'
+exit 1

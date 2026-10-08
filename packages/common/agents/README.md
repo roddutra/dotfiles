@@ -10,11 +10,9 @@ Skills that invoke the Claude Code CLI, including `claude-reviewer`, `delegate-t
 
 This maintainer file is excluded through `.stow-local-ignore`.
 
-## Platform-specific skills
+## 1Password approval alerts
 
-Skills and libraries that only work on one platform live in `packages/<platform>/agents`, linked from `packages/<platform>/claude` and `packages/<platform>/codex`, mirroring this package and its Claude and Codex counterparts. This package does not contain them.
-
-The first is `op-approval-blocked` with its library `.agents/lib/op-approval/`, in `packages/omarchy/agents/`, used by the skill and the Omarchy approval watcher. See `docs/op-approval.md`.
+`op-approval-blocked` and its library `.agents/lib/op-approval/` run on Omarchy and macOS. The library's per-OS parts are in `.agents/lib/op-approval/platform/`, and the watchers that share it live in `packages/{common,omarchy,macos}/op-approval-watcher`. See `docs/op-approval.md`.
 
 ## Third-party skills
 

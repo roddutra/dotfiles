@@ -1,0 +1,33 @@
+#!/bin/sh
+# Print whether Rod is at this machine, from the approval watcher's presence
+# feed (presence.json in the runtime directory described in common.sh).
+#
+# Usage:  presence
+#
+# Prints one JSON line: {"machine":..,"state":..}, plus "reason" when the
+# state is unknown and "engine" (the watcher's shared code revision) when
+# the feed is fresh. state is present, idle, away, locked or unknown. The feed
+# reads unknown when it is missing (watcher not running), malformed,
+# older than 30 s, timestamped in the future, or has an invalid state.
+# activity_pending_until is ignored here; notify and claim wait for it.
+#
+# Exit codes:
+#   0   always; the result is informational
+
+set -eu
+
+lib=${OP_APPROVAL_LIB:-$HOME/.agents/lib/op-approval}
+fail() {
+  printf '{"machine":"unknown","state":"unknown","reason":"%s"}\n' "$1"
+  exit 0
+}
+command -v jq >/dev/null 2>&1 || fail "jq is not installed"
+[ -r "$lib/common.sh" ] || fail "op-approval library not found"
+. "$lib/common.sh"
+
+feed=$(opa_presence_read) || fail "presence check failed"
+printf '%s\n' "$feed" | jq -c --arg machine "$(opa_machine)" '
+  {machine: $machine, state: .state}
+  + (if .state == "unknown" then {reason: (.reason // "unknown")} else {} end)
+  + (if .engine then {engine: .engine} else {} end)' \
+  || fail "presence check failed"

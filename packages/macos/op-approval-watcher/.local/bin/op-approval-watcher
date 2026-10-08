@@ -1,0 +1,50 @@
+#!/bin/bash
+# Start the 1Password approval watcher's macOS host. Run by the LaunchAgent
+# local.op-approval-watcher; launchd starts it again whenever it exits.
+#
+# The host is compiled from the Swift sources next to the shared Engine.js
+# and Policy.js, into ${XDG_STATE_HOME:-$HOME/.local/state}/op-approval/watcher/,
+# whenever the sources or the compiler change. It needs the Xcode Command
+# Line Tools and jq, and no privacy permission, so a rebuild loses nothing.
+#
+# Runs under launchd's minimal environment and macOS's bash 3.2.
+set -euo pipefail
+
+dir=${OP_APPROVAL_WATCHER_DIR:-"$HOME/.local/share/op-approval-watcher"}
+build_dir="${XDG_STATE_HOME:-"$HOME/.local/state"}/op-approval/watcher"
+
+# Helpers need jq (Homebrew) and may call herdr or tmux (~/.local/bin, Homebrew).
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+
+die() {
+  printf 'op-approval-watcher: %s\n' "$1" >&2
+  logger -t op-approval-watcher "$1" 2>/dev/null || true
+  exit 1
+}
+
+command -v jq >/dev/null 2>&1 || die "jq is not installed"
+# Through xcrun, which also selects the macOS SDK: the compiler run by its
+# own path cannot find the standard library under launchd.
+xcrun --find swiftc >/dev/null 2>&1 || die "swiftc not found: install the Xcode Command Line Tools (xcode-select --install)"
+
+sources=("$dir"/host/*.swift)
+[[ -f ${sources[0]} ]] || die "no host sources in $dir/host"
+hash=$({ xcrun swiftc --version 2>&1; xcrun --show-sdk-version 2>&1; cat "${sources[@]}"; } | shasum -a 256 | cut -c 1-16)
+binary="$build_dir/host-$hash"
+
+if [[ ! -x $binary ]]; then
+  umask 077
+  mkdir -p "$build_dir"
+  tmp="$binary.tmp.$$"
+  # Swift 5 mode: the host runs everything on the main run loop.
+  if ! xcrun --sdk macosx swiftc -swift-version 5 -O -suppress-warnings \
+    -module-cache-path "$build_dir/module-cache" -o "$tmp" "${sources[@]}" >"$build_dir/build.log" 2>&1; then
+    rm -f "$tmp"
+    die "building the host failed; see $build_dir/build.log"
+  fi
+  mv -f "$tmp" "$binary"
+  find "$build_dir" -maxdepth 1 -name 'host-*' ! -name "host-$hash" -exec rm -f {} + 2>/dev/null || true
+fi
+
+exec "$binary"

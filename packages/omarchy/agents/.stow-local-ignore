@@ -1,6 +1,0 @@
-# Adding this file replaces stow's default ignore list, so re-add the essentials.
-\.git
-\.gitignore
-\.DS_Store
-# Repository test suite, not part of any skill
-^/tests$

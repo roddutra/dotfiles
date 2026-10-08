@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# List the processes that could be waiting on a 1Password approval window.
+# Used by the approval watcher to name the requester in a fallback; it never
+# decides whether a window is an approval. macOS only and read-only: it uses
+# lsof and ps, and never talks to the SSH agent or 1Password.
+#
+#   requesters --opened-at EPOCH   the window opened at EPOCH (seconds, decimals allowed)
+#   requesters --reconciled        the window was already open when the watcher started
+#
+# Candidates:
+#   ssh-agent  every client of the 1Password SSH agent socket: a process with
+#              a Unix socket whose peer is a socket 1Password holds on that
+#              path. Sockets considered: SSH_AUTH_SOCK, every IdentityAgent in
+#              ~/.ssh/config and 1Password's default agent.sock, kept only
+#              when 1Password holds them.
+#   op         `op` processes of this user, except the op daemon (parent PID
+#              1), that started no later than EPOCH and at most 5 s before it
+#              (plus 1 s on the early side: ps reports whole seconds). With
+#              --reconciled, any younger than 65 s.
+#
+# Prints one JSON object, as the Linux helper does:
+#   {"sockets":["..."],"candidates":[{"pid":N,"comm":"..","source":"ssh-agent|op"}]}
+#
+# Exit codes:
+#   0   printed (no candidates is a normal result)
+#   1   lsof or jq is missing
+#   64  bad usage
+set -euo pipefail
+
+op_window_before=5
+op_early_slack=1
+reconciled_max_age=65
+
+usage() {
+  printf 'usage: requesters --opened-at EPOCH | --reconciled\n' >&2
+  exit 64
+}
+
+opened_at=''
+reconciled=false
+case "${1:-}" in
+  --opened-at)
+    [[ $# -eq 2 && $2 =~ ^[0-9]+(\.[0-9]+)?$ ]] || usage
+    opened_at=$2
+    ;;
+  --reconciled)
+    [[ $# -eq 1 ]] || usage
+    reconciled=true
+    ;;
+  *) usage ;;
+esac
+
+if ! command -v lsof >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  printf 'requesters: lsof and jq are required\n' >&2
+  exit 1
+fi
+
+expand_path() {
+  local p=$1
+  p=${p#\"}
+  p=${p%\"}
+  # ssh_config writes these literally; match the text, do not expand it.
+  # shellcheck disable=SC2088,SC2016
+  case $p in
+    "~/"*) p="$HOME/${p#\~/}" ;;
+    '$HOME/'* | '${HOME}/'*) p="$HOME/${p#*/}" ;;
+  esac
+  printf '%s\n' "$p"
+}
+
+# Candidate socket paths, in the order ssh would consider them.
+paths=()
+[[ -z ${SSH_AUTH_SOCK:-} ]] || paths+=("$SSH_AUTH_SOCK")
+if [[ -r $HOME/.ssh/config ]]; then
+  # The value may be quoted and contain spaces (Group Containers).
+  while IFS= read -r ia; do
+    [[ -n $ia && $ia != none ]] && paths+=("$(expand_path "$ia")")
+  done < <(sed -n 's/^[[:space:]]*[Ii][Dd][Ee][Nn][Tt][Ii][Tt][Yy][Aa][Gg][Ee][Nn][Tt][[:space:]=]*//p' "$HOME/.ssh/config" | sed 's/[[:space:]]*$//')
+fi
+paths+=("$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock")
+
+unique=()
+for p in "${paths[@]}"; do
+  [[ -S $p ]] || continue
+  for s in ${unique[@]+"${unique[@]}"}; do [[ $s == "$p" ]] && continue 2; done
+  unique+=("$p")
+done
+
+# Lines of "pid<TAB>comm<TAB>source".
+candidates=''
+sockets=()
+
+if ((${#unique[@]})); then
+  # lsof -F: p = PID, c = command, d = socket address, n = path or ->peer.
+  # 1Password's sockets on a candidate path give the addresses its clients
+  # are connected to.
+  # The paths go through the environment: macOS awk rejects a newline in -v.
+  pairs=$(lsof -U -F pcdn 2>/dev/null | OPA_SOCKETS="$(printf '%s\n' "${unique[@]}")" awk '
+    BEGIN { n = split(ENVIRON["OPA_SOCKETS"], list, "\n"); for (i = 1; i <= n; i++) if (list[i] != "") want[list[i]] = 1 }
+    /^p/ { pid = substr($0, 2); next }
+    /^c/ { comm[pid] = substr($0, 2); next }
+    /^d/ { dev = substr($0, 2); next }
+    /^n/ { k++; P[k] = pid; D[k] = dev; N[k] = substr($0, 2); next }
+    END {
+      for (i = 1; i <= k; i++)
+        if (comm[P[i]] == "1Password" && (N[i] in want)) { owned[D[i]] = N[i]; held[N[i]] = 1 }
+      for (p in held) printf "S\t%s\n", p
+      for (i = 1; i <= k; i++) {
+        if (comm[P[i]] == "1Password" || N[i] !~ /^->/) continue
+        if ((substr(N[i], 3) in owned) && !(P[i] in seen)) {
+          seen[P[i]] = 1
+          printf "C\t%s\t%s\tssh-agent\n", P[i], comm[P[i]]
+        }
+      }
+    }')
+  while IFS=$'\t' read -r tag a b c; do
+    case $tag in
+      S) sockets+=("$a") ;;
+      C) candidates+="$a"$'\t'"$b"$'\t'"$c"$'\n' ;;
+    esac
+  done <<<"$pairs"
+fi
+
+# op processes of this user: start time from ps lstart (whole seconds).
+now=$(date +%s)
+while read -r pid ppid lstart; do
+  [[ $pid =~ ^[0-9]+$ ]] || continue
+  [[ $ppid == 1 ]] && continue
+  started=$(LC_ALL=C date -j -f '%a %b %d %T %Y' "$lstart" +%s 2>/dev/null) || continue
+  if [[ $reconciled == true ]]; then
+    ((now - started <= reconciled_max_age)) || continue
+  else
+    awk -v s="$started" -v o="$opened_at" -v b="$op_window_before" -v e="$op_early_slack" \
+      'BEGIN { exit !(s >= o - b - e && s <= o) }' || continue
+  fi
+  candidates+="$pid"$'\top\top\n'
+done < <(ps -U "$(id -u)" -o pid=,ppid=,lstart=,comm= 2>/dev/null \
+  | awk '{ c = $NF; sub(/.*\//, "", c) } c == "op" { $NF = ""; sub(/ +$/, ""); print }')
+
+printf '%s' "$candidates" | jq -Rsc --args '
+  {sockets: $ARGS.positional,
+   candidates: [split("\n")[] | select(length > 0) | split("\t")
+                | select(length == 3 and (.[0] | test("^[0-9]+$")))
+                | {pid: (.[0] | tonumber), comm: .[1], source: .[2]}]}' ${sockets[@]+"${sockets[@]}"}

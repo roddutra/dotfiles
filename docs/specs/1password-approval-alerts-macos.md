@@ -16,8 +16,11 @@ spec**):
 Drafted 8 October 2026 and reviewed by Codex the same day. **Discovery ran on
 8 October 2026** on Rod's MacBook (19 cases with real prompts); see
 [Discovery results](#discovery-results), which settle the macOS detector and
-change the expiry rule on both platforms. **Status: ready to build**, after a
-review of the post-discovery changes.
+change the expiry rule on both platforms. **Status: built** on 8 October 2026
+and reviewed by Codex (three rounds, approved); see
+[Implementation notes](#implementation-notes) for where the build refines
+this design, and [Not exercised](#not-exercised) for what still needs a live
+check. The operational guide is [`docs/op-approval.md`](../op-approval.md).
 
 The base spec stays the behaviour reference. This document only describes what
 changes; where it says "as in the base spec", the behaviour is identical.
@@ -60,7 +63,7 @@ no alerts while the machine is asleep, no automatic resume), plus:
 | `op` CLI | agent, script | 1Password approval window; no log line at expiry unless 1Password was locked | Covered |
 | Environments (mounted `.env`) | dev server, script, agent | 1Password approval window; Environments log line | Out of scope; now in scope |
 | Unlock from an SSH, `op` or Environments request | the request | Inside the same 1Password window (Touch ID or password) | Covered |
-| Unlock from the browser extension | Rod, or a browser an agent drives | macOS Touch ID dialog (`coreautha`), not a 1Password window; times out after 30 s | Not considered; now in scope |
+| Unlock from the browser extension | Rod, or a browser an agent drives | macOS Touch ID dialog (`coreautha`), not a 1Password window; times out after 30 s. Not detected in the build: it needs 1Password's log (see [Implementation notes](#implementation-notes)) | Not considered; now in scope |
 | SDKs, MCP, anything 1Password adds later | | Generic detector only; not tested | Generic detector only |
 
 Consequences, on both platforms:
@@ -648,13 +651,76 @@ Verified during the build instead:
 
 - Karabiner's virtual keyboard, the screen saver with a lock delay, fast user
   switching
-- launchd loading a symlinked plist at login
+- launchd loading a symlinked plist at login (`apply-dotfiles` bootstraps it
+  for the current session)
+- on Omarchy, the rewritten `shell.qml` loading `Policy.js` and `Engine.js`
+  from another stow package through the shared directory, and the Linux
+  1Password log path `~/.config/1Password/logs/1Password_rCURRENT.log`
 - each harness on macOS reading the feed through the `getconf` path and
   reaching ntfy
 - `locate --pid` from the watcher's environment, on both platforms
 - delivery from the Mac to the locked iPhone
 - Touch ID for another app (`sudo` with `pam_tid` is not enabled here); the
   `coreautha` rule ignores it unless 1Password logged an unlock within 1 s
+
+# Implementation notes
+
+Where the build refines the design above:
+
+- **Confirmation is an observation.** The engine asks for the platform's
+  check with `observe candidate`; the host answers `{confirmed, reason}`.
+  There are no separate `candidate_confirmed` or `candidate_rejected`
+  events. `candidate_open` carries a `source`: `approval` (a 1Password
+  window) or `system-auth` (the macOS Touch ID dialog, which the engine
+  confirms only with an unlock line).
+- **More observations.** `observe` also takes `config` (the file's text) and
+  `code` (the text of `Policy.js` and `Engine.js`, hashed by the engine).
+  Hosts also send a `config` event when the file changes.
+- **Session states.** `session` is `up`, `inactive` (macOS: not on the
+  console; presence `unknown`, the watcher keeps running) or `lost` (Omarchy:
+  Hyprland not answering; the engine exits).
+- **Log lines are placed by their own timestamp.** Lines reach the watcher
+  10 to 220 ms after they are written and 1Password writes each signature
+  100 to 400 ms before the window is seen closing, so rule 1 uses signatures
+  written within the episode's lifetime, and the Touch ID rule needs the
+  unlock line written within the second before the dialog opened. The
+  engine classifies an episode 1.5 s after its last window closes, so late
+  lines and windows still awaiting confirmation are taken into account.
+- **Merging** joins every group an episode overlaps, including one whose
+  windows have all closed but which is not yet classified.
+- **Clock gaps.** Any timer, helper result or observation that arrives after a
+  gap of more than 5 s is handled only after the gap has reset input and
+  cancelled pending fallbacks, including one already waiting for the claim.
+- **Unrecognised lines** are logged once per source while an episode is
+  pending, and known noise from the same sources (lock state changes,
+  biometry status) is not reported.
+- **Packages.** `packages/omarchy/{agents,claude,codex}` held only this skill
+  and its library, so they were removed with the move and dropped from the
+  Omarchy package list.
+- **Runtime directory override.** `OP_APPROVAL_RUNTIME_DIR` overrides the
+  feed directory on both platforms; the test suites use it so they never
+  touch the live feed.
+- **macOS host build.** The wrapper compiles in Swift 5 language mode: the
+  host runs everything on the main run loop, and calls the compiler through
+  `xcrun`, which selects the SDK under launchd.
+- **No 1Password log on macOS.** The first live test showed that macOS
+  denies a launchd-run process read access to 1Password's Group Container
+  (`kTCCServiceSystemPolicyAppDataDetailed`; reading the log fails with
+  "Operation not permitted", while the socket stays visible to `lsof`).
+  Discovery read the log from a terminal that already had that access, so
+  the "no permissions needed" finding held for every signal except this
+  one. Granting Full Disk Access was rejected: it would extend to the
+  helper scripts the watcher runs and to every rebuild of its sources, all
+  writable by Rod, turning any code running as Rod into a reader of every
+  protected file. The macOS host therefore runs without the log: rules 2
+  and 3 decide, an unanswered browser extension unlock is not detected, and
+  an approval without an identifiable requester is reported without its
+  type. A separate fixed-function log reader with its own grant (own
+  LaunchAgent, no child processes, hardened runtime, never rebuilt
+  automatically) would restore both if they turn out to matter.
+- **launchd sets `SSH_AUTH_SOCK`** to Apple's own agent, so `requesters`
+  usually considers two socket paths; it passes them to awk through the
+  environment, since macOS awk rejects a newline in `-v`.
 
 # Configuration and token
 

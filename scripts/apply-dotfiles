@@ -43,6 +43,7 @@ common_packages=(
   grok
   ohmyposh
   omp
+  op-approval-watcher
   pi
   pnpm
   tmux
@@ -53,7 +54,7 @@ platform_folded_packages=()
 case "$(uname -s)" in
   Darwin)
     platform=macos
-    platform_packages=(ghostty karabiner nvim zsh)
+    platform_packages=(ghostty karabiner nvim op-approval-watcher zsh)
     ;;
   MINGW*|MSYS*|CYGWIN*)
     platform=windows
@@ -62,7 +63,7 @@ case "$(uname -s)" in
   Linux)
     if [[ -x /usr/bin/omarchy || -d /usr/share/omarchy ]]; then
       platform=omarchy
-      platform_packages=(agents bash claude claude-desktop codex ghostty gvfs hypr nvim omarchy op-approval-watcher starship)
+      platform_packages=(bash claude-desktop ghostty gvfs hypr nvim omarchy op-approval-watcher starship)
       platform_folded_packages=(voxtype)
     else
       echo "Linux host is not an Omarchy installation. Refusing to apply platform packages." >&2
@@ -99,6 +100,57 @@ stow_folded_packages() {
   stow "${args[@]}" "$@"
 }
 
+# A file that moved between packages leaves its old link dangling, and Stow
+# refuses to stow over a link it does not own. Before stowing, remove links
+# that dangle and point into this repository's packages/ directory, in every
+# directory the packages install into. Nothing else is touched.
+normalise_path() {
+  local path=$1 part
+  local -a parts=() out=()
+  IFS=/ read -r -a parts <<<"$path"
+  for part in "${parts[@]}"; do
+    case $part in
+      '' | .) ;;
+      ..) ((${#out[@]})) && unset 'out[${#out[@]}-1]' ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  local joined
+  joined=$(IFS=/; printf '%s' "${out[*]}")
+  printf '/%s\n' "$joined"
+}
+
+remove_stale_links() {
+  local package_dir rel dir link target resolved
+  for package_dir in "$@"; do
+    [[ -d $package_dir ]] || continue
+    while IFS= read -r rel; do
+      dir="$HOME/${rel#./}"
+      [[ -d $dir && ! -L $dir ]] || continue
+      for link in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+        [[ -L $link && ! -e $link ]] || continue
+        target=$(readlink "$link")
+        [[ $target == /* ]] || target="$(dirname -- "$link")/$target"
+        resolved=$(normalise_path "$target")
+        [[ $resolved == "$repo_root/packages/"* ]] || continue
+        if $dry_run; then
+          echo "Would remove stale link: $link"
+        else
+          rm -- "$link"
+          echo "Removed stale link: $link"
+        fi
+      done
+    done < <(cd "$package_dir" && find . -type d)
+  done
+}
+
+stale_dirs=()
+for package in "${common_packages[@]}"; do stale_dirs+=("$repo_root/packages/common/$package"); done
+for package in ${platform_packages[@]+"${platform_packages[@]}"} ${platform_folded_packages[@]+"${platform_folded_packages[@]}"}; do
+  stale_dirs+=("$repo_root/packages/$platform/$package")
+done
+remove_stale_links "${stale_dirs[@]}"
+
 echo "Applying common dotfiles..."
 stow_packages "$repo_root/packages/common" "${common_packages[@]}"
 
@@ -109,6 +161,19 @@ fi
 if ((${#platform_folded_packages[@]})); then
   echo "Applying folded $platform dotfiles..."
   stow_folded_packages "$repo_root/packages/$platform" "${platform_folded_packages[@]}"
+fi
+
+# Load the approval watcher's LaunchAgent on macOS if it is not running yet.
+# launchd loads it at every login after that.
+watcher_plist="$HOME/Library/LaunchAgents/local.op-approval-watcher.plist"
+if [[ $platform == macos && -e $watcher_plist ]] \
+  && ! launchctl print "gui/$(id -u)/local.op-approval-watcher" >/dev/null 2>&1; then
+  if $dry_run; then
+    echo "Would load the approval watcher LaunchAgent."
+  else
+    launchctl bootstrap "gui/$(id -u)" "$watcher_plist"
+    echo "Loaded the approval watcher LaunchAgent."
+  fi
 fi
 
 if $dry_run; then

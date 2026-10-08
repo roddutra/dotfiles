@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 1Password approval watcher: presence feed and fallback alert.
+     launchd does not expand ~ or $HOME in paths, so a shell finds the
+     wrapper in the user's home. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.op-approval-watcher</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/.local/bin/op-approval-watcher"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>Umask</key>
+  <integer>63</integer>
+</dict>
+</plist>
