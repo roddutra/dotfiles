@@ -99,18 +99,60 @@ Missing keys take their defaults silently. An invalid value takes its default wi
 
 ## ntfy token
 
-The token lives at `${XDG_DATA_HOME:-$HOME/.local/share}/op-approval/secrets/ntfy-token`. Create it without placing it in shell history:
+The token lives at `${XDG_DATA_HOME:-$HOME/.local/share}/op-approval/secrets/ntfy-token` (mode 600, in a mode 700 directory). Each machine has its own token for the server's write-only user, so one machine can be revoked without touching the other.
+
+`publish` accepts only `tk_` followed by letters and digits, and passes it to `curl` on stdin, never in arguments or the environment. Keep a copy of each machine's token in 1Password for recovery, but never read it with `op` at runtime: that would raise the very approval this feature reports.
+
+### New machine: generate a token
+
+The server issues nothing: a token is a random string that is declared in the server's configuration.
+
+1. Generate it straight into the token file, so it never appears on screen or in shell history:
+
+   ```sh
+   data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+   install -d -m 700 "$data_home/op-approval/secrets"
+   (umask 077; printf 'tk_%s\n' "$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 29)" \
+     > "$data_home/op-approval/secrets/ntfy-token")
+   ```
+
+   This matches ntfy's format (`tk_` plus 29 lowercase letters and digits). `ntfy token generate`, run where the server is installed, is an alternative.
+
+2. Declare it on the server: append an entry for the write-only user to the server's token list and redeploy. With ntfy's declarative auth that is `NTFY_AUTH_TOKENS` (in this homelab, the ntfy stack's Komodo Environment):
+
+   ```text
+   ,YOUR_NTFY_USER:tk_...:desktop-<hostname>
+   ```
+
+   Copy the token with `wl-copy --trim-newline < "$data_home/op-approval/secrets/ntfy-token"` (`pbcopy <` on macOS), then clear it from clipboard history: Omarchy's clipboard plugin keeps one. Never edit or move an existing entry to another user: ntfy then refuses to start. Issue a new token instead.
+
+3. Save a copy in 1Password, for example "ntfy desktop-<hostname> token".
+
+Until the server has been redeployed, `notify` reports `failed` with HTTP 403.
+
+### Existing machine: recover or re-enter a token
+
+To recover a token for 1Password, copy it from the server's token list, or from this machine's token file:
+
+```sh
+wl-copy --trim-newline < "${XDG_DATA_HOME:-$HOME/.local/share}/op-approval/secrets/ntfy-token"
+```
+
+Paste it into 1Password, then clear it from clipboard history.
+
+To write a known token back to the file (for example after a reinstall), enter it without echo:
 
 ```sh
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 install -d -m 700 "$data_home/op-approval/secrets"
 read -rsp 'ntfy token: ' NTFY_TOKEN; printf '\n'
-printf '%s' "$NTFY_TOKEN" > "$data_home/op-approval/secrets/ntfy-token"
+(umask 077; printf '%s\n' "$NTFY_TOKEN" > "$data_home/op-approval/secrets/ntfy-token")
 unset NTFY_TOKEN
-chmod 600 "$data_home/op-approval/secrets/ntfy-token"
 ```
 
-`publish` accepts only `tk_` followed by letters and digits, and passes it to `curl` on stdin, never in arguments or the environment. Keep a copy in 1Password for recovery, but never read it with `op` at runtime: that would raise the very approval this feature reports.
+### Revoke a token
+
+Remove its entry from the server's token list and redeploy. Deleting it only in ntfy's database is undone at the next start.
 
 ## Restore on another Omarchy machine
 
@@ -126,8 +168,8 @@ chmod 600 "$data_home/op-approval/secrets/ntfy-token"
 
    Add `--simulate --verbose=1` to preview.
 
-2. Create a token for this machine on the ntfy server, following the ntfy section of the homelab repository's docs. Each machine gets its own token for the write-only desktop user, so one can be revoked without touching the other.
-3. Create `config.json` and the token file as above.
+2. Generate and declare a token for this machine, as in [New machine: generate a token](#new-machine-generate-a-token).
+3. Create `config.json` as in [Machine-local configuration](#machine-local-configuration).
 4. Enable the watcher:
 
    ```sh
