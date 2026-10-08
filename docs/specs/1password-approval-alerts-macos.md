@@ -263,7 +263,7 @@ never eligible.
 
 The host feeds new lines of 1Password's current log to the engine;
 `Policy.js` matches each line's source path and message against this table.
-Observed on macOS 1Password 8.12.36:
+Observed on macOS 1Password 8.12.36 and 8.12.40:
 
 | Source | Message | Meaning |
 | --- | --- | --- |
@@ -580,8 +580,8 @@ Run on 8 October 2026 on a MacBook Pro (MacBookPro18,3): macOS 27.0 (26A428),
 settings: Touch ID unlock on, auto-lock after 60 minutes, SSH agent on.
 Cases 1 to 11 ran over VNC with the lid closed, which disables Touch ID;
 cases 12 to 19 ran at the Mac with the lid open. 1Password downloaded 8.12.40
-during the run and it was not installed: **re-check the signatures after
-updating.**
+during the run; it was installed afterwards and re-checked (see
+[Re-check on 8.12.40](#re-check-on-81240)).
 
 The recorder sampled windows, HID idle time, lock state, the frontmost app,
 sleep and wake, 1Password socket peers and processes every 250 to 500 ms, and
@@ -626,7 +626,25 @@ Other findings:
   something reading `~/Developer/--personal/proxmox-configs/.env`, the one
   mounted Environment on this Mac. What read it is not known.
 
-Not exercised, verified during the build instead:
+## Re-check on 8.12.40
+
+Two cases after updating 1Password to 8.12.40 the same day:
+
+- SSH with 1Password locked, left alone (as case 12): same window (layer
+  101, 400×369, 60.0 s), same `System unlock proceeding`, SSH timeout and
+  `AppCancel` lines, same error.
+- SSH with the screen locked (as case 13): cancelled 18.0 s after it opened
+  when the display turned off, with the same `DeviceWentToSleep`, `received
+  error from SSH auth prompt` and `Session was not authorized` lines, `agent
+  refused operation`, and no input while it was open.
+
+Only source line numbers changed (for example `lock.rs:237` became
+`lock.rs:248`). **Signatures match on the module path and message, never on
+line numbers.**
+
+## Not exercised
+
+Verified during the build instead:
 
 - Karabiner's virtual keyboard, the screen saver with a lock delay, fast user
   switching
