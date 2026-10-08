@@ -74,6 +74,15 @@
       "skillFolderHash": "9b31e495b887e4ca123960415eca69fc7e1bba28",
       "installedAt": "2026-07-01T02:09:54.503Z",
       "updatedAt": "2026-07-01T02:09:54.503Z"
+    },
+    "nurb": {
+      "source": "shpigford/nurb",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/shpigford/nurb.git",
+      "skillPath": "skills/nurb/SKILL.md",
+      "skillFolderHash": "6e568a6836c4b0eb5e83f09841f3b29ca4034d62",
+      "installedAt": "2026-10-05T03:21:44.962Z",
+      "updatedAt": "2026-10-05T03:21:44.962Z"
     }
   },
   "dismissed": {
