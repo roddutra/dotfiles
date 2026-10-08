@@ -36,6 +36,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `nvim/` contains the Linux-specific Neovim override.
 - `omarchy/` contains selected shell and plugin preference files.
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
+- `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration, vocabulary, and Groq cleanup commands. See `docs/voxtype.md`.
 
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.
@@ -148,6 +149,42 @@ findmnt --kernel --types fuse.gvfsd-fuse
 ```
 
 Verification: a forced helper failure recovered automatically; restarting GVFS restored exactly one helper and one FUSE mount. MPV decoded generated local HEVC media. No Samba share files or directories were accessed, so playback from the private share still needs a user check. This restores the existing file-manager connection workflow without storing credentials or configuring a new network mount.
+
+## Remote desktop with Sunshine
+
+Sunshine (`sunshine-bin` from the AUR) serves this desktop to Moonlight. It's set up for remote desktop work, not gaming. The Omarchy repository's `sunshine` package lagged a security release, and its build fell back to software encoding on this NVIDIA GPU (`Couldn't scale frame: Invalid argument`). The upstream build behind `sunshine-bin` 2026.914.233613 encodes with NVENC.
+
+Sunshine streams one display per process, and apps can't choose a display, so each monitor has its own host:
+
+| Moonlight host | Display | Ports | Service |
+| --- | --- | --- | --- |
+| `omarchy` | ASUS, DP-1 | default, web UI on 47990 | `app-dev.lizardbyte.app.Sunshine.service` |
+| `omarchy-ultrawide` | Dell, DP-2 | base 48089, web UI on 48090 | `sunshine-ultrawide.service` |
+
+`sunshine-ultrawide.service` sets `CONFIGURATION_DIRECTORY`, so that host keeps its config, credentials, pairings and log in `~/.config/sunshine-ultrawide/sunshine/`. Pair each host separately. Both configs carry the same encoder tuning, so keep them in step. Sunshine's web UI rewrites `sunshine.conf` and `apps.json` in place through the stow links, so changes made there show up in git. Credentials, certificates and pairing state stay untracked.
+
+After restoring the dotfiles, enable both hosts and set web UI credentials for each:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now app-dev.lizardbyte.app.Sunshine.service sunshine-ultrawide.service
+```
+
+Moonlight can connect over Tailscale or the LAN. In Moonlight, add the ultrawide host with its port, for example `<host-ip>:48089`. Sunshine treats `100.64.0.0/10` as LAN, so neither path uses Sunshine's own encryption.
+
+- Tailscale: the `ts-input` chain accepts all traffic on `tailscale0` ahead of UFW. No rule is needed.
+- LAN: two UFW rules, both commented `Sunshine from LAN`, allow the streaming ports from the LAN subnet only. They cover TCP 47984, 47989, 48010, 48084, 48089 and 48110, plus UDP 47998-48000 and 48098-48100. These are base-port offsets -5, 0 and +21 over TCP and +9 to +11 over UDP. The web UI ports (base +1) and mDNS stay closed to the LAN, so pair at the PC or over Tailscale, and add hosts by IP.
+
+Recreate the LAN rules after a reinstall, following the scoping in [LAN access and UFW](#lan-access-and-ufw):
+
+```sh
+sudo ufw allow in on <lan-interface> from <lan-subnet> to <workstation-ip> port 47984,47989,48010,48084,48089,48110 proto tcp comment 'Sunshine from LAN'
+sudo ufw allow in on <lan-interface> from <lan-subnet> to <workstation-ip> port 47998:48000,48098:48100 proto udp comment 'Sunshine from LAN'
+```
+
+Both services start when the autologin session reaches `graphical-session.target`. After a reboot, the LUKS passphrase must be typed at the PC before that happens, so a remote reboot leaves Sunshine unreachable.
+
+Capabilities: Sunshine drops all of them after startup (GHSA-fp6g-27w5-489j). The `Failed to gain CAP_SYS_ADMIN` log lines are expected, because only KMS capture needs that capability and both hosts use `wlr` capture.
 
 ## LAN access and UFW
 

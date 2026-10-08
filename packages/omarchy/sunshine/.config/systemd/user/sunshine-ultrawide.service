@@ -1,0 +1,17 @@
+[Unit]
+Description=Sunshine host for the Dell ultrawide (DP-2)
+StartLimitIntervalSec=500
+StartLimitBurst=5
+After=graphical-session.target xdg-desktop-autostart.target xdg-desktop-portal.service
+
+[Service]
+# Sunshine keeps its data in $CONFIGURATION_DIRECTORY/sunshine.
+Environment=CONFIGURATION_DIRECTORY=%h/.config/sunshine-ultrawide
+# Avoid starting Sunshine before the desktop is fully initialised.
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/bin/sunshine
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=graphical-session.target

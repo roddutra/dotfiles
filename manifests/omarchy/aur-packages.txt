@@ -8,6 +8,7 @@ grok-build
 hyprmoncfg
 hyprshell
 linear-bin
+sunshine-bin
 teams-for-linux
 trayscale
 voxtype-bin
