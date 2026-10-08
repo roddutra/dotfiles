@@ -7,16 +7,17 @@ spec**):
 1. **macOS.** Run the same system on Rod's Macs: the `op-approval-blocked`
    skill, the presence feed, the alert claim and the watcher's fallback, with
    the same behaviour as on Omarchy.
-2. **Every 1Password approval.** Cover every approval 1Password can raise, on
+2. **Every 1Password approval.** Detect every approval 1Password can raise, on
    both platforms, not only SSH and the `op` CLI.
 3. **One shared core.** Restructure the code so behaviour lives in shared
    files and each platform only translates its own signals. A behaviour change
    made once applies to every machine.
 
-Drafted 8 October 2026. **Status: draft.** Passive probes ran on Rod's MacBook
-the same day (see [What is already known](#what-is-already-known)). The
-[discovery run](#discovery) with real prompts has not been done and gates the
-macOS detector.
+Drafted 8 October 2026 and reviewed by Codex the same day. **Discovery ran on
+8 October 2026** on Rod's MacBook (19 cases with real prompts); see
+[Discovery results](#discovery-results), which settle the macOS detector and
+change the expiry rule on both platforms. **Status: ready to build**, after a
+review of the post-discovery changes.
 
 The base spec stays the behaviour reference. This document only describes what
 changes; where it says "as in the base spec", the behaviour is identical.
@@ -29,9 +30,9 @@ changes; where it says "as in the base spec", the behaviour is identical.
   - the watcher sends one fallback when nobody reported an expiry
   - at most one push per absence
   - fixed notification templates that say where to go
-- Any 1Password approval that expires while Rod is away is reported, whatever
-  asked for it: SSH, git, the `op` CLI, an SDK, an Environments mount, an
-  unlock, or a type 1Password adds later.
+- Any 1Password approval that is not given while Rod is away is reported,
+  whatever asked for it: SSH, git, the `op` CLI, an Environments mount, an
+  unlock (including the browser extension's), or a type 1Password adds later.
 - A behaviour change is made in one place, tested once, and reaches every
   machine with `git pull` and `./scripts/apply-dotfiles`.
 
@@ -40,43 +41,46 @@ changes; where it says "as in the base spec", the behaviour is identical.
 As in the base spec (no remote approval, no alerts while a prompt is pending,
 no alerts while the machine is asleep, no automatic resume), plus:
 
-- **macOS privacy permissions.** The watcher must work without Screen
-  Recording, Accessibility or Full Disk Access. Every signal probed so far
-  needs none. If discovery shows one is unavoidable, Rod decides then.
+- **macOS privacy permissions.** The watcher works without Screen Recording,
+  Accessibility or Full Disk Access. Discovery confirmed every signal it needs
+  is available without them.
 - **Windows.** `apply-dotfiles` knows the platform, but nothing here targets
   it.
 - **Spaces and window titles on macOS.** Neither is available without
   permissions, so the location names the app and the multiplexer only.
+- **Testing approval types Rod does not use.** The SDKs and MCP are covered
+  only by the generic detector; nobody exercises them.
 
 ## Scope: every 1Password approval
 
-| Type | Typical requester | macOS evidence (8 October 2026) | Omarchy today |
+| Type | Typical requester | macOS surface (discovery) | Omarchy today |
 | --- | --- | --- | --- |
-| SSH (`ssh`, `scp`, `rsync`) | agent, script | Logged: prompt start and `ssh authorization prompt timed out`; 369 timeouts in retained logs | Covered |
-| Git over SSH, SSH commit signing | agent | Same SSH agent path | Covered |
-| `op` CLI | agent, script | No log lines found; unknown | Covered |
-| SDKs (desktop app integration) | script, app | No log lines found; unknown | Out of scope; now in scope |
-| Environments (mounted `.env`) | dev server, script | Logged: `Developer Environment file mount auth was denied by the user`; 28 timeouts, most at :15:05 past the hour | Out of scope; now in scope |
-| Unlock with Touch ID or system authentication | any of the above while 1Password is locked | Logged: `System unlock proceeding ...`, then `AppCancel invoked by a timed-out prompt` | Covered as the same approval window |
-| MCP integration | agent | Disabled in settings | Not considered; now in scope if enabled |
-| Anything 1Password adds later | unknown | | Caught only by a generic detector |
+| SSH (`ssh`, `scp`, `rsync`) | agent, script | 1Password approval window; SSH log lines | Covered |
+| Git over SSH | agent | Same as SSH | Covered |
+| `op` CLI | agent, script | 1Password approval window; no log line at expiry unless 1Password was locked | Covered |
+| Environments (mounted `.env`) | dev server, script, agent | 1Password approval window; Environments log line | Out of scope; now in scope |
+| Unlock from an SSH, `op` or Environments request | the request | Inside the same 1Password window (Touch ID or password) | Covered |
+| Unlock from the browser extension | Rod, or a browser an agent drives | macOS Touch ID dialog (`coreautha`), not a 1Password window; times out after 30 s | Not considered; now in scope |
+| SDKs, MCP, anything 1Password adds later | | Generic detector only; not tested | Generic detector only |
 
 Consequences, on both platforms:
 
 - **A requester no longer decides whether an approval counts.** On Omarchy a
   window only becomes an episode when an SSH socket client or an `op` process
-  is found, so Environments and SDK approvals are dropped. From now on the
-  detector alone qualifies an episode; requesters only add identity
-  (harness, project, location). See [Detector contract](#detector-contract).
+  is found. Discovery showed an Environments read whose requester exited 23 ms
+  after raising the prompt. From now on the detector alone qualifies an
+  episode; requesters only add identity (harness, project, location). See
+  [Detector contract](#detector-contract).
+- **Lifetime alone cannot decide expiry.** See
+  [Outcome rule](#outcome-rule).
 - **Not every requester is an agent.** The fallback names the approval type
   and, when identified, the process; it must not claim an agent was involved.
   See [Notifications](#notifications).
-- **The skill covers the new types**: new categories and the failure text for
-  each, from discovery. See [Skill](#skill).
 - **One user-facing approval may produce several signals.** An SSH request
-  while 1Password is locked logs an unlock timeout and an SSH timeout. The
-  alert claim already limits pushes to one per absence; the engine also merges
-  overlapping episodes so the log stays readable.
+  while 1Password is locked logs an unlock line and an SSH line; two requests
+  at once share one window. The alert claim already limits pushes to one per
+  absence; the engine also merges overlapping episodes so the log stays
+  readable.
 
 # Part 1: Shared core
 
@@ -97,7 +101,7 @@ engine returns. If a platform file contains a threshold, a timer length or an
                                    │
                     Engine.js + Policy.js (shared, pure)
                                    │
-       effects: write feed · run helper · set timer · cancel timer · log · exit
+   effects: write feed · run helper · observe · reset input · timers · log · exit
                                    │
             shared shell: claim, publish, locate, notify, presence, blocked
                                    │
@@ -108,12 +112,12 @@ engine returns. If a platform file contains a threshold, a timer length or an
 
 | Concern | Shared | Omarchy | macOS |
 | --- | --- | --- | --- |
-| Episode lifecycle, grace timer, fallback decision, reconcile, merge | `Engine.js` | | |
+| Episode lifecycle, outcome rule, grace timer, fallback decision, reconcile, merge | `Engine.js` | | |
 | Thresholds, presence derivation, synthetic-activity filter, feed document, config normalisation, label allowlist, log signatures | `Policy.js` | | |
 | Alert claim, publishing, templates, token handling | `claim`, `publish` | | |
 | Skill procedure and scripts | `op-approval-blocked` | | |
 | Config and state paths, presence reader, lock | `common.sh` | | feed directory from `getconf DARWIN_USER_TEMP_DIR` |
-| Approval candidates | | Hyprland window events, title rule | decided by [discovery](#discovery) |
+| Approval candidates | | Hyprland window events, title rule | window list: new 1Password layer-101 window, or `coreautha` window tied to an unlock log line |
 | 1Password log follower | parser in `Policy.js` | `~/.config/1Password/logs/` (to confirm) | `~/Library/Group Containers/2BUA8C4S2C.com.1password/Library/Application Support/1Password/Data/logs/1Password_rCURRENT.log` |
 | Input idleness | | `IdleMonitor`, 5 s | `CGEventSource` seconds since last HID event |
 | Lock state | | `omarchy-hyprland-session-locked` | `CGSessionCopyCurrentDictionary`, plus `com.apple.screenIsLocked` and `screenIsUnlocked` notifications |
@@ -127,9 +131,9 @@ engine returns. If a platform file contains a threshold, a timer length or an
 ## Engine
 
 `Engine.js` takes over the orchestration now in `shell.qml`: candidates and
-generations, the confirm and requester steps, episode start and end, grace
-timers, the fallback flow, reconciliation, resume handling, config
-application, and when to write the feed.
+generations, the confirm and requester steps, episode start and end, the
+outcome rule, grace timers, the fallback flow, reconciliation, resume handling,
+config application, and when to write the feed.
 
 - Written in the JavaScript subset that runs unchanged in Quickshell's QML
   engine, JavaScriptCore and node, like `Policy.js` today (no modules, no
@@ -149,6 +153,7 @@ Events:
 - `lock` (`locked`, `unlocked`, `unknown`)
 - `session` (`up` or `down`)
 - `sleep`, `wake`
+- `log_line` (source, message), new lines of 1Password's log
 - `candidate_open`, `candidate_confirmed`, `candidate_rejected`, `candidate_closed` (see below)
 - `helper_done` (effect ID, exit code, output)
 - `observed` (effect ID, result), the answer to an `observe` effect
@@ -189,41 +194,106 @@ Each platform's detector reports approval candidates with a key it chooses:
 | `candidate_open {key, openedAtMs, reconciled, kind?}` | Something that may be an approval appeared |
 | `candidate_confirmed {key, kind?}` | The platform rule says it is an approval |
 | `candidate_rejected {key, reason}` | It is not (logged with the reason, never a title) |
-| `candidate_closed {key, closedAtMs, kind?}` | It went away |
+| `candidate_closed {key, closedAtMs}` | It went away |
 
-`kind` is one of `ssh`, `op-cli`, `sdk`, `environment`, `unlock`, `mcp` or
-`unknown`, from a log signature or a requester hint. The engine owns everything
-after confirmation: the requester lookup (identity only), the lifetime rule
-(`watcher.expired_min_seconds`), merging, the grace period and the fallback.
+`kind` is one of `ssh`, `op-cli`, `environment`, `unlock` or `unknown`. The
+engine owns everything after confirmation: kind from log lines and requesters,
+the requester lookup (identity only), the [outcome rule](#outcome-rule),
+merging, the grace period and the fallback.
 
 **Merging.** Confirmed episodes whose lifetimes overlap are one episode. The
-merged episode is expired if any part expired, and its kind is the most
-specific one reported (`ssh` over `unlock` over `unknown`).
+merged episode is not given if any part was not given, and its kind is the
+most specific one reported (`ssh`, `op-cli` or `environment` over `unlock`
+over `unknown`).
 
-**Log follower**, both platforms. The host feeds new lines of 1Password's
-current log; `Policy.js` matches them against a table of signatures, each with
-a kind and a role (`start` or `end`):
+## Outcome rule
 
-| Signature (source and message) | Kind | Role |
+When an episode closes, the engine classifies it:
+
+- **Not given** (eligible for the fallback) if any of these holds:
+  1. a log line within its lifetime marks a timeout or a cancellation (see
+     [log signatures](#log-signatures))
+  2. it lasted at least `watcher.expired_min_seconds` (59 s)
+  3. input observations were valid for its whole lifetime, and no input
+     occurred after it opened and at or before it closed
+- **Answered** otherwise.
+
+Rule 3 details:
+
+- **Raw input, before the synthetic-activity filter.** The click or key that
+  answers a prompt lands milliseconds before the window closes, so the filter
+  would hold it and, if Rod then leaves, discard it. Rule 3 therefore reads
+  the input timestamps the engine records before filtering. The filter only
+  ever affects presence.
+- **Timestamps.** The macOS host stamps each `input active` with the real
+  input time (now minus the HID idle seconds), so the click and the close are
+  ordered correctly even though both are polled. Omarchy stamps the event's
+  arrival time.
+- **Coverage.** If observations were invalid at any point in the lifetime
+  (after a start, a `reset_input` or a wake, until the monitor first reports
+  idle), rule 3 does not apply and only rules 1 and 2 decide.
+- **Bias.** While the input monitor stays active, the reducer counts every
+  tick as input. Continuous activity at the start of a prompt therefore
+  reads as "answered": a lost alert, never a spurious one. On Omarchy, a
+  synthetic input that arrives before the `closewindow` event has the same
+  effect.
+
+Why rule 2 is no longer enough, from discovery:
+
+- While the screen is locked, the display turns off after 20 to 30 s, and
+  1Password cancels any pending prompt at that moment (`Locked. Reason:
+  Automatic(DeviceWentToSleep)`). The prompt ended after 18.5 s and 24.6 s in
+  two runs, and `ssh` reported `agent refused operation`, the same as a
+  rejection.
+- A browser extension unlock times out after 30 s.
+- Approving or rejecting needs a click, a key or Touch ID. In 13 of the 14
+  unattended runs no input was recorded between the window opening and
+  closing, and in every answered case there was. The exception, case 1, ran
+  over VNC and recorded input at 15, 20 and 30 s, probably Rod (not
+  confirmed); rule 2 still classified it.
+
+Rule 3 takes the input observations the presence feed already uses. Known
+edge: an approval given with an Apple Watch produces no input and would count
+as not given. It only alerts if Rod is also not present, so it is accepted.
+
+Reconciled episodes (already open at start) keep the base spec's treatment:
+never eligible.
+
+## Log signatures
+
+The host feeds new lines of 1Password's current log to the engine;
+`Policy.js` matches each line's source path and message against this table.
+Observed on macOS 1Password 8.12.36:
+
+| Source | Message | Meaning |
 | --- | --- | --- |
-| `op-ssh-agent` `Notifying user through tray icon that they have a background prompt waiting` | `ssh` | start |
-| `op-ssh-agent` `ssh authorization prompt timed out` | `ssh` | end, expired |
-| `op-unlock` `System unlock proceeding with DeviceEnclave backend` | `unlock` | start |
-| `op-system-auth` `AppCancel invoked by a timed-out prompt` | `unlock` | end, expired |
-| `developer/environment` `Developer Environment file mount auth was denied by the user` | `environment` | kind hint for the overlapping unlock |
+| `op-ssh-agent` | `ssh authorization prompt timed out` | SSH prompt timed out |
+| `op-ssh-agent` | `Session was not authorized` | SSH prompt rejected or cancelled |
+| `op-app` `components/ssh_agent.rs` | `received error from SSH auth prompt` | SSH prompt cancelled (with a lock below) |
+| `op-app` `backend/lock.rs` | `Locked. Reason: Automatic(DeviceWentToSleep)` | 1Password locked because the display turned off; cancels pending prompts |
+| `op-unlock` | `System unlock proceeding with DeviceEnclave backend` | Unlock requested |
+| `op-system-auth` | `AppCancel invoked by a timed-out prompt` | Unlock prompt timed out |
+| `op-automated-unlock` | `Failed to authorize using system biometry` | Kind hint: browser extension unlock |
+| `developer/environment` | `Developer Environment file mount auth was denied by the user` | Kind hint: Environments. Logged on timeout as well as rejection |
+| `ProcessValidation.swift` | `Will validate remote process` | Kind hint: an `op` request over XPC |
+| `op-ssh-agent` | `Notifying user through tray icon that they have a background prompt waiting` | Kind hint: SSH. Seen 366 times in old logs, never during discovery |
 
-The table is completed by discovery. The engine logs any line from a
-prompt-related source that matches no signature as "unrecognised 1Password
-prompt line from `<source>`", never the message itself, so a 1Password update
-that changes the log shows up in the journal.
+`failed to find NSApplication related to pid` is logged for every SSH and
+`op` request, prompted or not, so it is not a signal.
+
+The engine logs any line from a source in this table that matches no message
+as "unrecognised 1Password prompt line from `<source>`", never the message
+itself. Discovery saw account IDs in neighbouring lines, so log content never
+leaves the matcher.
 
 ## Shared tests
 
 - **Engine scenarios (node).** One timeline test per acceptance scenario in
-  the base spec and this one (for example: away, SSH expiry, no skill, grace
-  passes, one fallback). They run against `Engine.js` alone, so one test
-  covers both platforms. They replace the parts of `policy.test.js` that
-  exercise orchestration indirectly.
+  the base spec and this one, and one per discovery case, replayed from the
+  recorded event shapes (for example: screen locked, SSH cancelled at 18.5 s
+  with no input, grace passes, one fallback). They run against `Engine.js`
+  alone, so one test covers both platforms. They replace the parts of
+  `policy.test.js` that exercise orchestration indirectly.
 - **Shell contracts (Python).** `test_op_approval.py` runs on both platforms,
   with per-OS stubs (`hyprctl` and `ss` on Linux; `lsof`, `ps` and `getconf`
   on macOS).
@@ -312,7 +382,8 @@ and runs one `RunLoop`.
   `${XDG_STATE_HOME:-$HOME/.local/state}/op-approval/watcher/` when the hash
   changed, and runs the binary. It needs the Xcode Command Line Tools; without
   them it logs why and exits non-zero. No permissions are granted to the
-  binary, so a rebuild loses nothing.
+  binary, so a rebuild loses nothing. The discovery recorder, built the same
+  way, compiled in seconds.
 - **Service:** a LaunchAgent with `RunAtLoad` and `KeepAlive`. launchd's
   minimum restart interval is 10 s, longer than systemd's 2 s first retry.
   The wrapper sets `PATH` to include `/opt/homebrew/bin` for `jq`.
@@ -322,34 +393,37 @@ and runs one `RunLoop`.
 
 ## Approval detection
 
-Decided by discovery against every row of the [scope table](#scope-every-1password-approval).
-Two sources are available without permissions:
+Two candidate sources, both from `CGWindowListCopyWindowInfo` polled every
+250 ms (owner, PID, window number, layer, bounds, on-screen flag; no titles):
 
-- **Window list.** `CGWindowListCopyWindowInfo` gives each window's owner,
-  PID, layer, bounds and on-screen flag, but not its title. Polled every
-  250 ms while 1Password runs.
-- **1Password log.** The log follower in the
-  [detector contract](#detector-contract). The host follows
-  `1Password_rCURRENT.log` by name (it rotates at about 500 KB), reopens it on
-  rotation, and starts at the end of the file.
+1. **1Password approval window.** A 1Password-owned window whose window
+   number was not in the previous poll and which reaches layer 101. Confirmed
+   after `watcher.confirm_seconds` if it is still present and 400 points wide.
+   - Every SSH, git, `op` and Environments approval used it, unlocked or
+     locked, with Touch ID or a password field inside it.
+   - Heights seen: 325 (`op`, Environments), 369 to 370 (SSH), 425 to 455
+     (with an unlock field). Height is not used.
+   - Quick Access is also at layer 101, but it is one window created at
+     launch and shown and hidden (550 wide), so it is never new. The main
+     window (1024×800) and Settings (780×680) are at layer 0.
+   - Position depends on the active display and is not used.
+2. **macOS Touch ID dialog.** A `coreautha` window (layer 1000) that opens
+   within 1 s after a `System unlock proceeding` log line. The browser
+   extension's unlock uses it; without the log line it belongs to another app
+   and is ignored.
 
-Open questions that decide the rule:
+The candidate closes when its window leaves the list. Kind comes from the log
+lines during its lifetime and from requesters. Window numbers are new for each
+prompt, so they are the candidate keys.
 
-- Does every approval type show a window, and can the approval window be told
-  apart from the main window, Quick Access, Settings and the unlock screen by
-  owner, layer and size alone?
-- "background prompt waiting" suggests that when 1Password is not frontmost,
-  the SSH prompt may only highlight the menu bar icon. If some approvals show
-  no window, the log is the only source for them.
-- Which types log nothing (the `op` CLI and SDKs, so far)? Those depend on the
-  window list.
+**Log follower.** The host follows `1Password_rCURRENT.log` by name (it rotates
+at about 500 KB), reopens it on rotation, starts at the end of the file, and
+sends each line as `log_line`. Lines arrived within about 50 ms of being
+written.
 
-Acceptance rule for the chosen design: every type in the discovery matrix
-produces an episode, and none of the [negative cases](#negative-cases) does.
-
-**Reconcile on start:** approval windows already open, and log `start` lines
-from the last 65 s with no `end`, become reconciled candidates, never eligible
-for a fallback, as in the base spec.
+**Reconcile on start:** 1Password windows already at layer 101 that are not
+the Quick Access window become reconciled candidates, never eligible for a
+fallback, as in the base spec.
 
 ## Presence
 
@@ -358,18 +432,32 @@ supplies the same inputs:
 
 - **Input:** polls seconds since the last HID event every 250 ms and sends
   `input idle` when it reaches 5 s, and `input active` when it falls below the
-  previous reading. Measured on the hardware event stream, so power assertions
-  (video playback, `caffeinate`) do not count as Rod being there. Discovery
-  confirms this.
-- **Closes:** every 1Password window that leaves the window list sends
-  `surface_closed`, so the synthetic-activity filter keeps working if macOS
-  shows the same behaviour as Hyprland.
+  previous reading. Verified: `caffeinate` and a playing video (with its
+  display wake lock) do not count, and nothing registers when an approval
+  window opens or closes.
+- **Remote control counts as presence.** Input over VNC or Screen Sharing
+  registers like local input. Someone controlling the Mac remotely can see
+  and answer the prompt, so this is correct.
+- **Closes:** the macOS host does not send `surface_closed`. Discovery saw no
+  synthetic input when windows close, so there is nothing to filter, and the
+  filter cannot hold a real click that happens to land next to a close. This
+  is a fact about what the platform emits, not a decision: the filter itself
+  stays in `Policy.js` and still runs on Omarchy.
 - **Lock:** the session dictionary's `CGSSessionScreenIsLocked`, read on
-  every lock notification and on the base spec's polling schedule.
+  every lock notification and on the base spec's polling schedule. Both
+  signals agreed within 0.3 s on every lock and unlock.
 - **Session:** `down` when the session is not on the console (fast user
   switching, login window), which makes presence `unknown`.
-- **Sleep and wake:** `NSWorkspace` notifications send `sleep` and `wake`, in
-  addition to the clock-gap rule.
+- **Sleep and wake:** `NSWorkspace` `willSleep` and `didWake` send `sleep`
+  and `wake`, in addition to the clock-gap rule. `screensDidSleep` was never
+  delivered to the recorder, so display sleep is not an input; the log's
+  `DeviceWentToSleep` line covers its effect on prompts.
+
+**Sleep behaviour.** Rod's Mac sleeps one minute after the display turns off
+(`pmset` `sleep 1`) unless something holds it awake. Claude Code holds
+`caffeinate -i -t 300` while it works, so a working agent keeps the Mac awake
+and its prompts still raise and expire normally with the display off (case 14).
+An idle Mac sleeps, as the base spec's non-goal allows.
 
 **Feed path.** On macOS the feed directory is
 `$(getconf DARWIN_USER_TEMP_DIR)op-approval/`, not `$TMPDIR`, because a
@@ -378,18 +466,23 @@ sandboxed harness can change `TMPDIR` and would then read the wrong file.
 
 ## Requesters
 
-`requesters` for macOS, read-only, printing the same JSON as the Linux one:
+`requesters` for macOS, read-only, printing the same JSON as the Linux one.
+Identity only:
 
 - **SSH agent:** sockets from `SSH_AUTH_SOCK`, each `IdentityAgent` in
-  `~/.ssh/config`, and
+  `~/.ssh/config` (here `Host *` sets one), and
   `~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock`, kept
-  when 1Password listens on them. Clients are found with `lsof -U`: a
-  client's peer address equals the address of a socket 1Password holds on
-  that path. Verified with a held connection on 8 October 2026.
-- **`op`:** as on Linux, but `ps -o lstart` has one-second resolution, so the
-  early-side slack is 1 s instead of 0.2 s.
-- **SDK, Environments, MCP:** decided by discovery (which socket an SDK
-  client holds; which process has a mounted `.env` file open).
+  when 1Password listens on them. Clients are found with `lsof -U -F pcdn`: a
+  client's peer address equals the device address of a socket 1Password
+  holds on that path. Paired within 0.5 s in every SSH case.
+- **`op`:** `op` holds no Unix socket (it talks to 1Password over XPC), so it
+  is matched by start time as on Linux. `ps -o lstart` has one-second
+  resolution, so the early-side slack is 1 s instead of 0.2 s. Exclude the
+  `op` daemon: an `op` process whose parent is PID 1, which starts with the
+  first request and keeps running.
+- **Environments:** not identified. The reader may exit within milliseconds
+  (case 17) or block on the mounted file (case 17b); the watcher does not know
+  the mount paths. The fallback names the machine and the type.
 
 ## locate
 
@@ -424,141 +517,126 @@ sandboxed harness can change `TMPDIR` and would then read the wrong file.
 ## Skill
 
 - Move to `packages/common/agents`, so it installs on every platform.
-- `--category` gains `sdk`, `environment` and `mcp`.
+- `--category` gains `environment`. Browser unlocks are not an agent's
+  command, so they reach Rod through the fallback only.
 - The description, the procedure's step 2 and the shared `AGENTS.md` rule
-  cover any 1Password approval, with the failure text for each type on each
-  platform from discovery.
+  cover any 1Password approval, with these symptoms:
+
+| Command | Not given (expired, or cancelled when the display turned off) | Rejected |
+| --- | --- | --- |
+| `ssh`, macOS and Linux | expired: `... from agent: communication with agent failed`; cancelled: `... agent refused operation`; then `Permission denied (publickey)`, exit 255 | `... agent refused operation` |
+| `git` over SSH | the SSH lines, then `fatal: Could not read from remote repository`, exit 128 | same pattern |
+| `op`, macOS | expired: `[ERROR] ... authorization timeout`, exit 1 | `[ERROR] ... authorization prompt dismissed, please try again`, exit 1 |
+| `op`, Linux | `[ERROR] ... authorization prompt dismissed, please try again`, exit 1 | identical |
+| Reading a mounted Environments `.env` | **no error**: the read blocks about 60 s, then returns an empty file with exit 0 | same, sooner |
+
+- Two discovery facts the procedure states: on macOS, `op` also prints
+  `prompt dismissed` when it was waiting on another request's prompt that
+  expired (case 6), so no error proves Rod rejected anything; and a mounted
+  `.env` is a named pipe, so `test -p <path>` identifies one without raising
+  a prompt. An agent whose program stalled for about a minute and then ran
+  without its variables checks that, and treats a pipe as "approval not
+  given".
 - The `AGENTS.md` rule's parenthesis ("SSH with the 1Password agent, git over
-  SSH, or the `op` CLI") becomes "any command that needs 1Password", with the
-  current three kept as examples.
+  SSH, or the `op` CLI") becomes "any command that needs 1Password, including
+  reading a mounted `.env` file", with the current three kept as examples.
 
 ## Notifications
 
 Templates stay fixed and use only enumerated or sanitised fields, as in the
 base spec.
 
-- **Category labels:** `SSH`, `Git over SSH`, `1Password CLI`, `SDK`,
-  `Environment`, `MCP`, `Unlock`, `1Password`.
+- **Category labels:** `SSH`, `Git over SSH`, `1Password CLI`, `Environment`,
+  `Unlock`, `1Password`.
 - **Skill alert:** unchanged; an agent always sent it.
 - **Watcher fallback with an identified agent harness:** unchanged.
 - **Watcher fallback without one:** title `[<machine>] 1Password approval
-  expired`, body `<category> approval expired with no report from an agent,
-  <process> in <project>, <location>.`, with each unknown part left out. The
-  process is the requester's `comm`, sanitised.
+  not given`, body `<category> approval not given, with no report from an
+  agent, <process> in <project>, <location>.`, with each unknown part left
+  out. The process is the requester's `comm`, sanitised.
 
 ## Omarchy
 
 - Extract `Engine.js` from `shell.qml` with no behaviour change, then run the
   existing tests and the base spec's E2E checks again.
+- Apply the [outcome rule](#outcome-rule). Verify that Hyprland's synthetic
+  input arrives after the `closewindow` event (so it does not count for rule
+  3), with an unattended expiry and an unattended cancellation (lock the
+  screen during a prompt), and that an approval click arrives before it.
 - Drop the requester gate (the [scope](#scope-every-1password-approval)
-  change). The title rule alone then qualifies an episode, so confirm on
-  Omarchy that Environments and SDK prompts use the same approval window, and
-  that no other 1Password window keeps the title `1Password` for more than a
-  second.
+  change). The title rule alone then qualifies an episode, so confirm that an
+  Environments prompt uses the same approval window, and that no other
+  1Password window keeps the title `1Password` for more than a second.
 - Add the log follower if Linux 1Password logs the same signatures. The base
-  spec recorded `ssh authorization prompt timed out` there.
+  spec recorded `ssh authorization prompt timed out` and `Session was not
+  authorized` there.
+- Check whether Linux 1Password cancels a pending prompt when the screen
+  locks or the display turns off.
 
-# Discovery
+# Discovery results
 
-An implementation gate for the macOS detector, the requester sources for the
-new types and the skill's failure text. Record versions (macOS, 1Password,
-`op`, Herdr, tmux, Ghostty, Swift) and every observation in this document
-before writing the macOS host.
+Run on 8 October 2026 on a MacBook Pro (MacBookPro18,3): macOS 27.0 (26A428),
+1Password 8.12.36, `op` 2.32.0, Herdr in use, Ghostty and Arc. 1Password
+settings: Touch ID unlock on, auto-lock after 60 minutes, SSH agent on.
+Cases 1 to 11 ran over VNC with the lid closed, which disables Touch ID;
+cases 12 to 19 ran at the Mac with the lid open. 1Password downloaded 8.12.40
+during the run and it was not installed: **re-check the signatures after
+updating.**
 
-## Approval matrix
+The recorder sampled windows, HID idle time, lock state, the frontmost app,
+sleep and wake, 1Password socket peers and processes every 250 to 500 ms, and
+followed 1Password's log.
 
-Run each type below. For each, cover 1Password unlocked and locked; 1Password
-frontmost, in the background, and with its main window closed; and the outcome
-left alone, rejected and approved.
+| # | Case | Window | Life | Outcome | Command result |
+| --- | --- | --- | --- | --- | --- |
+| 1 | SSH, 1Password locked (password), left alone | 1P layer 101, 400×455 | 60.0 s | `ssh authorization prompt timed out` | `communication with agent failed`, 255, 60.2 s |
+| 2 | SSH, unlocked, left alone | 400×370 | 60.0 s | same | same |
+| 3 | `op vault list`, unlocked, left alone | 400×325 | 60.3 s | no log line | `authorization timeout`, 1, 60.2 s |
+| 4 | `op`, rejected | 400×325 | 2.8 s | no log line | `authorization prompt dismissed`, 1, 2.9 s |
+| 5 | SSH, rejected | 400×370 | 4.0 s | `Session was not authorized` | `agent refused operation`, 255, 4.3 s |
+| 6 | SSH and `op` together, left alone | one shared 400×370 | 60.0 s | SSH timed out | SSH as case 2; `op`: `prompt dismissed` |
+| 7 | Rod opens main window, Quick Access, Settings | layer 0, layer 101 (persistent), layer 0 | | no episode | |
+| 8 | `git ls-remote` over SSH, left alone | 400×370 | 59.8 s | SSH timed out | SSH lines + `fatal: Could not read from remote repository`, 128, 65 s |
+| 9 | SSH, approved; then SSH again | 400×370 | 2.5 s | no log line | 0; repeat: no prompt, 0.3 s |
+| 10 | SSH, 1Password locked, Touch ID unavailable (lid closed) | 400×438 | 60.0 s | SSH timed out | as case 1 |
+| 11 | SSH, screen locked, over VNC | 400×438 | 24.5 s | display off, `DeviceWentToSleep`, `Session was not authorized` | `agent refused operation`, 24.6 s |
+| 12 | SSH, 1Password locked, Touch ID available, left alone | 400×369 | 59.3 s | `System unlock proceeding`, SSH timed out, `AppCancel` | as case 2 |
+| 13 | SSH, screen locked, at the Mac | 400×425 | 18.5 s | as case 11 | `agent refused operation`, 18.5 s |
+| 14 | SSH raised after the display was already off (`caffeinate -i`) | 400×425 | 59.7 s | SSH timed out, normally | as case 2 |
+| 15 | Browser extension unlock, left alone | `coreautha` layer 1000, 260×205 | 30.0 s | `System unlock proceeding`, `AppCancel`, `Failed to authorize using system biometry` | |
+| 16 | `op`, 1Password locked, left alone | 400×325 | 60.0 s | `System unlock proceeding`, `AppCancel` | `authorization timeout`, 60.1 s |
+| 17 | Open a mounted `.env` (opener exits at once), locked | 400×325 | 60.0 s | `AppCancel`, `Developer Environment file mount auth was denied by the user` | |
+| 18 | SDK through desktop integration | none | | dropped: Rod does not use the SDKs | |
+| 19 | Video playing, hands off 40 s | | | HID idle reached 61 s | |
 
-1. `ssh` to a host, with the approval cache lapsed (a new terminal session
-   with per-session approval).
-2. `git ls-remote` over SSH, and `git commit -S` with SSH signing in a scratch
-   repository.
-3. `op vault list` with CLI integration on.
-4. An SDK call through desktop app integration, if an SDK supports it at the
-   time. Otherwise record that and skip.
-5. Reading a mounted Environments `.env` file. Also identify what reads one at
-   :15:05 past the hour.
-6. Unlocking from the browser extension, including from a browser an agent
-   drives.
-7. MCP, only if Rod enables it.
-8. Two requests at once (two SSH, and SSH with `op`).
+Case 17b read the same `.env` with `wc -c`: the read blocked 60.3 s and
+returned 0 bytes with exit 0.
 
-Record for each run:
+Other findings:
 
-- every window from the window list while it runs, sampled every 250 ms:
-  owner, PID, layer, bounds, on-screen flag, and open and close times
-- whether only the menu bar icon changes
-- every log line from start to end, with its source path
-- requester visibility: `lsof -U` peers, `op` start time, other sockets or
-  open files
-- the command's error text, exit code and duration
-- seconds since the last HID event, sampled through the window's open and
-  close, with nobody touching the Mac (the synthetic-activity question)
+- **Input.** No input was recorded in any unattended case except case 1
+  (see [Outcome rule](#outcome-rule)), including when windows opened and
+  closed. Clicks over VNC and at the Mac both registered.
+- **Requesters.** `ssh` was paired with `agent.sock` within 0.5 s every time.
+  `op` was found by start time. The Environments opener in case 17 exited
+  23 ms after raising the prompt.
+- **"Background prompt waiting"** never appeared, although it was logged 366
+  times before. Its trigger is unknown; nothing depends on it.
+- **Historic timeouts.** The 28 Environments timeouts on 1 October came from
+  something reading `~/Developer/--personal/proxmox-configs/.env`, the one
+  mounted Environment on this Mac. What read it is not known.
 
-## Negative cases
+Not exercised, verified during the build instead:
 
-None of these may produce an episode:
-
-- Rod opens the main window, Quick Access or Settings
-- a 1Password update prompt
-- Touch ID for something else (`sudo` with `pam_tid`, a system dialog)
-
-Unlock prompts are approvals whoever raised them, including Rod and the
-browser extension. One Rod raises himself does not alert because he is
-present or answers it, under the base spec's rules.
-
-## Presence, service and harness probes
-
-- Idle time ignores `caffeinate -d` and video playback.
-- Karabiner's virtual keyboard registers input only when Rod types.
-- Lock with Ctrl-Cmd-Q, with the screen saver and a lock delay, on display
-  sleep and with the lid closed. The notification and the session dictionary
-  agree, and unlocking clears `locked` promptly.
-- Sleep and wake produce `sleep` and `wake`, and pending fallbacks are
-  cancelled.
-- Fast user switching makes presence `unknown`.
-- launchd loads a symlinked plist at login, and the wrapper's `PATH` finds
-  `jq`.
-- In Claude Code, Codex, Pi and OMP on macOS: the global rule loads, the skill
-  is found, `presence` reads the feed through the `getconf` path, `notify`
-  reaches `https://ntfy.dutrafamily.com`, and the index is writable.
-- `locate --pid`, run from the watcher's environment (no `HERDR_*` or
-  `TMUX`), names the Herdr workspace and tab, and the tmux session, for a
-  requester in each, and maps both to Ghostty through the attached client.
-  The same check runs on Omarchy.
-- Delivery from the Mac to the locked iPhone on Wi-Fi.
-
-## Probe commands
-
-```sh
-logdir="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/Library/Application Support/1Password/Data/logs"
-tail -F "$logdir/1Password_rCURRENT.log" | grep --line-buffered -E 'op-ssh-agent|op-system-auth|op-unlock|environment|cli|sdk|mcp'
-lsof -U -a -c 1Password; lsof -U -a -c ssh
-ioreg -c IOHIDSystem | awk '/HIDIdleTime/ {print $NF / 1e9; exit}'
-```
-
-The window sampler and lock reader are throwaway Swift scripts in the
-session's scratch directory, not committed.
-
-## What is already known
-
-Passive probes on 8 October 2026: macOS 27.0 (26A428), arm64, 1Password
-8.12.36, Herdr in use, Ghostty and iTerm2 installed, Swift available.
-
-- The log records SSH prompts (start and timeout, about 60 s apart), unlock
-  timeouts and Environments denials, as in the
-  [scope table](#scope-every-1password-approval). No `op` CLI or SDK lines
-  exist in logs retained since 4 September 2026.
-- 237 SSH prompts timed out on 30 September and 128 on 1 October, which looks
-  like something retrying in a loop.
-- `CGSessionCopyCurrentDictionary`, `CGEventSource` idle time and
-  `CGWindowListCopyWindowInfo` owner and bounds all work without permissions.
-  Window titles do not.
-- `lsof -U` pairs an agent socket client with 1Password's accepted socket.
-- `getconf DARWIN_USER_TEMP_DIR` returns the per-user temporary directory.
-- `ps -E` does not return another process's environment.
+- Karabiner's virtual keyboard, the screen saver with a lock delay, fast user
+  switching
+- launchd loading a symlinked plist at login
+- each harness on macOS reading the feed through the `getconf` path and
+  reaching ntfy
+- `locate --pid` from the watcher's environment, on both platforms
+- delivery from the Mac to the locked iPhone
+- Touch ID for another app (`sudo` with `pam_tid` is not enabled here); the
+  `coreautha` rule ignores it unless 1Password logged an unlock within 1 s
 
 # Configuration and token
 
@@ -570,8 +648,8 @@ paths (`~/.config/op-approval/config.json`,
 - Each Mac gets its own ntfy token for the `desktop` user, added to
   `NTFY_AUTH_TOKENS` in the `ntfy` stack's Komodo Environment, as in the base
   spec's [notification service](1password-approval-alerts.md#notification-service).
-- No new keys. Detector parameters that discovery produces (sizes, signatures)
-  are constants in `Policy.js`, not config.
+- No new keys. Detector parameters from discovery (layer, width, the
+  `coreautha` window, log signatures) are constants in `Policy.js`, not config.
 
 # Security
 
@@ -579,8 +657,8 @@ The base spec's [threat model and rules](1password-approval-alerts.md#security)
 apply unchanged. macOS additions:
 
 - The watcher holds no macOS privacy permission.
-- 1Password's log may contain account and item identifiers. The watcher only
-  matches signatures and never logs or forwards log content.
+- 1Password's log contains account identifiers. The watcher only matches
+  signatures and never logs or forwards log content.
 - The fallback without an agent names a process and project. Set a project
   alias for anything that should not appear on the lock screen.
 
@@ -592,14 +670,22 @@ macOS, on each Mac:
   [acceptance criteria](1password-approval-alerts.md#acceptance-criteria)
   passes, with macOS equivalents for Hyprland restart (session loss) and the
   journal (unified log).
-- Every type in the approval matrix produces exactly one push when Rod is away
-  and no agent reports it, and none when he is present.
-- No negative case produces an episode.
+- With Rod away, each of these produces exactly one push when no agent
+  reports it, and none when he is present: SSH, git over SSH, `op`, an
+  Environments read, a browser extension unlock, each with 1Password locked
+  and unlocked, and an SSH prompt cancelled by the screen locking.
+- Rejected and approved prompts send nothing, including when Rod approves and
+  then leaves the Mac untouched for 10 s, and when a prompt is approved
+  within 5 s of the watcher starting. The same two checks run on Omarchy.
+- Opening the main window, Quick Access or Settings creates no episode.
 - The watcher runs without any privacy permission.
+- After a 1Password update, the signatures in [Log signatures](#log-signatures)
+  still match, or the unrecognised-line log shows what changed.
 
 Shared core:
 
-- Engine scenario tests cover every acceptance scenario and pass under node.
+- Engine scenario tests cover every acceptance scenario and every discovery
+  case, and pass under node.
 - Both hosts load the same `Engine.js` and `Policy.js`. After a pull, both
   machines log the same engine hash.
 - A test change to a default in `Policy.js`, made on one machine, changes
@@ -612,4 +698,6 @@ Omarchy, after the refactor:
 - Upgrading the existing installation with `git pull` and
   `./scripts/apply-dotfiles` succeeds with no Stow conflicts.
 - The base spec's E2E criteria still pass.
-- Environments and SDK approvals produce a fallback when Rod is away.
+- An Environments approval produces a fallback when Rod is away.
+- An unattended prompt cancelled early (if Linux 1Password does that) is
+  classified as not given.
