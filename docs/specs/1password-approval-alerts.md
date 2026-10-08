@@ -58,6 +58,9 @@ sessions in parallel, across two Omarchy machines and several harnesses
 - Alerting while a prompt is still pending.
 - Alerting when the PC is asleep or the graphical session is not running.
 - macOS. Every part is in Omarchy-only packages, so nothing installs there.
+  **Superseded** by [`1password-approval-alerts-macos.md`](1password-approval-alerts-macos.md),
+  which also widens the scope to every 1Password approval type on both
+  platforms.
 
 ## How the components divide the work
 
@@ -398,7 +401,8 @@ application and terminal session, remembered until 1Password locks.
 
 Scope agreed with Rod during the run: SSH signing and the `op` CLI, including
 a locked vault that one of them unlocks. 1Password Environments (mounted
-`.env` files) and the SDKs are out of scope.
+`.env` files) and the SDKs are out of scope. **Superseded:** every approval
+type is in scope; see [`1password-approval-alerts-macos.md`](1password-approval-alerts-macos.md#scope-every-1password-approval).
 
 ### The prompt is 1Password's own window, not polkit
 
