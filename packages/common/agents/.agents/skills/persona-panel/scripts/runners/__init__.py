@@ -36,8 +36,11 @@ capabilities() -> dict
     provider             str: who receives the materials
     billing_env          list[str]: environment variables that, when set, can change who is
                          billed. The plan step reports any that are set
-    isolation_gaps       list[str]: what the runner could not switch off, in plain English.
-                         The plan step prints them
+    isolation_gaps       list[str]: what the runner could not switch off for any run or job, in
+                         plain English. The plan step prints them
+    browse_gaps          list[str]: what it could not switch off only for a run that may browse
+                         ("browse" true), in the same words. Empty when "browser" is false. The
+                         plan step prints them when the study's runs can browse on this runner
 
 launch_command(run, prompt, workdir, limits) -> dict
 resume_command(run, session_id, message, workdir, limits) -> dict

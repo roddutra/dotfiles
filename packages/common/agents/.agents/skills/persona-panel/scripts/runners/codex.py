@@ -140,6 +140,7 @@ def capabilities() -> dict:
             "A run inside a git repository adds a trust entry for that repository to the "
             "user's Codex config.toml.",
         ],
+        "browse_gaps": [],  # no run browses on this runner
     }
 
 

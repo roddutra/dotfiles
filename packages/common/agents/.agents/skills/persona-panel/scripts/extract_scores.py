@@ -14,11 +14,16 @@ runs.csv has one row per expected run (panel_lib.run_records), whether or not it
 labels with a section and with a score row, separated by spaces; "has_final" is 1 when the final
 sections exist.
 
+A run whose latest follow-up question is not settled yet is read as it stood before the question
+(panel_lib.read_persona), so nothing a follow-up changed reaches a CSV before a launcher has
+accepted it. One line names each such run.
+
 Usage: extract_scores.py <study-dir>
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import sys
 from pathlib import Path
@@ -28,9 +33,9 @@ import panel_lib as pl  # noqa: E402
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit(__doc__)
-    cfg = pl.load_study(Path(sys.argv[1]))
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("study_dir", type=Path)
+    cfg = pl.load_study(ap.parse_args().study_dir)
     sd = cfg["_dir"]
     labels = list(pl.label_map(cfg))
     keys = pl.factor_keys(cfg)
@@ -66,8 +71,8 @@ def main():
                     n_rows += 1
             for i, label in enumerate(r["ranking"], start=1):
                 rw.writerow([*who, complete, run["segment"], i, label])
-    print(f"{n_rows} score rows from {len(runs)} runs; {incomplete} runs incomplete "
-          f"(run check_runs.py for details)")
+    print(*pl.unsettled_lines(runs), f"{n_rows} score rows from {len(runs)} runs; {incomplete} runs incomplete "
+          "(run check_runs.py for details)", sep="\n")
 
 
 if __name__ == "__main__":

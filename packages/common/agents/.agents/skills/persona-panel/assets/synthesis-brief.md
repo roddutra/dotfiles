@@ -9,8 +9,13 @@ You are writing the final synthesis of a simulated customer research study for <
 - `analysis/qual-*.md`: themes, quotes and per-concept findings.
 <EXTRA_CONTEXT_FILES>
 - You may spot-check persona files in `panel/personas/` to confirm a quote.
+<FOLLOWUPS>
 
 ## Output: `<STUDY_DIR>/analysis/SYNTHESIS.md`
+Open the file with a `#` title and, directly under it, this line on its own, word for word:
+
+<NOTICE>
+
 1. **The answer in one screen.** Eight to ten bullets: what won and for whom, why, what failed, what is still missing, and what to do next.
 2. **Method and how much to trust it.** Personas, models and method in brief. What is robust across models, what is model-dependent, and known limitations (static screenshots, capture artefacts, repetition across similar concepts, flagged runs, background leakage).
 3. **Leaderboard.** Overall, the headline segment, a compact per-segment view, and a short model-skew note.
@@ -24,6 +29,7 @@ You are writing the final synthesis of a simulated customer research study for <
 11. **Decisions for <DECISION_MAKER>.** Only what needs a human call, including any claims the concepts invented that need confirming.
 
 ## Rules
+<TEXT_ONLY_NOTE>
 - Concise and concrete; prefer tables and bullets. Every claim traces to the inputs.
 - Quote exactly, with a run citation (for example "P04-opus").
 - No em or en dashes.

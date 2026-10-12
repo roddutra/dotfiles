@@ -26,6 +26,12 @@ Steps, in the order given:
     final           append the final sections only
     meddle:<run id> append a line to the persona file of another run, <pid>-<key>: a panellist
                     writing outside its own file
+    followup        append the "## Follow-up <n>" section the message asks for, with the
+                    question quoted: what a panellist does with a follow-up question
+    rescore         raise the first score of the first concept section by one: a panellist
+                    changing a score it had already given
+    cut             cut the persona file off before its last concept section: a panellist that
+                    rewrote its file and lost the end of it
     reply           end with DOCUMENT as the final reply, in place of the recorded one: what a
                     job that could not write its file returns
     wait:<gate>     block until the test creates go/<gate>
@@ -40,7 +46,7 @@ Steps, in the order given:
     exit:<code>     exit with that code and print nothing more: a process that went quiet long
                     before it ended
 
-Sections use 11 score columns, so the study must keep the default factors.
+Sections have one score column for each factor in the score table of the panel instructions.
 
 $FAKE_CLI_LOG gets one JSON line per event instead of one per invocation:
 
@@ -59,7 +65,6 @@ import sys
 import time
 from pathlib import Path
 
-FACTORS = 11
 PATIENCE = 30  # seconds a blocked step waits before giving up, so a broken test leaves no process behind
 PERSONA_FILE = re.compile(r"(\S+/personas/([^/\s-]+)-[^/\s]*--([^/\s]+)\.md)")
 JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(?:qual-(\d+)|SYNTHESIS)\.md)`", re.M)
@@ -78,6 +83,12 @@ def events():
     return [e for e in map(json.loads, lines) if "event" in e]
 
 
+def factors(path):
+    """How many scores the panel instructions ask for in a section: the columns of their template row."""
+    instructions = (path.parents[1] / "_panel-instructions.md").read_text()
+    return re.search(r"^\| n(?: \| n)* \|$", instructions, re.M).group(0).count("n")
+
+
 def write(path, count):
     """Append `count` concept sections ("all": every one missing, then the final sections).
     A job's output file is written whole instead."""
@@ -87,10 +98,11 @@ def write(path, count):
     text = path.read_text()
     order = [x.strip() for x in re.search(r"\| Review order \| (.+?) \|", text).group(1).split(",")]
     missing = [label for label in order if not re.search(rf"^### Concept {label}\b", text, re.M)]
-    row = "| " + " | ".join(["7"] * FACTORS) + " |"
+    n = factors(path)
+    row = "| " + " | ".join(["7"] * n) + " |"
     for label in missing if count == "all" else [] if count == "final" else missing[:int(count)]:
         text += f"### Concept {label}\n**5-second take (in my words):** fine.\n\n{row.replace('7', 'F')}\n" \
-                f"|{'---|' * FACTORS}\n{row}\n\n"
+                f"|{'---|' * n}\n{row}\n\n"
     if count in ("all", "final"):
         ranking = "".join(f"{i}. Concept {label} - reason\n" for i, label in enumerate(order, 1))
         text += f"## Comparison\n### My ranking (best to worst)\n{ranking}\n" \
@@ -173,6 +185,15 @@ def play(cli, session, resumed, prompt, recording, modes, reply, lost):
             pid, _, key = arg.partition("-")
             other = next(file.parent.glob(f"{pid}-*--{key}.md"))
             other.write_text(other.read_text() + "A line written by another run.\n")
+        elif verb == "followup":
+            number = re.search(r"`## Follow-up (\d+)`", prompt).group(1)
+            asked = re.search(r"^-{10}\n(.*?)\n-{10}$", prompt, re.S | re.M).group(1)
+            file.write_text(file.read_text() + f"\n## Follow-up {number}\n\n> {asked}\n\nIn character: it depends.\n")
+        elif verb == "rescore":
+            file.write_text(re.sub(r"^\| 7 \|", "| 8 |", file.read_text(), count=1, flags=re.M))
+        elif verb == "cut":
+            whole = file.read_text()
+            file.write_text(whole[:whole.rindex("### Concept ")])
         elif verb == "reply":
             said.append(DOCUMENT)
         elif verb == "wait":

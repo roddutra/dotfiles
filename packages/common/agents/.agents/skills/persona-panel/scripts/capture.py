@@ -14,6 +14,11 @@ depending on whether their model thought to click it:
   {"id": "03-x", "path": "...", "states": [{"name": "insurance", "page": "index",
    "js": "document.querySelector('[data-industry=insurance]').click()"}]}
 
+A text-only study (study.json "materials": "text") gets page-text.txt alone, extracted the
+same way. Its pages come from <study>/sites/, outside panel/, and every image an earlier capture
+left under panel/materials is removed, so a panellist has nothing of the design to open. It
+needs no ImageMagick.
+
 Then scans page text for study.json "forbidden_terms" (build notes, internal terms) and
 reports any hit, because panellists read everything literally.
 
@@ -23,6 +28,7 @@ Usage: capture.py <study-dir> [--label A] [--page index] [--jobs 3]
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -32,7 +38,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
 
 
-def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: dict | None = None) -> str:
+IMAGES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: dict | None = None,
+                 text_only: bool = False) -> str:
     dw, dh = cap.get("desktop", [1440, 900])
     mw, mh = cap.get("mobile", [390, 844])
     max_screens = cap.get("max_screens", 20)
@@ -41,7 +51,7 @@ def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: d
     media = cap.get("media", "")
     setup_js = state["js"] + ";1" if state else ""
     raw = pdir / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
+    (pdir if text_only else raw).mkdir(parents=True, exist_ok=True)
     for old in list(raw.glob("*.png")) + list(pdir.glob("desktop-sheet-*.png")):
         old.unlink()
     url = f"file://{site / page}"
@@ -54,8 +64,9 @@ def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: d
     total = b.scroll_height()
     step = dh - 60
     i = pos = 0
-    while pos < total and i < max_screens:
-        b.run("screenshot", str(raw / f"d-{i:02d}.png"))
+    while pos < total and i < max_screens:  # a text-only capture scrolls too, so the same reveals fire
+        if not text_only:
+            b.run("screenshot", str(raw / f"d-{i:02d}.png"))
         for _ in range(3):
             b.run("scroll", "down", str(step // 3))
             b.run("wait", "300")
@@ -67,6 +78,8 @@ def capture_page(site: Path, page: str, out: Path, cap: dict, tag: str, state: d
     text = b.eval("document.body.innerText")
     (pdir / "page-text.txt").write_text(text if isinstance(text, str) else str(text))
     b.close()
+    if text_only:
+        return f"{tag}/{name}: height {total}px, page text only"
 
     n_mobile = cap.get("mobile_screens_home", 4) if page == "index.html" else cap.get("mobile_screens_other", 2)
     m = pl.Browser(f"cap-{tag}-{name}-m")
@@ -107,8 +120,9 @@ def main():
     cfg = pl.load_study(args.study_dir)
     sd = cfg["_dir"]
     cap = cfg.get("capture", {})
+    text_only = cfg["materials"] == "text"
     jobs = []
-    for site in sorted((sd / "panel" / "sites").glob("concept-*")):
+    for site in sorted(pl.sites_dir(cfg).glob("concept-*")):
         label = site.name.split("-", 1)[1]
         if args.label and label not in args.label:
             continue
@@ -123,9 +137,15 @@ def main():
                 jobs.append((site, page, sd / "panel" / "materials" / site.name, label, st))
     if not jobs:
         raise SystemExit("Nothing to capture. Run init_study.py first.")
+    if text_only:  # nothing of the design stays under panel/materials, whichever pages this capture covers
+        materials = sd / "panel" / "materials"
+        for raw in materials.glob("concept-*/*/raw"):
+            shutil.rmtree(raw)
+        for old in [f for f in materials.rglob("*") if f.suffix.lower() in IMAGES]:
+            old.unlink()
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:
-        for line in ex.map(lambda j: capture_page(j[0], j[1], j[2], cap, j[3], j[4]), jobs):
+        for line in ex.map(lambda j: capture_page(j[0], j[1], j[2], cap, j[3], j[4], text_only), jobs):
             print(line)
 
     terms = [t.lower() for t in cfg.get("forbidden_terms", []) + cfg["leak_terms"]]
@@ -136,7 +156,12 @@ def main():
     if hits:
         print("\nForbidden or internal terms found in page text. Fix the concept or accept the bias:")
         print("\n".join(f"  {h}" for h in hits))
-    print("\nNow look at one desktop sheet and one mobile sheet per concept yourself before launching runs.")
+    if text_only:
+        print("\nNow read one page-text.txt per concept yourself before launching runs. Repeated navigation and "
+              "labels cut loose from their layout are expected, and the instructions say so. A missing section "
+              "is not.")
+    else:
+        print("\nNow look at one desktop sheet and one mobile sheet per concept yourself before launching runs.")
 
 
 if __name__ == "__main__":

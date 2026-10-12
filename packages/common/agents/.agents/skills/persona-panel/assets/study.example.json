@@ -51,6 +51,10 @@
       "minutes": 30,
       "budget_usd": 6.0
     },
+    "followup": {
+      "minutes": 5,
+      "budget_usd": 0.5
+    },
     "overrides": {
       "sol": {
         "minutes": 25
@@ -144,6 +148,21 @@
         "Has cleaned up after three bookkeeping tools that clients signed up to without asking.",
         "Reads on a laptop at the office and checks the pricing and data pages before anything else.",
         "Will pass a page on only if it says who owns the data and how to export it."
+      ]
+    },
+    {
+      "id": "P03",
+      "variant_of": "P01",
+      "name": "Dana Kowalski",
+      "slug": "dana-kowalski",
+      "role": "Owner of a 2-site cafe, does the books on Sunday nights",
+      "personality": "Early adopter: tries new tools first and forgives rough edges",
+      "segment": "owner",
+      "bio": [
+        "Age 41. Runs two cafes with 14 staff; their partner handles rostering.",
+        "Uses a spreadsheet and a shoebox of receipts; their accountant charges extra to tidy it up.",
+        "Reads on their phone between services and will close a page that doesn't say what it does in 5 seconds.",
+        "Will sign up only if the page answers \"does it work with my point-of-sale\" and \"what does it cost\"."
       ]
     }
   ]

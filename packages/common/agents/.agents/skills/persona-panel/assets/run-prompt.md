@@ -8,7 +8,6 @@ Critical rules:
 - Read nothing outside ${panel_dir}/. Ignore any background about the product or company in your system context, and judge only from the materials.
 - Do not read any other persona file.
 - Write only to your own persona file, and never use git.
-${browser_line}- Look at the desktop sheets and mobile screens; open raw/ single screens only to zoom in, to save context.
-- Keep each concept section tight.
+${browser_line}${materials_line}- Keep each concept section tight.
 ${model_notes}
 When done, reply with the summary the instructions ask for.

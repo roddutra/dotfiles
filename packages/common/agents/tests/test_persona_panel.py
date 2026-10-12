@@ -123,7 +123,7 @@ class PersonaPanelTest(unittest.TestCase):
             self.assertNotIn(cid, "".join(p.read_text() for p in (panel / "personas").glob("*.md")))
         self.assertIn("What does it cost?", instructions)
         self.assertIn("**Pages I looked at:**", instructions)
-        self.assertNotIn("—", instructions)
+        self.assertNotIn("\u2014", instructions)
         self.assertFalse((panel / "key.md").exists())
         self.assertEqual(len(self.runs), 4)
         orders = {}
@@ -148,9 +148,19 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("--force", r.stderr)
         self.assertEqual(before, self.sd.joinpath("runs.json").read_text())
+        # --force replaces the run state, and the record of follow-ups answered in the files it rewrites.
+        self.sd.joinpath("followups.json").write_text("[]\n")
+        run("init_study.py", self.sd, "--force")
+        self.assertFalse(self.sd.joinpath("followups.json").exists())
 
     def test_invalid_model_entries_and_options_are_refused(self):
+        dana, sam = self.cfg["personas"]
         cases = {
+            "variant of no persona": ({"personas": [dana, {**sam, "variant_of": "P09"}]}, '"P09" is not a persona id'),
+            "variant of itself": ({"personas": [dana, {**sam, "variant_of": "P02"}]}, "names the persona itself"),
+            "variant of a variant": ({"personas": [dana, {**sam, "variant_of": "P01"},
+                                                   {**sam, "id": "P03", "variant_of": "P02"}]},
+                                     "is itself a variant of P01"),
             "name unusable as a key": ({"models": ["claude-opus-4"]}, 'needs a "key"'),
             "key with a hyphen": ({"models": [{"key": "opus-high", "model": "opus"}]}, "letters and digits"),
             "duplicate key": ({"models": ["opus", {"key": "opus", "model": "opus", "effort": "high"}]},
@@ -161,6 +171,8 @@ class PersonaPanelTest(unittest.TestCase):
             "runner that does not exist": ({"runner": "nope"}, 'Unknown runner "nope". Available runners: claude'),
             "override for an unknown key": ({"limits": {"overrides": {"sonnet": {"minutes": 5}}}},
                                             '"sonnet" is not a model key'),
+            "the study brief as a file for the analysts": (
+                {"synthesis": {"context_files": ["notes/Study-Brief.md"]}}, "is the study brief"),
         }
         for i, (name, (overrides, message)) in enumerate(cases.items()):
             with self.subTest(name):
@@ -341,7 +353,7 @@ class PersonaPanelTest(unittest.TestCase):
         self.fill_all()
         f = self.sd / self.runs[0]["file"]
         a = self.labels_for("01-plain")
-        text = f.read_text() + filled_section(a, [9] * FACTORS) + "Mentions the secret codename — oops.\n"
+        text = f.read_text() + filled_section(a, [9] * FACTORS) + "Mentions the secret codename \u2014 oops.\n"
         text += "### Concept Z\nInvented.\n"
         f.write_text(text)
         r = run("check_runs.py", self.sd, check=False)
@@ -400,6 +412,7 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertIn("Unsettled personas", self.sd.joinpath("analysis/quant.md").read_text())
 
     def test_extract_agent_reply(self):
+        from panel_lib import NOTICE
         t = Path(self.tmp.name) / "out.jsonl"
         doc = "Here it is.\n\n# Round 1 synthesis\n\n- point\n"
         t.write_text("\n".join(json.dumps(x) for x in [
@@ -408,15 +421,17 @@ class PersonaPanelTest(unittest.TestCase):
         ]))
         out = Path(self.tmp.name) / "s.md"
         run("extract_agent_reply.py", t, "--out", out)
-        self.assertEqual(out.read_text(), "# Round 1 synthesis\n\n- point\n")
+        self.assertEqual(out.read_text(), f"# Round 1 synthesis\n\n{NOTICE}\n\n- point\n")
 
     def test_archive_keeps_findings_and_drops_bulk(self):
         self.fill_all()
         run("extract_scores.py", self.sd)
         (self.sd / "panel/materials/concept-A/index").mkdir(parents=True)
         (self.sd / "panel/materials/concept-A/index/page-text.txt").write_text("x")
+        (self.sd / "study-brief.md").write_text("# Study brief\n\nWhat was agreed.\n")
         dest = Path(self.tmp.name) / "archive/customer-research/2026-09-25-t/panel/round-1"
         run("archive.py", self.sd, "--dest", dest)
+        self.assertIn("What was agreed.", (dest / "study-brief.md").read_text())
         self.assertTrue((dest / "personas").is_dir())
         self.assertTrue((dest / "panel-instructions.md").exists())
         self.assertTrue((dest / "analysis/scores.csv").exists())
@@ -450,6 +465,358 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertEqual((as_archived["concept"], as_archived["first"]), (self.labels_for("01-plain"), 4))
         self.assertIn("12 score rows from 4 runs; 0 runs incomplete", run("extract_scores.py", dest).stdout)
         self.assertEqual(top(), as_archived)
+
+    # ---- the roster grid and roster files, the study brief and the synthetic panel notice
+
+    def test_roster_grid_is_deterministic_covers_every_role_and_personality_and_refuses_what_it_cannot_meet(self):
+        roles = ["Staff", {"role": "Owner of a 2-site cafe", "segment": "owner"}, "Accountant"]
+        kinds = ["Curious sceptic", "Early adopter", "Time-poor skimmer", "Critic"]
+        written = self.cfg["personas"]
+
+        def study(name, caps, personas=(), grid=(), **settings):
+            grid = {"roles": roles, "personalities": kinds, "stages": ["new to the industry", "20 years in"],
+                    **dict(grid)}
+            return self.study(name, personas=list(personas), roster={**grid, "caps": caps}, **settings)
+
+        def personas(sd):
+            return json.loads(sd.joinpath("study.json").read_text())["personas"]
+
+        sd = study("grid", {"personas": 5, "runs": 10})
+        before = json.loads(sd.joinpath("study.json").read_text())
+        run("roster.py", sd, "grid")
+        text = sd.joinpath("study.json").read_text()
+        after = json.loads(text)
+        self.assertEqual(list(after), list(before))
+        self.assertEqual(text, json.dumps({**before, "personas": after["personas"]}, indent=2) + "\n")
+        skeletons = after["personas"]
+        self.assertEqual([p["id"] for p in skeletons], ["P01", "P02", "P03", "P04", "P05"])
+        self.assertEqual({p["role"].split(", ")[0] for p in skeletons},
+                         {"Staff", "Owner of a 2-site cafe", "Accountant"})
+        self.assertEqual({p["personality"] for p in skeletons}, set(kinds))
+        self.assertEqual({p["role"].split(", ")[1] for p in skeletons}, {"new to the industry", "20 years in"})
+        self.assertEqual({p["segment"] for p in skeletons}, {"staff", "owner", "accountant"})
+        self.assertEqual(len({(p["role"], p["personality"]) for p in skeletons}), 5)
+        self.assertTrue(all(p["name"] == "TODO" and p["bio"] == [] for p in skeletons))
+        again = study("grid-again", {"personas": 5, "runs": 10})
+        run("roster.py", again, "grid")
+        self.assertEqual(personas(again), skeletons)
+        # A skeleton is never scaffolded: the lead has to write it first.
+        r = run("init_study.py", sd, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("still a roster skeleton", r.stderr)
+        self.assertFalse((sd / "runs.json").exists())
+
+        one_of_each = {"roles": ["Staff"], "personalities": ["Curious sceptic"]}
+        refused = {  # caps, the personas already there, study settings, arguments, what the refusal says
+            "a cap too small for every role and personality": ({"personas": 3}, [], {}, [], "takes at least 4"),
+            "more runs than the cap": (
+                {"personas": 5, "runs": 19}, [], {"replicates": 2}, [],
+                "5 personas x 2 model entries x 2 replicates = 20 runs, over roster.caps.runs of 19"),
+            "personas already written": ({}, written, {}, [], "--append"),
+            "written personas that leave too little of the cap": (
+                {"personas": 5}, written, {}, ["--append"], "takes at least 4 more"),
+            # One role and one personality, so one more persona covers both, and not the two stages.
+            "written personas that leave too little of the cap for every stage": (
+                {"personas": 2}, written[:1], {"grid": one_of_each}, ["--append"],
+                "every stage to appear once. 1 role x 1 personality x 2 stages = 2 combinations, and covering every "
+                "role, every personality and every stage takes at least 2 more. Set roster.caps.personas to 3"),
+        }
+        for i, (name, (caps, there, settings, arguments, message)) in enumerate(refused.items()):
+            with self.subTest(name):
+                sd = study(f"refused-{i}", caps, there, **settings)
+                was = sd.joinpath("study.json").read_text()
+                r = run("roster.py", sd, "grid", *arguments, check=False)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(message, r.stderr)
+                self.assertEqual(was, sd.joinpath("study.json").read_text())
+
+        sd = study("append", {"personas": 6}, written)
+        run("roster.py", sd, "grid", "--append")
+        self.assertEqual(personas(sd)[:2], written)
+        self.assertEqual([(p["id"], p["name"]) for p in personas(sd)[2:]],
+                         [("P03", "TODO"), ("P04", "TODO"), ("P05", "TODO"), ("P06", "TODO")])
+        # A written persona that is still a combination of the grid covers its stage: one more will do.
+        new_hire = {**written[0], "role": "Staff, new to the industry", "personality": "Curious sceptic"}
+        sd = study("append-to-a-stage", {"personas": 2}, [new_hire], grid=one_of_each)
+        run("roster.py", sd, "grid", "--append")
+        self.assertEqual([p["role"] for p in personas(sd)], ["Staff, new to the industry", "Staff, 20 years in"])
+
+    def test_roster_file_carries_personas_between_studies_and_refuses_a_clash(self):
+        dana, sam = self.cfg["personas"]
+        first = self.study("first", personas=[dana, {**sam, "variant_of": "P01"}])
+        file = Path(self.tmp.name) / "project/roster.json"
+        run("roster.py", first, "export", "--to", file)
+        held = json.loads(file.read_text())
+        self.assertEqual(list(held), ["personas"])  # nothing else of the study leaves it
+        self.assertEqual(held["personas"], [
+            {"id": "P01", "name": "Dana Kowalski", "slug": "dana-kowalski", "role": "Owner", "personality": "Sceptic",
+             "segment": "owner", "bio": ["Runs two cafes."]},
+            {"id": "P02", "name": "Sam Lee", "slug": "sam-lee", "role": "Staff", "personality": "Early adopter",
+             "segment": "staff", "bio": ["Uses the tools daily."], "variant_of": "P01"}])
+        second = self.study("second", personas=[], product="Another product")
+        before = json.loads(second.joinpath("study.json").read_text())
+        run("roster.py", second, "import", "--from", file)
+        self.assertEqual(json.loads(second.joinpath("study.json").read_text()),
+                         {**before, "personas": held["personas"]})
+
+        third = self.study("third", personas=[{**dana, "bio": ["Sold the cafes."]}])
+        clashes = [("export", ["--to", file], file), ("import", ["--from", file, "--ids", "P01"], third / "study.json")]
+        for command, arguments, target in clashes:
+            with self.subTest(command):
+                was = target.read_text()
+                r = run("roster.py", third, command, *arguments, check=False)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("P01 (bio)", r.stderr)
+                self.assertEqual(was, target.read_text())
+        run("roster.py", third, "export", "--to", file, "--update")
+        self.assertEqual([p["bio"] for p in json.loads(file.read_text())["personas"]],
+                         [["Sold the cafes."], ["Uses the tools daily."]])
+
+    def test_scaffold_refuses_a_copy_of_the_study_brief_inside_the_panel_folder(self):
+        brief = "# Study brief\n\n## Hypotheses\n\nThe story concept wins with owners.\n"
+        cases = {"under its own name": ("panel/notes/study-brief.md", "An older draft.\n"),
+                 "under another name with the same content": ("panel/materials/background.md", brief),
+                 "in a concept folder, which is copied into the panel": ("../concepts/01-plain/notes.md", brief)}
+        for i, (name, (path, content)) in enumerate(cases.items()):
+            with self.subTest(name):
+                sd = self.study(f"brief-{i}")
+                (sd / "study-brief.md").write_text(brief)
+                copy = (sd / path).resolve()
+                copy.parent.mkdir(parents=True, exist_ok=True)
+                copy.write_text(content)
+                r = run("init_study.py", sd, check=False)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(f"{copy} is a copy of the study brief", r.stderr)
+                self.assertFalse((sd / "runs.json").exists())
+                copy.unlink()
+                run("init_study.py", sd)  # beside study.json is where the brief belongs
+
+    def test_synthetic_panel_notice_is_on_every_persona_file_and_brief_and_the_archive_adds_it_where_missing(self):
+        import panel_lib as pl
+        notice = pl.NOTICE
+        self.assertRegex(notice, "generated by AI personas.*not user research")
+        for name in ("synthesis-brief.md", "qual-brief.md"):
+            tokens = set(pl.PLACEHOLDER.findall((pl.ASSETS / name).read_text())) - {"NOTICE"}
+            self.assertIn(f"\n{notice}\n", pl.fill_brief(name, dict.fromkeys(tokens, "x")))
+        self.fill_all()
+        files = sorted((self.sd / "panel/personas").glob("*.md"))
+        for f in files:
+            self.assertEqual(f.read_text().splitlines()[2], notice)  # under the title
+        # What an older round holds: a persona file and a lead's note without the line.
+        old = files[0]
+        old.write_text(old.read_text().replace(notice + "\n\n", ""))
+        run("extract_scores.py", self.sd)
+        (self.sd / "analysis/lead-notes.md").write_text("Checked one claim.\n")
+        dest = Path(self.tmp.name) / "archive/round-1"
+
+        def archived():
+            run("archive.py", self.sd, "--dest", dest)
+            return {f.relative_to(dest).as_posix(): f.read_text() for f in sorted(dest.rglob("*")) if f.is_file()}
+
+        first = archived()
+        self.assertEqual([name for name, text in first.items() if name.endswith(".md") and text.count(notice) != 1], [])
+        self.assertEqual(first[f"personas/{old.name}"].splitlines()[2], notice)
+        self.assertEqual(first["analysis/lead-notes.md"], f"{notice}\n\nChecked one claim.\n")
+        for name in ("analysis/scores.csv", "runs.json", "study.json"):  # data files are copied as they are
+            self.assertEqual(first[name], self.sd.joinpath(name).read_text())
+        self.assertEqual(archived(), first)
+        self.assertIn("12 score rows from 4 runs; 0 runs incomplete", run("extract_scores.py", dest).stdout)
+        self.assertIn("4 of 4 runs complete", run("analyze.py", dest).stdout)
+
+    def template_section(self, sd, label, answers, fields):
+        """A concept section as a panellist writes one: the template in the study's own instructions,
+        filled in. answers are given in question order, and fields maps a word of a field's label to
+        what the panellist wrote there."""
+        blocks = sd.joinpath("panel/_panel-instructions.md").read_text().split("```")
+        template = next(b for b in blocks if b.lstrip().startswith("### Concept <label>"))
+        answers, used, out = iter(answers), set(), []
+        for line in template.strip().splitlines():
+            bold = re.match(r"\*\*(.+?)\*\*", line)
+            if line.startswith("- "):
+                line += " " + next(answers)
+            elif bold:
+                word = next((w for w in fields if w in bold[1]), None)
+                used.add(word)
+                line = bold[0] + (" " + fields[word] if word else "" if "find the answer" in bold[1] else " fine.")
+            elif line.startswith("| n "):
+                line = line.replace("n", "7")
+            out.append(line.replace("<label>", label))
+        self.assertEqual(used - {None}, set(fields), "the template no longer has a field the tallies read")
+        return "\n".join(out) + "\n\n"
+
+    def test_answers_and_lines_are_tallied_and_what_cannot_be_read_is_listed_as_unparsed(self):
+        works, costs = questions = ["Does it work with my accounting software?", "What does it cost each month?"]
+        sd = self.study("tallies", find_the_answer=questions)
+        run("init_study.py", sd)
+        clean, varied, patchy, stopped = json.loads(sd.joinpath("runs.json").read_text())
+        x, y, z = (self.labels_for(c) for c in ("01-plain", "02-story", "03-console"))
+
+        def write(r, *sections, done=True):
+            f = sd / r["file"]
+            f.write_text(f.read_text() + "".join(sections) + (finals([x, z, y]) if done else ""))
+
+        def section(label, *fields):  # written by hand: the fields this panellist filled in, then the scores
+            return filled_section(label, [7] * FACTORS).replace("fine.\n", "\n".join(["fine.", *fields, ""]), 1)
+
+        # The template as given, filled in the way it asks.
+        write(clean, *(self.template_section(sd, label, ["Found (FAQ, first answer).", "Not found"], {
+            "keep": '"Know what every job made."', "cut": '"Set up in an afternoon."', "believe": '"none"',
+            "forward": 'Yes, to my bookkeeper: "Have a look at this."'}) for label in (x, y, z)))
+        # The ways real runs departed from it: questions reworded to a label, a verdict in bold or
+        # in a nested bullet, curly quotes, a comment after a line, verdicts alone in question order,
+        # a forward answer that announces its message.
+        write(varied, section(
+            x, "**Could I find the answer?**",
+            "- Accounting software: **Found**, index, Good questions names Xero.",
+            "- Monthly cost:",
+            "  - Partly (Simple plans: $29 for 1 user; nothing for nine people).",
+            "",
+            "**One line to keep:** “Know what every job made.”",
+            '**One line to cut:** "Set up in an afternoon" (vague, I\'d want a number)',
+            '**One line I don’t believe:** "Know what every job made."',
+            '**Would I forward it?** Maybe to my bookkeeper. "Worth a look?"',
+        ), section(y), section(
+            z, "**Could I find the answer?**", "- Found (pricing section)", "- Not found.",
+            '**Would I forward it?** Yes, to a client who has asked me about job costing, with the message: '
+            '"Check the learning step."'))
+        # An answer that is no verdict, a question skipped, two lines where one was asked for, a
+        # field left out, a forward answer that is neither yes nor no, and questions out of order.
+        write(patchy, section(
+            x, "**Could I find the answer?**", f"- {works} Yes, it says so in the FAQ.", f"- {costs}",
+            '**One line to keep:** "Know your numbers." and "No more guessing."',
+            "**One line I don't believe:** None.",
+            "**Would I forward it?** Not yet. Maybe once it has prices.",
+        ), section(y, "**Could I find the answer?**", f"- {costs} Not found", f"- {works} Partially, FAQ only."),
+            section(z))
+        # Cut off after one concept, with entries that would change every count below.
+        write(stopped, section(
+            x, "**Could I find the answer?**", f"- {works} Not found", f"- {costs} Not found",
+            '**One line to keep:** "Know what every job made."', "**Would I forward it?** No.",
+        ), done=False)
+
+        run("extract_scores.py", sd)
+        out = run("extract_answers.py", sd).stdout
+        self.assertIn("20 answers (5 Found, 2 Partly, 7 Not found, 5 missing, 1 unparsed)", out)
+        self.assertIn("40 line and forward entries (18 missing, 2 unparsed)", out)
+
+        def rows(name, entry):
+            with open(sd / "analysis" / name) as f:
+                return {(r["run"], r["concept"], r[entry]): r for r in csv.DictReader(f)}
+
+        answers = rows("answers.csv", "question")
+        said = {k: (r["verdict"], r["where"]) for k, r in answers.items()}
+        self.assertEqual([said[clean["run"], x, q] for q in "12"],
+                         [("Found", "(FAQ, first answer)."), ("Not found", "")])
+        self.assertEqual([said[varied["run"], x, q] for q in "12"], [
+            ("Found", "index, Good questions names Xero."),
+            ("Partly", "(Simple plans: $29 for 1 user; nothing for nine people).")])
+        self.assertEqual([said[varied["run"], z, q][0] for q in "12"], ["Found", "Not found"])
+        self.assertEqual([said[patchy["run"], y, q][0] for q in "12"], ["Partly", "Not found"])
+        self.assertEqual([said[patchy["run"], x, q][0] for q in "12"], ["unparsed", "missing"])
+        self.assertEqual(answers[patchy["run"], x, "1"]["raw"], f"{works} Yes, it says so in the FAQ.")
+        self.assertEqual({(r["concept"], r["verdict"], r["complete"]) for r in answers.values()
+                          if r["run"] == stopped["run"]}, {(x, "Not found", "0")})
+
+        lines = rows("lines.csv", "entry")
+        wrote = {k: (r["status"], r["text"], r["forward_to"], r["note"]) for k, r in lines.items()}
+        self.assertEqual(wrote[clean["run"], x, "forward"], ("yes", "Have a look at this.", "my bookkeeper", ""))
+        self.assertEqual(wrote[clean["run"], x, "not_believed"], ("none", "", "", ""))
+        self.assertEqual(wrote[varied["run"], x, "keep"], ("quoted", "Know what every job made.", "", ""))
+        self.assertEqual(wrote[varied["run"], x, "cut"],
+                         ("quoted", "Set up in an afternoon", "", "(vague, I'd want a number)"))
+        self.assertEqual(wrote[varied["run"], x, "forward"], ("maybe", "Worth a look?", "my bookkeeper", ""))
+        self.assertEqual(wrote[varied["run"], z, "forward"],
+                         ("yes", "Check the learning step.", "a client who has asked me about job costing", ""))
+        self.assertEqual([wrote[patchy["run"], x, e][0] for e in ("keep", "cut", "not_believed", "forward")],
+                         ["unparsed", "missing", "none", "unparsed"])
+        self.assertEqual(lines[patchy["run"], x, "keep"]["raw"], '"Know your numbers." and "No more guessing."')
+
+        # The analysis counts the three complete runs and leaves the one that was cut off out.
+        run("analyze.py", sd)
+        quant = self.quant(sd)
+
+        def counted(tally):
+            return {c: {k: n for k, n in tally[c].items() if n} for c in (x, y, z)}
+
+        asked = {q["text"]: counted(q["concepts"]) for q in quant["answers"]["questions"]}
+        self.assertEqual(asked[works], {x: {"found": 2, "unparsed": 1}, y: {"found": 1, "partly": 1, "missing": 1},
+                                        z: {"found": 2, "missing": 1}})
+        self.assertEqual(asked[costs], {x: {"partly": 1, "not_found": 1, "missing": 1},
+                                        y: {"not_found": 2, "missing": 1}, z: {"not_found": 2, "missing": 1}})
+        self.assertEqual(counted(quant["lines"]["forward"]), {
+            x: {"yes": 1, "maybe": 1, "unparsed": 1}, y: {"yes": 1, "missing": 2}, z: {"yes": 2, "missing": 1}})
+        self.assertEqual(quant["lines"]["recurring"], {y: [], z: [], x: [
+            {"line": "Know what every job made.", "runs": 2, "keep": 2, "cut": 0, "not_believed": 1},
+            {"line": "Set up in an afternoon.", "runs": 2, "keep": 0, "cut": 2, "not_believed": 0}]})
+        md = sd.joinpath("analysis/quant.md").read_text()
+        self.assertIn(f"| {x} | 2 | 0 | 0 | 0 | 1 |", md[md.index("## Find the answer"):md.index("## Forward test")])
+        self.assertIn(f"| {x} | 1 | 0 | 1 | 0 | 1 |", md[md.index("## Forward test"):md.index("## Lines that recur")])
+
+    def test_replicates_of_a_persona_on_one_model_are_compared_with_each_other(self):
+        sd = self.study("spread", replicates=2)
+        run("init_study.py", sd)
+        plain_first = ({"01-plain": [9] * FACTORS, "02-story": [5] * FACTORS, "03-console": [7] * FACTORS},
+                       ["01-plain", "03-console", "02-story"])
+        story_first = ({"01-plain": [5] * FACTORS, "02-story": [9] * FACTORS, "03-console": [7] * FACTORS},
+                       ["02-story", "03-console", "01-plain"])
+        # One replicate differs from the seven other runs: only P01's pair on opus is apart.
+        for r in json.loads(sd.joinpath("runs.json").read_text()):
+            self.fill(r, *(plain_first if r["run"] == "P01-opus" else story_first), sd=sd)
+        run("extract_scores.py", sd)
+        run("analyze.py", sd)
+        quant = self.quant(sd)
+        pairs = {(d["persona"], d["model"]): d for d in quant["replicates"]["by_persona"]}
+        self.assertEqual(sorted(pairs), [("P01", "fable"), ("P01", "opus"), ("P02", "fable"), ("P02", "opus")])
+        apart = pairs.pop(("P01", "opus"))
+        self.assertEqual((apart["replicates"], apart["same_top"]), ([1, 2], False))
+        for figure, expected in (("spearman", -1), ("same_score", 1 / 3), ("mean_abs_diff", 8 / 3)):
+            self.assertAlmostEqual(apart[figure], expected, msg=figure)
+        self.assertEqual({(round(d["spearman"], 6), d["same_score"], d["mean_abs_diff"], d["same_top"])
+                          for d in pairs.values()}, {(1, 1, 0, True)})
+        by_model = quant["replicates"]["by_model"]
+        self.assertEqual((by_model["opus"]["same_top"], by_model["fable"]["same_top"]), (1, 2))
+        self.assertAlmostEqual(by_model["opus"]["mean_abs_diff"], 4 / 3)
+        self.assertIn("## Replicate spread", sd.joinpath("analysis/quant.md").read_text())
+        self.assertNotIn("variants", quant)  # no persona here is a variant
+
+    def test_variant_is_shown_under_its_parent_with_its_difference_from_it(self):
+        dana, sam = self.cfg["personas"]
+        sd = self.study("variants", models=["opus"], personas=[
+            dana, sam, {**dana, "id": "P03", "personality": "Blunt", "variant_of": "P01"}])
+        run("init_study.py", sd)
+        parent, other, variant = json.loads(sd.joinpath("runs.json").read_text())
+
+        def order(r):
+            return next(l for l in sd.joinpath(r["file"]).read_text().splitlines() if l.startswith("| Review order"))
+
+        self.assertEqual(order(variant), order(parent))  # so that order is no part of the difference between them
+        self.fill_all([parent, other], sd)
+        self.fill(variant, {"01-plain": [5] * FACTORS, "02-story": [9] * FACTORS, "03-console": [7] * FACTORS},
+                  ["02-story", "03-console", "01-plain"], sd=sd)
+        run("extract_scores.py", sd)
+        run("analyze.py", sd)
+        quant = self.quant(sd)
+        plain, story, console = (self.labels_for(c) for c in ("01-plain", "02-story", "03-console"))
+        [pair] = quant["variants"]
+        self.assertEqual((pair["variant"], pair["parent"], pair["differs_in"], pair["models"]),
+                         ("P03", "P01", ["personality"], ["opus"]))
+        self.assertEqual({c: pair["concepts"][c]["diff"] for c in (plain, story, console)},
+                         {plain: -3, story: 4, console: 0})
+        self.assertEqual(pair["top"], {"parent": plain, "variant": story})
+        md = sd.joinpath("analysis/quant.md").read_text()
+        matrix = md[md.index("## Persona x concept"):].splitlines()
+        cells = {plain: "5.0 (-3.0)", story: "9.0 (+4.0)", console: "7.0 (+0.0)"}
+        row = "| P03 Dana Kowalski (variant of P01) | " + " | ".join(cells[c] for c in sorted(cells)) + " |"
+        self.assertEqual(matrix.index(row), next(i for i, line in enumerate(matrix) if line.startswith("| P01 ")) + 1)
+        self.assertEqual(sorted(quant["persona_matrix"]), ["P01", "P02", "P03"])  # a persona of its own elsewhere
+        self.assertNotIn("replicates", quant)  # no run here was repeated
+        # A variant written only to test a trait is kept out of the headline, in a view of its own.
+        self.assertIn("2 of 2 runs complete", run("analyze.py", sd, "--exclude-persona", "P03").stdout)
+        headline = json.loads(sd.joinpath("analysis/quant-no-P03.json").read_text())
+        self.assertEqual((sorted(headline["persona_matrix"]), headline["leaderboard"][0]["concept"]),
+                         (["P01", "P02"], plain))
+        self.assertNotIn("variants", headline)
+        self.assertEqual(self.quant(sd), quant)
 
 
 # The options each runner passes on every launch, written out: they are its contract with the CLI.
@@ -894,11 +1261,14 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY", plan["runners"][0]["billing_env_set"])
         self.assertIn("ANTHROPIC_API_KEY", printed.stdout)
         self.assertNotIn("sk-never-shown", printed.stdout + as_json.stdout)
+        browsing = runners.get("claude").capabilities()["browse_gaps"][0]  # what browsing opens, where runs browse
+        self.assertIn(browsing, printed.stdout)
 
         # Every run and job capped: a maximum, and never called one without what can take a run past its cap.
-        self.study(name="capped", models=[self.CLAUDE], synthesis=synthesis)
+        self.study(name="capped", models=[self.CLAUDE], synthesis=synthesis, browse=False)
         note = runners.get("claude").capabilities()["budget_cap_note"]
         capped, ceiling = self.launch("plan").stdout, self.plan()["ceiling"]
+        self.assertNotIn(browsing, capped)
         self.assertIn("Ceiling: $9.00, a guaranteed maximum apart from the caveats below", capped)
         self.assertIn(f"Caveat: on claude, {note}.", capped)
         self.assertEqual((ceiling["label"], ceiling["caveats"][0]), ("guaranteed maximum", f"on claude, {note}"))
@@ -950,6 +1320,70 @@ class LauncherTest(unittest.TestCase):
         self.settings({"materials": "text"})  # the same model is welcome where there is nothing to look at
         self.assertEqual(self.launch("plan").returncode, 0)
 
+    def test_text_only_study_gives_panellists_the_words_alone_and_scores_no_design_factor(self):
+        self.study(models=[self.CLAUDE], materials="text", browse=True, fit_factors=["relevance", "visual"],
+                   synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
+        panel = self.sd / "panel"
+        # Capture: the page text alone. Sheets left by an earlier capture go, and nothing of a
+        # page that a run could open is inside panel/.
+        earlier = panel / "materials/concept-A/index"
+        (earlier / "raw").mkdir(parents=True)
+        for image in ("raw/d-00.png", "desktop-sheet-01.png", "mobile-first-screens.png"):
+            (earlier / image).touch()
+        captured = subprocess.run([sys.executable, str(self.scripts / "capture.py"), str(self.sd)], env=self.env,
+                                  capture_output=True, text=True)
+        self.assertEqual(captured.returncode, 0, captured.stderr)
+        self.assertEqual(sorted(str(f.relative_to(panel)) for f in panel.rglob("*")
+                                if f.is_file() and f.parent.name != "personas"),
+                         ["_panel-instructions.md", *(f"materials/concept-{x}/index/page-text.txt" for x in "ABC")])
+        browser = [json.loads(line)["argv"] for line in self.log.read_text().splitlines()]
+        self.assertEqual((any("open" in argv for argv in browser), any("screenshot" in argv for argv in browser)),
+                         (True, False))
+        # What panellists are told: they read the words, and nothing points them at the design.
+        instructions = panel.joinpath("_panel-instructions.md").read_text()
+        prompts = [f.read_text() for f in self.sd.glob("prompts/P*.md")]
+        for told in (instructions, *prompts):
+            self.assertIn("You cannot see the design", told)
+            for word in ("sheet", "screenshot", "raw/", ".png", "browser", "Visual", "Mobile"):
+                self.assertNotIn(word, told)
+        self.assertIn("flattened page", instructions)
+        self.assertIn("\n|---|---|---|---|---|---|---|---|---|\n| n | n | n | n | n | n | n | n | n |\n", instructions)
+        # The plan says what "materials": "text" overrode in study.json.
+        plan = self.plan()
+        self.assertEqual(plan["materials"]["text_only"], {
+            "dropped_factors": ["visual", "mobile"], "dropped_fit_factors": ["visual"], "fit_factors": ["relevance"],
+            "browse_ignored": True})
+        self.assertEqual([('"fit_factors" names visual' in n, '"browse": true' in n) for n in plan["notes"]],
+                         [(True, False), (False, True)])
+        self.assertIn("panellists receive the page text only", self.launch("plan").stdout)
+        # The runs: nine scores a section make a run done, and no run is given the browser.
+        r = self.launch("run")
+        self.assertEqual((r.returncode, set(self.states().values())), (0, {"done"}), r.stdout + r.stderr)
+        self.assertFalse([e["run"] for e in self.starts() if "Bash" in " ".join(e["argv"])])
+        self.assertEqual(run("check_runs.py", self.sd).returncode, 0)
+        run("extract_scores.py", self.sd)
+        with open(self.sd / "analysis/scores.csv") as f:
+            self.assertEqual(next(csv.reader(f))[8:], ["first", "relevance", "problem", "how", "why_care", "trust",
+                                                       "structure", "next_step", "overall"])
+        run("analyze.py", self.sd)
+        quant = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+        self.assertEqual((quant["fit"]["factors"], sorted(set(quant["factors"]["A"]) & {"visual", "mobile"})),
+                         (["relevance"], []))
+        report = self.sd.joinpath("analysis/quant.md").read_text()
+        self.assertEqual(("Structure and flow" in report, "Visual design" in report, "Mobile" in report),
+                         (True, False, False))
+        # The analysts and the writer are told what the panel could not see.
+        self.launch("run", "--role", "analyst")
+        self.launch("run", "--role", "writer")
+        self.assertIn("text-only study", self.sd.joinpath("prompts/analyst-1.md").read_text())
+        self.assertIn("flattened pages", self.sd.joinpath("prompts/writer.md").read_text())
+        # A section scored on the full set of factors is an unscored one, as any wrong count is.
+        f = self.sd / self.entries()["P01-opus"]["file"]
+        f.write_text(f.read_text().replace("| 7 | 7 |", "| 7 | 7 | 7 | 7 |", 1))
+        checked = run("check_runs.py", self.sd, check=False)
+        self.assertEqual(checked.returncode, 1)
+        self.assertIn("| P01-opus | no parseable score row:", checked.stdout)
+
     def test_persona_file_changed_by_another_run_is_flagged_and_a_lead_edit_is_not(self):
         self.study({"P02-opus": [["meddle:P01-opus", "write:all"]]}, personas=3, models=[self.CLAUDE],
                    runners={"claude": {"concurrency": 1}})  # one at a time: P01-opus has ended when P02-opus writes
@@ -963,13 +1397,14 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("| P01-opus | changed while P02-opus was running, not by its own run", checked.stdout)
         self.assertEqual(checked.stdout.count("changed while"), 1)
 
+    def deleted(self):
+        """The sessions the codex CLI was asked to delete."""
+        lines = self.log.read_text().splitlines()
+        return sorted(c["argv"][-1] for c in map(json.loads, lines) if c.get("argv", [""])[0] == "delete")
+
     def test_purge_sessions_deletes_only_with_yes_and_never_while_a_launcher_has_the_study(self):
         self.study({"P01-cx": [["write:1", "wait:hold"]]}, models=[self.CODEX])
-
-        def deleted():
-            lines = self.log.read_text().splitlines()
-            return sorted(c["argv"][-1] for c in map(json.loads, lines) if c.get("argv", [""])[0] == "delete")
-
+        deleted = self.deleted
         launcher, _ = self.launch_in_background("run")
         self.wait_for(lambda: self.waiting() == {"P01-cx"} and self.entries()["P02-cx"].get("state") == "done",
                       "one run done and one under way")
@@ -994,6 +1429,27 @@ class LauncherTest(unittest.TestCase):
         resumed = self.launch("resume")  # the partial run has sections and no session left to continue in
         self.assertIn("P01-cx: partial with sections written, but its session was purged", resumed.stdout)
         self.assertEqual(len(self.starts()), 2)
+
+    def test_sessions_of_runs_that_a_new_scaffold_replaced_can_still_be_purged(self):
+        self.study(models=[self.CODEX])
+        self.assertEqual(self.launch("run").returncode, 0)
+        self.assertEqual(self.launch("purge-sessions", "--runs", "P02-cx", "--yes").returncode, 0)
+        held, gone = (self.entries()[run_id]["session"] for run_id in ("P01-cx", "P02-cx"))
+        again = run("init_study.py", self.sd, "--force")  # as after a pilot: runs.json forgets both sessions
+        self.assertEqual([e.get("session") for e in self.entries().values()], [None, None])
+        self.assertIn("still held by their harnesses: 1", again.stdout)
+        record = self.sd / "logs/earlier-sessions.json"
+        kept, = json.loads(record.read_text())
+        self.assertEqual({k: kept[k] for k in ("run", "runner", "session", "workdir")},
+                         {"run": "P01-cx", "runner": "codex", "session": held,
+                          "workdir": str(self.sd.resolve() / "panel")})
+        self.assertEqual((self.status()["earlier_sessions"], self.plan()["earlier_sessions"]), (1, 1))
+        listed = self.launch("purge-sessions")
+        self.assertIn(f"codex delete --force {held}", listed.stdout)
+        self.assertEqual((self.deleted(), record.exists()), ([gone], True))
+        self.assertEqual(self.launch("purge-sessions", "--yes").returncode, 0)
+        self.assertEqual((self.deleted(), record.exists(), self.status()["earlier_sessions"]),
+                         (sorted([gone, held]), False, 0))
 
     def test_done_is_decided_by_the_persona_file_and_a_failed_run_is_retried_once(self):
         cases = {  # run: (what each of its processes does, the state it ends in, processes started)
@@ -1152,6 +1608,10 @@ class LauncherTest(unittest.TestCase):
                       "four runs to be under way")
         first.kill()
         first.wait()
+        # No launcher has the study now, and its processes are still at work: no new scaffold under them.
+        scaffold_again = run("init_study.py", self.sd, "--force", check=False)
+        self.assertEqual(scaffold_again.returncode, 1)
+        self.assertRegex(scaffold_again.stderr, r"still at work \(.*P02-opus.*Stop them first: launch.py \S+ stop")
         # runs.json as a launcher killed between starting P02-opus and noting its pid leaves it:
         # the attempt is on record without one, and only the attempt's own pid file says where it is.
         as_left = self.entries()
@@ -1251,6 +1711,10 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(second.returncode, 1)
         self.assertIn(f"Another launcher has this study (pid {first.pid}", second.stderr)
         self.assertEqual(len(self.starts()), 2)
+        scaffold_again = run("init_study.py", self.sd, "--force", check=False)  # would replace runs.json under it
+        self.assertEqual(scaffold_again.returncode, 1)
+        self.assertIn(f"Another launcher has this study (pid {first.pid}", scaffold_again.stderr)
+        self.assertIn(f"launch.py {self.sd.resolve()} stop", scaffold_again.stderr)
 
         self.assertEqual(self.launch("stop").returncode, 0)
         self.assertEqual(first.wait(timeout=30), 1)
@@ -1352,6 +1816,7 @@ class LauncherTest(unittest.TestCase):
                          (0, True, True), used.stderr)
 
     def test_analysts_then_the_writer_run_on_their_own_models_within_a_share_of_the_pool(self):
+        from panel_lib import NOTICE
         self.study({"analyst-2": [["end:usage_limit"], ["write"]]}, personas=3, limits={"synthesis": {"budget_usd": 5}},
                    synthesis={"analysts": 2, "analyst": {"runner": "claude", "model": "sonnet"},
                               "writer": {"runner": "claude", "model": "fable", "effort": "high"}})
@@ -1396,8 +1861,9 @@ class LauncherTest(unittest.TestCase):
             owned[job] = sorted(set(re.findall(r"/personas/(P\d+)-[^`]*--(\w+)\.md`", e["stdin"])))
         self.assertEqual(owned, {"analyst-1": [("P01", "cx"), ("P01", "opus"), ("P02", "cx"), ("P02", "opus")],
                                  "analyst-2": [("P03", "cx"), ("P03", "opus")], "writer": []})
-        for output in ("qual-1.md", "qual-2.md", "SYNTHESIS.md"):
-            self.assertIn("by the job itself", self.sd.joinpath("analysis", output).read_text())
+        for output in ("qual-1.md", "qual-2.md", "SYNTHESIS.md"):  # as the job wrote it, plus the notice it left out
+            self.assertEqual(self.sd.joinpath("analysis", output).read_text(),
+                             f"# Findings\n\n{NOTICE}\n\n- Written to {output} by the job itself.\n")
         # Jobs have their own group in the launcher's status, and are no part of the panel's runs.
         status = self.status()
         self.assertEqual([(j["run"], j["state"], j["file"]) for j in status["jobs"]], [
@@ -1432,12 +1898,14 @@ class LauncherTest(unittest.TestCase):
         self.assertTrue(self.sd.joinpath("analysis/qual-1.md").read_text().strip())  # one analyst writes qual-1 too
 
     def test_job_that_could_not_write_its_file_gets_it_from_its_reply(self):
+        from panel_lib import NOTICE
         self.study({"writer": [["reply"]]}, personas=1, synthesis={"writer": {"runner": "codex"}})
         self.sd.joinpath("analysis/qual-1.md").write_text("# Findings\n")  # the analysis, done by hand
         r = self.launch("run", "--role", "writer")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual([e["run"] for e in self.starts()], ["writer"])
-        self.assertEqual(self.sd.joinpath("analysis/SYNTHESIS.md").read_text(), "# Findings\n\n- From the reply.\n")
+        self.assertEqual(self.sd.joinpath("analysis/SYNTHESIS.md").read_text(),
+                         f"# Findings\n\n{NOTICE}\n\n- From the reply.\n")
         self.assertIn("I could not write the file", self.sd.joinpath("analysis/writer-reply.md").read_text())
         [job] = self.status()["jobs"]
         self.assertEqual((job["state"], "from its reply" in job["note"]), ("done", True))
@@ -1449,6 +1917,253 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(sorted(e["run"] for e in self.starts()), ["P01-cx", "P01-opus"])
         self.assertEqual(self.states(), {"P01-opus": "done", "P02-opus": "pending", "P01-cx": "done",
                                          "P02-cx": "pending"})
+
+    # ---- follow-up questions (followup.py)
+
+    def followup(self, *args):
+        return [self.python, str(self.scripts / "followup.py"), str(self.sd), *map(str, args)]
+
+    def ask(self, question, *args, wait=True):
+        """Put a follow-up question with followup.py, to its end. With wait false, start it and
+        leave it running: returns the process."""
+        file = self.tmp / "question.md"
+        file.write_text(question)
+        command = self.followup("ask", "--question-file", file, *args, "--poll", "0.02", "--grace", "0.3")
+        if wait:
+            return subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=60)
+        self.background.append(subprocess.Popen(command, env=self.env, stdout=subprocess.DEVNULL,
+                                                stderr=subprocess.DEVNULL))
+        return self.background[-1]
+
+    def asked(self):
+        return json.loads(self.sd.joinpath("followups.json").read_text())
+
+    def extracted(self):
+        """What extract_scores.py writes: every score and ranking, and each run's state and progress.
+        What it printed is kept in self.extract_said."""
+        self.extract_said = run("extract_scores.py", self.sd).stdout
+        return {name: self.sd.joinpath("analysis", name).read_text()
+                for name in ("scores.csv", "rankings.csv", "runs.csv")}
+
+    def test_follow_up_reaches_the_original_session_and_appends_one_section_without_changing_a_score(self):
+        self.study({"P01-opus": [["write:all"], ["followup"]],  # writes its section
+                    "P01-cx": [["write:all"], ["end:ok"]]},     # only replies
+                   personas=1, leak_terms=["tenant", "it depends"],
+                   synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
+        self.assertEqual(self.launch("run").returncode, 0)
+        sessions = {run_id: e["session"] for run_id, e in self.entries().items()}
+        scores = self.extracted()
+        first = "Would you pay for it \u2014 as a tenant?"  # the lead's dash and leak term, not the panellist's
+        r = self.ask(f"{first}\nSay how much.\n", "--runs", "all")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # Each run was continued in the session it reviewed in, and got the question word for word.
+        sent = self.starts(since=2)
+        self.assertEqual({e["run"]: (e["resumed"], e["session"]) for e in sent},
+                         {run_id: (True, session) for run_id, session in sessions.items()})
+        self.assertTrue(all(f"\n{first}\nSay how much.\n" in e["stdin"] for e in sent))
+        # One section each, by the panellist or, for the one that only replied, from its reply.
+        files = {run_id: self.sd.joinpath(e["file"]).read_text() for run_id, e in self.entries().items()}
+        self.assertEqual({run_id: text.count("## Follow-up") for run_id, text in files.items()},
+                         {"P01-opus": 1, "P01-cx": 1})
+        self.assertIn(f"## Follow-up 1\n\n> {first}\n> Say how much.\n\ncodename=NONE; skills=0; "
+                      "agents=yes\n\n(Taken from the panellist's reply", files["P01-cx"])
+        # No score moved, and the runs are as finished as they were, to the launcher and to the analysis.
+        self.assertEqual(self.extracted(), scores)
+        self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "done"})
+        self.assertEqual({r["run"]: (r["state"], r["attempts"], r["followups"]) for r in self.status()["runs"]},
+                         {"P01-opus": ("done", 1, [1]), "P01-cx": ("done", 1, [1])})
+        # The checks read the answers and not the question quoted above them: nothing is noted of the
+        # follow-up or of the lead's words, and no file was changed by a run not its own.
+        checked = run("check_runs.py", self.sd)
+        self.assertNotRegex(checked.stdout, "dashes|tenant|follow-up|changed while")
+        self.assertRegex(checked.stdout, r"P01-opus \|.*leak terms: it depends \|")
+        followup, = self.asked()
+        self.assertEqual((followup["n"], followup["question"]), (1, f"{first}\nSay how much."))
+        self.assertAlmostEqual(followup["asked"], time.time(), delta=60)
+        self.assertEqual({x["run"]: (x["outcome"], x["attempt"], x["session"]) for x in followup["runs"]},
+                         {"P01-opus": ("answered", 2, sessions["P01-opus"]),
+                          "P01-cx": ("answered from the reply", 2, sessions["P01-cx"])})
+        # The follow-up attempts are in the usage record under a role of their own, and in no run's row.
+        usage = json.loads(self.launch("usage", "--json").stdout)
+        self.assertEqual(({r["run"]: r["attempts"] for r in usage["runs"]},
+                          {r["run"]: (r["attempts"], r["followups"]) for r in usage["followups"]}),
+                         ({"P01-opus": 1, "P01-cx": 1}, {"P01-opus": (1, [1]), "P01-cx": (1, [1])}))
+        self.assertEqual([(r["role"], r["runs"], r["attempts"]) for r in usage["roles"]],
+                         [("panellist", 2, 2), ("follow-up", 2, 2)])
+        self.assertIn("| follow-up | 2 | - | 2 |", self.sd.joinpath("analysis/usage.md").read_text())
+        self.assertEqual((self.plan()["followups"]["asked"], self.status()["followups"]), (1, 1))
+        # The analyst and the writer are told what was asked, and that an answer is cited as prompted.
+        jobs = len(self.starts())
+        self.assertEqual((self.launch("run", "--role", "analyst").returncode,
+                          self.launch("run", "--role", "writer").returncode), (0, 0))
+        for brief in (e["stdin"] for e in self.starts(since=jobs)):
+            self.assertIn(f"\n- Follow-up 1, asked of P01-opus and P01-cx: {first} Say how much.\n", brief)
+            self.assertIn("prompted by a question", brief)
+        # An archived round keeps the record of what was asked, so its checks read the same.
+        dest = self.tmp / "archive"
+        run("archive.py", self.sd, "--dest", dest)
+        self.assertEqual(run("check_runs.py", dest).stdout, checked.stdout)
+
+    def test_follow_up_that_changes_a_score_is_rejected_and_the_persona_file_is_put_back(self):
+        self.study({"P01-opus": [["write:all"], ["rescore", "followup"]]}, personas=1, models=[self.CLAUDE])
+        self.assertEqual(self.launch("run").returncode, 0)
+        file = self.sd / self.entries()["P01-opus"]["file"]
+        before, scores = file.read_text(), self.extracted()
+        r = self.ask("Why that score?", "--runs", "P01-opus")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("P01-opus: FOLLOW-UP 1 REJECTED", r.stdout)
+        self.assertEqual((file.read_text(), self.extracted(), self.states()), (before, scores, {"P01-opus": "done"}))
+        kept = self.sd.joinpath("logs/P01-opus.2.rejected.md").read_text()  # what the panellist left, score and all
+        self.assertIn("| 8 | 7 |", kept)
+        self.assertIn("## Follow-up 1", kept)
+        answer, = self.asked()[0]["runs"]
+        self.assertEqual(answer["outcome"], "rejected")
+        self.assertIn("it changed the scores of concept", answer["reason"])
+
+    def test_follow_up_cut_short_by_a_killed_launcher_changes_no_score_and_is_settled_as_it_was_decided(self):
+        rewrites = [["write:all"], ["rescore", "cut", "wait:hold"]]  # a score raised and a section lost, then a reply
+        self.study({"P01-opus": rewrites, "P02-opus": rewrites}, personas=3, models=[self.CLAUDE],
+                   runners={"claude": {"concurrency": 2}},  # so the third run is still queued when the launcher dies
+                   synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
+        self.assertEqual(self.launch("run").returncode, 0)
+        files = {run_id: self.sd / e["file"] for run_id, e in self.entries().items()}
+        before, scores = {run_id: file.read_text() for run_id, file in files.items()}, self.extracted()
+        unsettled = [f"{run_id}: a follow-up is unsettled, so its file was read as it stood before the question"
+                     for run_id in ("P01-opus", "P02-opus")]
+        asker = self.ask("Why that score?", "--runs", "all", wait=False)
+        self.wait_for(lambda: self.waiting() == {"P01-opus", "P02-opus"}, "two runs to have rewritten their files")
+        self.assertNotEqual(files["P01-opus"].read_text(), before["P01-opus"])
+        # While the question is out, the runs are read as they stood before it: done, with every
+        # score as it was, and each script that read a copy says so.
+        self.assertEqual((self.extracted(), self.extract_said.splitlines()[:2]), (scores, unsettled))
+        self.assertEqual({r["run"]: (r["state"], r["scored"], r["unsettled"], r["asking"], r["followups"])
+                          for r in self.status()["runs"]},
+                         {"P01-opus": ("done", 3, True, 1, []), "P02-opus": ("done", 3, True, 1, []),
+                          "P03-opus": ("done", 3, False, None, [])})
+
+        def archived():
+            r = run("archive.py", self.sd, "--dest", self.tmp / "archive", check=False)
+            return r.returncode, self.tmp.joinpath("archive").exists(), r.stderr
+
+        # An archive has no copy to read, so nothing is archived: not under a launcher, which could
+        # start or settle a follow-up while the files are copied, and not while one is unsettled.
+        code, copied, why = archived()
+        self.assertEqual((code, copied), (1, False), why)
+        self.assertIn(f"Another launcher has this study (pid {asker.pid}", why)
+        asker.kill()
+        asker.wait()
+        code, copied, why = archived()
+        self.assertEqual((code, copied), (1, False), why)
+        self.assertIn("A follow-up question to P01-opus, P02-opus, P03-opus is not settled", why)
+        analysts = self.launch("run", "--role", "analyst")  # they would read files that may yet be put back
+        self.assertEqual((analysts.returncode, len(self.starts())), (1, 5), analysts.stdout + analysts.stderr)
+        self.assertIn("the one put to P01-opus and P02-opus is not settled", analysts.stderr)
+        self.assertIn(f"followup.py {self.sd.resolve()} list", analysts.stderr)
+        self.release("hold")
+        self.wait_for(lambda: self.processes() == {"P01-opus": "gone", "P02-opus": "gone"}, "both processes to end")
+        # The two states a launcher killed while settling a rejection leaves: its decision is on
+        # record, and the file is either still as the panellist left it (P01-opus) or already put
+        # back, with what the panellist left kept beside it (P02-opus). A file put back reads, on
+        # its own, as a panellist that only replied.
+        logs, decided = self.sd / "logs", "as decided before the launcher was killed"
+        record = self.asked()
+        for answer in record[0]["runs"][:2]:
+            answer["settling"] = {"attempt": 2, "outcome": "rejected", "reason": decided, "action": "restore",
+                                  "section": None}
+        self.sd.joinpath("followups.json").write_text(json.dumps(record))
+        shutil.copyfile(files["P02-opus"], logs / "P02-opus.2.rejected.md")
+        shutil.copyfile(logs / "P02-opus.2.before", files["P02-opus"])
+
+        listed = subprocess.run(self.followup("list"), env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(listed.returncode, 0, listed.stdout + listed.stderr)
+        # Every run asked has its outcome: the decisions were carried out, not made again, and the
+        # run whose turn never came is not left as if the question were still with it.
+        self.assertEqual([(x["run"], x["outcome"], x["reason"] == decided, "settling" in x)
+                          for x in self.asked()[0]["runs"]],
+                         [("P01-opus", "rejected", True, False), ("P02-opus", "rejected", True, False),
+                          ("P03-opus", "not asked", False, False)])
+        self.assertIn("P03-opus         not asked", listed.stdout)
+        self.assertEqual({run_id: file.read_text() for run_id, file in files.items()}, before)  # no section added
+        for run_id in ("P01-opus", "P02-opus"):  # what each left is kept, and not replaced by the file put back
+            self.assertIn("| 8 | 7 |", logs.joinpath(f"{run_id}.2.rejected.md").read_text())
+        self.assertEqual((self.extracted(), self.extract_said.count("unsettled"), list(logs.glob("*.before"))),
+                         (scores, 0, []))
+
+    def test_follow_up_to_a_run_that_was_stopped_before_reporting_its_usage_leaves_the_estimate_as_it_was(self):
+        self.study({"P01-opus": [["write:all", "hang"], ["followup"]]}, personas=1, models=[self.CLAUDE])
+        file = self.sd / self.entries()["P01-opus"]["file"]
+        launcher, _ = self.launch_in_background("run")
+        self.wait_for(lambda: file.read_text().endswith("Notes.\n"), "the run to have written everything")
+        self.assertEqual(self.launch("stop").returncode, 0)  # stopped before its harness reported anything
+        launcher.wait(timeout=30)
+        self.assertEqual(self.states(), {"P01-opus": "done"})
+
+        def measured():
+            estimate, = self.plan()["estimate"]["entries"]
+            return estimate
+
+        was = measured()
+        self.assertEqual((was["basis"], was["per_run"]["tokens"], was["left_out"]),
+                         ("duration", None, {"unallocated": 0, "unreported": 1}))
+        self.assertEqual(self.ask("Anything missing?", "--runs", "P01-opus").returncode, 0)
+        # The follow-up's result is the session's total: the review's spend and its own, in one figure.
+        # It is neither's, so the run measures as it did, and the figure is counted once, apart.
+        now = measured()
+        self.assertEqual(({**now, "left_out": None}, now["left_out"]),
+                         ({**was, "left_out": None}, {"unallocated": 1, "unreported": 0}))
+        usage = json.loads(self.launch("usage", "--json").stdout)
+        self.assertEqual([[(r["run"], r["input_tokens"], r["cost_usd"]) for r in usage[rows]]
+                          for rows in ("runs", "followups", "unallocated")],
+                         [[("P01-opus", None, None)], [("P01-opus", None, None)], [("P01-opus", 2956, 0.00046504)]])
+        self.assertEqual((usage["total"]["input_tokens"], usage["total"]["cost_usd"]), (2956, 0.00046504))
+        self.assertIn("| unallocated | 1 | - | - | - | 2,956 | 597 | 2,234 | $0.0005 | - |",
+                      self.sd.joinpath("analysis/usage.md").read_text())
+        self.assertIn("2,956 in and 597 out tokens and $0.0005 unallocated between the run and a follow-up",
+                      self.launch("status").stdout)
+        self.assertIn("1 whose usage cannot be told apart from a follow-up's", self.launch("plan").stdout)
+
+    def test_follow_up_asks_nothing_unless_every_run_named_can_be_asked(self):
+        refusals = {"P01-cx": "it is partial",                     # unfinished: a question would pass for its resume
+                    "P02-cx": "its session was purged",            # done, with no session left to continue
+                    "analyst-1": "it is an analyst job"}
+        self.study({"P01-cx": [["write:1"]], "P03-cx": [["write:all"], ["followup"]]}, personas=3, models=[self.CODEX],
+                   synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
+        self.launch("run")
+        self.assertEqual(self.launch("purge-sessions", "--runs", "P02-cx", "--yes").returncode, 0)
+        self.assertEqual(self.launch("run", "--role", "analyst").returncode, 0)
+        self.assertEqual(self.states(), {"P01-cx": "partial", "P02-cx": "done", "P03-cx": "done", "analyst-1": "done"})
+        started, everyone = len(self.starts()), ",".join([*refusals, "P03-cx"])
+        r = self.ask("Anything missing?", "--runs", everyone)
+        self.assertEqual(r.returncode, 1)
+        for run_id, why in refusals.items():
+            self.assertIn(f"{run_id}: cannot be asked: {why}", r.stdout)
+        self.assertEqual(self.ask(" \n", "--runs", "P03-cx").returncode, 1)  # an empty question
+        dry = self.ask("Anything missing?", "--runs", everyone, "--skip-unfit", "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("Follow-up 1: would ask 1 run (P03-cx).", dry.stdout)
+        self.assertIn("It has up to 5 min and $0.50 for this question", dry.stdout)
+        self.assertIn("No budget cap for the 1 run on codex", dry.stdout)
+        self.assertEqual((len(self.starts()), self.sd.joinpath("followups.json").exists()), (started, False))
+        r = self.ask("Anything missing?", "--runs", everyone, "--skip-unfit")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([(x["run"], x["outcome"]) for x in self.asked()[0]["runs"]], [("P03-cx", "answered")])
+        self.assertEqual([e["run"] for e in self.starts(since=started)], ["P03-cx"])
+
+    def test_follow_up_on_a_native_study_is_printed_for_the_lead_to_send_and_recorded_as_sent_by_hand(self):
+        self.study(personas=1, models=["opus"])
+        file = self.sd / self.entries()["P01-opus"]["file"]
+        file.write_text(file.read_text() + "".join(filled_section(c, [7] * FACTORS) for c in "ABC") + finals("ABC"))
+        run("runs.py", self.sd, "mark", "P01-opus", "agent-7")
+        before = file.read_text()
+        r = self.ask("Would you pay for it?", "--runs", "P01-opus")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("=== P01-opus (subagent: agent-7)", r.stdout)
+        self.assertIn("\nWould you pay for it?\n", r.stdout)
+        self.assertIn("`## Follow-up 1`", r.stdout)
+        followup, = self.asked()
+        self.assertEqual((followup["mode"], [(x["run"], x["outcome"], x["session"]) for x in followup["runs"]]),
+                         ("native", [("P01-opus", "sent by hand", "agent-7")]))
+        self.assertEqual((file.read_text(), self.starts()), (before, []))
 
 
 class LauncherWithoutWaitidTest(LauncherTest):

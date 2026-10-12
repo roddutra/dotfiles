@@ -154,6 +154,8 @@ def capabilities() -> dict:
             "The full path of the working directory, the OS version and today's date are always "
             "in the model's context, so folder names above the panel can leak internal terms.",
             "The model is told whether the working directory is inside a git repository.",
+        ],
+        "browse_gaps": [
             "With browsing on, the agent-browser CLI can open any file:// path the user can read "
             "and save screenshots outside the working directory.",
             "With browsing on, read-only shell commands inside the working directory (such as "

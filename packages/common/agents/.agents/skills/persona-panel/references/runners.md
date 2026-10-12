@@ -8,13 +8,15 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 |---|---|
 | `runner` | The default runner for every model entry and synthesis job that names none |
 | `models` | Model entries. A bare string is that model on the study's `runner`, and is its own key. An object is `{"key", "runner", "model", "effort"}` |
-| `replicates` | Default 1. Above 1, each run is repeated as `<pid>-<key>-r<n>`. Analysis counts replicates as separate runs |
+| `replicates` | Default 1. Above 1, each run is repeated as `<pid>-<key>-r<n>`. Analysis counts replicates as separate runs and adds "Replicate spread" (`references/method.md`, Replicates and variants) |
 | `limits.run` | `{"minutes", "budget_usd"}` for each panellist run, over all its attempts. Default 15 minutes and $2 |
 | `limits.synthesis` | `minutes` for each analyst and writer job, `budget_usd` as one pool split equally among them. Default 30 minutes and $5 |
+| `limits.followup` | `{"minutes", "budget_usd"}` for each run asked a follow-up question, for each question, apart from its run limits and outside the plan's ceiling. Default 5 minutes and $0.50 |
 | `limits.overrides` | Run limits for one model entry, keyed by model key |
 | `runners.<name>.concurrency` | Runs to keep going at once on that runner |
-| `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory) |
+| `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory; the study brief is refused) |
 | `browse` | Default true: panellists may open pages with `agent-browser`, on runners that can |
+| `materials` | Default `"full"`. `"text"` is a text-only pass: page text only, no design factors, no browser (`references/method.md`, Text-only pass) |
 
 Model entry rules:
 
@@ -22,7 +24,7 @@ Model entry rules:
 - Without `model`, the run uses the harness's own default, which depends on the account. Name the model when the study must be reproducible.
 - `effort` must be one of the runner's levels. `plan` and `run` refuse any other value, because the CLIs themselves only warn or fail at the first model call.
 - A study where no entry has a runner is in native mode (below). Mixing the two is refused.
-- `type` and `materials` are reserved for study types that are not built yet. Leave them out.
+- `type` is reserved for study types that are not built yet. Leave it out.
 
 ## Capabilities
 
@@ -61,9 +63,11 @@ Not switched off for its runs:
 - With browsing on, `agent-browser` can open any `file://` path the user can read, and save screenshots outside the working directory.
 - With browsing on, read-only shell commands inside the working directory (such as `ls`) run without an allow rule.
 
+The plan lists the last two only for a study whose panellists can browse on this runner.
+
 ### `codex`
 
-- **No budget cap.** The time limit is what bounds a run. The plan leaves these runs out of the ceiling and labels it an estimate.
+- **No budget cap.** The time limit is what bounds a run, and a follow-up question. The plan leaves these runs out of the ceiling and labels it an estimate.
 - **No cost or duration.** `analysis/usage.md` shows tokens and "not reported" for the rest, and the plan judges these runs by time.
 - **No browser.** Each shell call in the sandbox gets its own process namespace, so the `agent-browser` daemon dies between calls and the next command starts a blank browser. With `"browse": true`, `init_study.py` tells each Codex run in its prompt to review from the files alone. In a mixed panel, set `"browse": false` when every panellist must work from the same materials.
 - **Models.** Without `model`, the run uses the first model of the account's list. An unknown model fails at the first model call. Only the low and medium effort levels were run in discovery.
@@ -95,8 +99,10 @@ The launcher enforces, on every runner:
 - the time limit: SIGTERM to the CLI's process group, `--grace` seconds (default 10) to finish the current write, then SIGKILL
 - the prompt: the file in `prompts/` on stdin, with nothing added
 - one launcher per study
+- what a follow-up question may change: the persona file is copied before the question, and anything but one appended `## Follow-up <n>` section is rejected and the file put back. Until the launcher has settled it, every script reads the copy for scores and progress
+- the synthetic panel notice in an analyst's or the writer's saved output: added under the title when the job left it out
 
-Each run's own watchdog process enforces its time limit, so a killed launcher does not unbound its runs. The watchdog also ends whatever the CLI started and left running, and records when and how the run ended. The next `run`, `resume` or `stop` settles the run from that record, or adopts it while it is still alive.
+Each run's own watchdog process enforces its time limit, so a killed launcher does not unbound its runs. The watchdog also ends whatever the CLI started and left running, and records when and how the run ended. The next `run`, `resume` or `stop` settles the run from that record, or adopts it while it is still alive. A follow-up question is settled the same way, in recorded steps that a later launcher finishes without deciding again (`scripts/panel_lib.py`, "Settling").
 
 - `--grace` is given to a watchdog when its run starts. A run already going keeps the grace it has.
 - `--poll` is how often the launcher looks for runs that have ended and for a request to stop. Time limits do not depend on it.
@@ -131,7 +137,7 @@ Add one module, `scripts/runners/<name>.py`. The registry lists the package's mo
 
 | Function | Contract |
 |---|---|
-| `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps` |
+| `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps` |
 | `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
 | `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: neither harness tried so far inherits the working directory, the tools or the budget on resume |
 | `parse_result(stdout, stderr, exit_code)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done |
@@ -148,7 +154,8 @@ Rules for a runner:
 - Set `session_lost` when the CLI refuses a resume because the session is gone. The launcher then starts the run afresh if it wrote nothing, and otherwise leaves it to the lead. Without it, such a resume reads as a CLI that could not be started, and closes the runner for the command.
 - Report usage with a `scope`: `session` when the figures are running totals for the session, `process` when they cover one process. The launcher totals a run with `merge_usage()` and `total_usage()` and never double counts a resumed session.
 - Never read, store or relay a provider login.
-- List in `isolation_gaps` whatever could not be switched off, in plain words. The plan prints it.
+- List in `isolation_gaps` whatever could not be switched off for any run, in plain words. The plan prints it.
+- List in `browse_gaps` what stays open only for a run that may browse, and leave it empty on a runner with no browser. The plan prints it only when the study's panellists can browse on the runner.
 - List in `billing_env` the variables that can change who is billed.
 
 Helpers to reuse from `runners/__init__.py`:
@@ -181,6 +188,7 @@ What it lacks:
 - No usage record, and no estimate from a pilot.
 - No isolation beyond the run prompt. Subagents inherit the lead's project instructions, and internal terms leaked into reviews in the Sept 2026 study.
 - No modification record. `launch.py pilot`, `run` and `resume` refuse a native study.
+- No check on follow-up questions: nothing is sent for the lead, limited or put back.
 
 Set it up by leaving `runner` out of `study.json` and giving `models` the model names the lead's subagent tool accepts. `launch.py plan` still lists the runs.
 
@@ -205,10 +213,24 @@ Running a native panel:
 
 The synthesis briefs are filled by hand:
 
+- Run `extract_answers.py` and `analyze.py` first. Step 6 of the analyst brief reads their tables, and falls back to counting by hand without them.
 - Split the persona files by persona, all models of a persona to one analyst, between one or two analysts.
-- Give each analyst `assets/qual-brief.md` with every `<PLACEHOLDER>` replaced. Delete the line of a placeholder that has nothing to say (`<EXTRA_CONTEXT_FILES>`, `<INCOMPLETE_RUNS>`).
+- Give each analyst `assets/qual-brief.md` with every `<PLACEHOLDER>` replaced. Delete the line of a placeholder that has nothing to say (`<EXTRA_CONTEXT_FILES>`, `<INCOMPLETE_RUNS>`, `<FOLLOWUPS>`).
+- Replace `<NOTICE>` with the synthetic panel notice, word for word (`references/communicating.md`). Never delete its line.
+- When follow-up questions were asked, replace `<FOLLOWUPS>` with the text of `assets/qual-brief-followups.md` or `assets/synthesis-brief-followups.md`, and its `<QUESTIONS>` with one line per question from `followup.py <study> list`: the number, the runs asked and the question. An analyst gets only the questions asked of its own personas. When none was asked, delete the `<FOLLOWUPS>` line.
 - Then give one writer `assets/synthesis-brief.md`, filled the same way.
-- A harness may block a subagent from writing a file that looks like a report. Ask for the document as the reply and save it with `extract_agent_reply.py`.
+- For a text-only study, replace `<TEXT_ONLY_NOTE>` with the text of `assets/qual-brief-text.md` or `assets/synthesis-brief-text.md`. Otherwise delete its line.
+- A harness may block a subagent from writing a file that looks like a report. Ask for the document as the reply and save it with `extract_agent_reply.py`, which adds the notice under the title when the reply lacks it.
+- Check that a file a subagent wrote itself has the notice under its title. Nothing else adds it in native mode until `archive.py`.
+
+Follow-up questions are sent by hand too:
+
+1. Run `extract_scores.py <study>` and keep a copy of `analysis/scores.csv`.
+2. `followup.py <study> ask --runs <ids>|all --question-file <file>` sends nothing. It prints one message per run, with the subagent id that `runs.py mark` recorded, and records the follow-up in `followups.json` as `sent by hand`. A run with no recorded id cannot be asked. With `--dry-run` it names the runs and records nothing.
+3. Send each message, verbatim, to its subagent with the harness's tool for messaging one.
+4. Run `extract_scores.py` again and compare with the copy. No script checks what a panellist did to its file, and a follow-up may only append its `## Follow-up <n>` section.
+
+The message is the question inside the frame of `assets/followup-message.md`, the same one a runner sends. There is no `limits.followup` in native mode.
 
 ## When the lead's own sandbox blocks the launcher
 

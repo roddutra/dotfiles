@@ -19,6 +19,9 @@ subagent instead of relaunched, which would duplicate sections or lose its readi
 "next", "mark" and "resume" are for native mode, where the lead starts each run with its own
 subagent tool. A study whose model entries name a runner is started, tracked and resumed by
 launch.py, and these three commands refuse it.
+
+A follow-up question to a finished run goes through followup.py in either mode. In native mode
+it prints the message for you to send to the subagent that "mark" recorded.
 """
 
 from __future__ import annotations
@@ -34,12 +37,14 @@ import panel_lib as pl  # noqa: E402
 
 def run_view(sd: Path, cfg: dict, r: dict) -> dict:
     """A runs.json entry with how far its persona file has got: "state" (done, started or
-    pending), "scored", "of", "written" and "has_final"."""
-    f = sd / r["file"]
-    prog = pl.run_progress(cfg, pl.parse_persona_file(f, cfg) if f.exists() else None)
+    pending), "scored", "of", "written", "has_final" and "unsettled" (the file was read as it
+    stood before a follow-up that is not settled: panel_lib.read_persona)."""
+    parsed = pl.read_persona(sd, cfg, sd / r["file"], r)
+    prog = pl.run_progress(cfg, parsed)
     state = "done" if prog["complete"] else "started" if prog["written"] else "pending"
     return {**r, "state": state, "scored": len(prog["scored"]), "of": len(prog["units"]),
-            "written": prog["written"], "has_final": prog["has_final"]}
+            "written": prog["written"], "has_final": prog["has_final"],
+            "unsettled": bool(parsed and parsed["unsettled"])}
 
 
 def run_states(sd: Path, cfg: dict) -> list[dict]:
@@ -88,7 +93,7 @@ def main():
         for s in states:
             counts[s["state"]] = counts.get(s["state"], 0) + 1
             print(f"{s['run']:<16} {s['state']:<8} {s['scored']}/{s['of']}  {s['name']}")
-        print(" | ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
+        print(" | ".join(f"{k}: {v}" for k, v in sorted(counts.items())), *pl.unsettled_lines(states), sep="\n")
     elif args.cmd == "next":
         running = {x.strip() for x in args.running.split(",") if x.strip()}
         # A pending run with a recorded agent id was launched and hasn't written yet: count it as running.

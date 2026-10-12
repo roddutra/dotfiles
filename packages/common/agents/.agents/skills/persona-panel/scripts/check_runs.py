@@ -7,12 +7,21 @@ Flags, per run:
   - missing final sections or ranking
   - ranking that contradicts the run's own overall scores
   - flat scoring (very low spread across all factor scores)
-  - em or en dashes, and leak terms from study.json (background-context leakage)
-  - a review order different from the key
+  - em or en dashes, and leak terms from study.json (background-context leakage). A follow-up
+    question that followups.json records, quoted by the panellist in its section, is the lead's
+    writing and is left out of both: the answer under it is checked like the rest of the file
+  - a review order different from the key (a variant's is its parent's: panel_lib.review_order)
   - a persona file changed while other runs were running and its own was not: a panellist wrote
     outside its own file. This comes from the modification record launch.py keeps in
     logs/modifications.json (panel_lib.py), so a native-mode study is never flagged. Once you
     have dealt with a change, take its entry out of that file
+  - a "## Follow-up <n>" section that followups.json does not record as an answer (the panellist or
+    a hand edit added it), and an answer on record whose section is missing. Both are notes, and
+    neither blocks: a follow-up never changes a score
+
+A run whose latest follow-up question is not settled yet is checked as it stood before the
+question (panel_lib.read_persona): a line under the table names each such run. Check again once a
+launcher has settled it.
 
 Exit code 1 when any run has a blocking problem (missing, duplicate, unscored, unknown, or
 changed by another run).
@@ -22,6 +31,7 @@ Usage: check_runs.py <study-dir>
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -30,8 +40,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
 
 
-def check(run: dict, cfg: dict, expected_order: list[str], changes: list[dict] = ()) -> tuple[list[str], list[str]]:
-    """changes: the modification record's entries for this run's persona file."""
+def check(run: dict, cfg: dict, expected_order: list[str], changes: list[dict] = (),
+          asked: dict | None = None, questions: dict | None = None) -> tuple[list[str], list[str]]:
+    """changes: the modification record's entries for this run's persona file. asked: {follow-up
+    number: outcome} for the follow-up questions followups.json records for this run, and
+    questions: {follow-up number: the question} for the same ones."""
     blocking, notes = [], []
     prog = pl.run_progress(cfg, run)
     unit, units = pl.unit_nouns(cfg)
@@ -62,36 +75,51 @@ def check(run: dict, cfg: dict, expected_order: list[str], changes: list[dict] =
     allscores = [x for s in run["scores"].values() for x in s]
     if len(allscores) > 5 and pl.sd(allscores) < 0.6:
         notes.append(f"flat scoring (sd {pl.sd(allscores):.2f})")
-    if run["dash_count"]:
-        notes.append(f"{run['dash_count']} em/en dashes")
-    low = run["text"].lower()
+    own = pl.own_words(run, questions or {})  # a question the lead wrote is not the panellist's to answer for
+    dashes = sum(own.count(d) for d in pl.DASHES)
+    if dashes:
+        notes.append(f"{dashes} em/en dashes")
+    low = own.lower()
     leaks = [t for t in cfg["leak_terms"] if t.lower() in low]
     if leaks:
         notes.append(f"leak terms: {', '.join(leaks)}")
     if run["order"] and expected_order and run["order"] != expected_order:
         notes.append(f"review order {','.join(run['order'])} differs from key {','.join(expected_order)}")
+    asked, written = asked or {}, [f["n"] for f in run["followups"]]
+    expected = {n for n, outcome in asked.items() if outcome in pl.FOLLOWUP_ANSWERED}
+    loose = sorted(n for n in set(written) if n not in expected and asked.get(n) != "sent by hand")
+    if loose:
+        notes.append(f"follow-up section {', '.join(map(str, loose))} not recorded as an answer in {pl.FOLLOWUPS}")
+    if expected - set(written):
+        notes.append(f"follow-up {', '.join(map(str, sorted(expected - set(written))))} is recorded as answered, but "
+                     "its section is missing")
     return blocking, notes
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit(__doc__)
-    cfg = pl.load_study(Path(sys.argv[1]))
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("study_dir", type=Path)
+    cfg = pl.load_study(ap.parse_args().study_dir)
     sd = cfg["_dir"]
     labels = list(pl.label_map(cfg))
     runs = pl.load_runs(sd, cfg)
     changes = pl.read_modifications(sd)["changes"]
+    followups = pl.read_followups(sd)
     lines = ["# Run checks", "", "| Run | Blocking | Notes |", "|---|---|---|"]
     bad = 0
     for r in runs:
         # Only studies scaffolded by init_study.py have a seeded order to compare against.
         order = pl.review_order(cfg, r["pid"], labels) if (sd / "runs.json").exists() else []
-        blocking, notes = check(r, cfg, order, [c for c in changes if c.get("run") == r["run"]])
+        mine = [f for f in followups if any(x["run"] == r["run"] for x in f.get("runs") or [])]
+        asked = {f["n"]: x.get("outcome") for f in mine for x in f["runs"] if x["run"] == r["run"]}
+        blocking, notes = check(r, cfg, order, [c for c in changes if c.get("run") == r["run"]], asked,
+                                {f["n"]: f.get("question") for f in mine})
         bad += bool(blocking)
         if blocking or notes:
             lines.append(f"| {r['run']} | {'; '.join(blocking) or '-'} | {'; '.join(notes) or '-'} |")
     expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
     lines += ["", f"{len(runs)} run files of {expected} expected; {bad} with blocking problems."]
+    lines += pl.unsettled_lines(runs)
     (sd / "analysis").mkdir(exist_ok=True)
     (sd / "analysis" / "checks.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

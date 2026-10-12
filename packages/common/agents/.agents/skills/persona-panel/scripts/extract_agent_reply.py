@@ -5,8 +5,11 @@ Some harnesses block subagents from writing report files and they return the doc
 their reply instead. This pulls the last assistant text from the transcript and writes
 everything from the first line matching --start (default: the first "# " heading).
 
+The saved file carries the synthetic panel notice (panel_lib.NOTICE): when the document lacks
+the line it is added under the title, as launch.py and archive.py add it (panel_lib.with_notice).
+
 For native mode. In a study that runs through runners, launch.py saves each analyst's and the
-writer's reply itself, by the same rule (panel_lib.reply_document).
+writer's reply itself, by the same rules (panel_lib.reply_document).
 
 Usage: extract_agent_reply.py <transcript.jsonl|reply.txt> --out <file.md> [--start "# Round 2"] [--contains "text"]
 """
@@ -56,7 +59,7 @@ def main():
     if not texts:
         raise SystemExit("No assistant text found")
     text = max(texts[-3:], key=len)  # the document is usually the longest of the final replies
-    body = pl.reply_document(text, args.start)
+    body = pl.with_notice(pl.reply_document(text, args.start))
     args.out.write_text(body + "\n")
     dashes = sum(body.count(d) for d in pl.DASHES)
     print(f"Wrote {args.out} ({len(body)} chars, {dashes} em/en dashes)")
