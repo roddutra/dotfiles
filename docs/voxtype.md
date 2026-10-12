@@ -102,8 +102,9 @@ Setup. Handy's own files are not linked from this repository:
 
 - `handy-bin` from the AUR. It is not in `manifests/omarchy/aur-packages.txt` until the trial passes.
 - Model `parakeet-unified-en-0.6b` (Q8_0 GGUF, 731 MB) in `~/.local/share/com.pais.handy/models/`. It is a streaming model: Handy decodes it in bounded chunks during recording and pastes once at the end. On the RTX 3070 Ti it loads in 0.3 seconds and unloads after each transcription.
-- Settings in `~/.local/share/com.pais.handy/settings_store.json`. Handy rewrites this file and stores the Groq API key in it as plain text, so it must not be committed. Edit it only while Handy is stopped.
+- Settings in `~/.local/share/com.pais.handy/settings_store.json`. Handy rewrites this file and stores the Groq API key in it as plain text, so it must not be committed. Change it through Handy's settings window or `handy-settings apply`, not by hand while Handy runs.
 - Handy starts hidden at login through `~/.config/autostart/Handy.desktop`, which it writes itself.
+- The recording overlay is on (`overlay_style = "live"`, bottom). Handy disables it by default on Linux because it can take focus and break pasting. On Hyprland it is a layer-shell surface with keyboard input off, and it rendered and pasted correctly here.
 - The Groq key comes from the 1Password item `Groq`, field `OpenWhispr` in the `API keys` section.
 - Idle, with the model unloaded, Handy and its WebKit processes hold about 280 MB of RAM. Voxtype idles at about 30 MB.
 
@@ -119,12 +120,24 @@ Known limits found during setup:
 - CLI triggers are toggle only, so there is no hold-to-talk binding.
 - Recordings are kept for two weeks in `~/.local/share/com.pais.handy/recordings/`.
 
-Reference copies in `packages/omarchy/handy/`, which `scripts/apply-dotfiles` does not stow:
+`packages/omarchy/handy/` holds everything needed to rebuild this setup. `scripts/apply-dotfiles` does not stow it.
 
-- `cleanup-prompt.txt`: the cleanup prompt as stored in Handy. `${output}` is Handy's transcript placeholder.
-- `settings-overrides.json`: every setting changed from Handy's defaults, without the API key. `post_process_custom_base_url` is the `base_url` of the `custom` entry in `post_process_providers`, and `bindings` holds each binding's `current_binding`.
+| File | Contents |
+|---|---|
+| `settings.json` | Every Handy setting except the API key, the microphone, output and GPU device choices, and Handy's built-in prompt |
+| `cleanup-prompt.txt` | The cleanup prompt. `${output}` is Handy's transcript placeholder. `settings.json` refers to it as `@cleanup-prompt.txt` |
+| `handy-settings` | `export` refreshes both files from the running configuration. `apply` writes them into Handy |
 
-Update both copies after changing the prompt or settings in Handy. To restore, stop Handy, apply the values to `settings_store.json`, add the prompt to `post_process_prompts` with the id `voxtype_minimal_cleanup`, and set the Groq key under `post_process_api_keys.custom`.
+Run `packages/omarchy/handy/handy-settings export` after changing anything in Handy's settings window, then commit the result.
+
+To set Handy up on another machine:
+
+1. Run `./scripts/apply-dotfiles` for the `F8` bindings.
+2. Run `omarchy pkg aur add handy-bin`.
+3. Put the Groq key at `~/.local/share/voxtype/secrets/groq-api-key` (see [Secret storage](#secret-storage)).
+4. Run `packages/omarchy/handy/handy-settings apply`. It starts Handy once to create its default settings, downloads the model and verifies its checksum, merges the settings and prompt, copies the Groq key when Handy has none, and restarts Handy hidden.
+
+`apply` was verified by moving the settings file and model aside on this machine: the rebuilt settings matched the originals exactly.
 
 To remove the trial: delete the three `F8` bindings in `bindings.lua`, run `yay -Rns handy-bin`, and delete `~/.local/share/com.pais.handy`, `~/.config/autostart/Handy.desktop`, and `packages/omarchy/handy/`.
 

@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Keep Handy's configuration reproducible. Handy rewrites its own settings
+# file and stores the Groq API key in it, so the file cannot be linked from
+# this repository. This command copies the settings out and applies them back.
+#
+#   handy-settings export   Refresh settings.json and cleanup-prompt.txt from
+#                           the running configuration, without secrets or
+#                           machine-specific device choices.
+#   handy-settings apply    Apply both files to this machine, download the
+#                           selected model if it is missing, copy the Groq key
+#                           from Voxtype's secret file when Handy has none,
+#                           and restart Handy hidden.
+set -euo pipefail
+
+here=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
+snapshot_file=$here/settings.json
+prompt_file=$here/cleanup-prompt.txt
+
+data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+handy_dir=$data_home/com.pais.handy
+settings_file=$handy_dir/settings_store.json
+key_file=${VOXTYPE_GROQ_API_KEY_FILE:-"$data_home/voxtype/secrets/groq-api-key"}
+
+# The cleanup prompt is kept as plain text beside the snapshot. The snapshot
+# holds this marker in its place so there is one copy of the wording. Handy's
+# built-in prompts (ids starting with "default_") are not exported.
+prompt_id=voxtype_minimal_cleanup
+prompt_marker=@cleanup-prompt.txt
+
+# Pinned download for the model the snapshot selects. Handy also finds a model
+# dropped into its models directory, so no in-app download is needed.
+model_file=parakeet-unified-en-0.6b-Q8_0.gguf
+model_url=https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/7e948f21b7bdbac698d3318db9d350f1096f3b6c/$model_file
+model_sha256=4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+stop_handy() {
+  pkill -x handy 2>/dev/null || return 0
+  local _
+  for _ in {1..50}; do
+    pgrep -x handy > /dev/null || return 0
+    sleep 0.1
+  done
+  fail "Handy did not stop."
+}
+
+start_handy() {
+  systemd-run --user --collect --quiet "$(command -v handy)" --start-hidden
+}
+
+# Handy writes its defaults, including the provider list this command merges
+# into, the first time it starts.
+create_default_settings() {
+  local _
+  start_handy
+  for _ in {1..100}; do
+    [[ ! -s "$settings_file" ]] || break
+    sleep 0.1
+  done
+  [[ -s "$settings_file" ]] || fail "Handy did not write $settings_file."
+  sleep 1
+  stop_handy
+}
+
+export_settings() {
+  [[ -r "$settings_file" ]] || fail "Handy settings not found at $settings_file."
+
+  local prompt
+  prompt=$(jq -r --arg id "$prompt_id" \
+    '.settings.post_process_prompts[] | select(.id == $id) | .prompt' \
+    "$settings_file")
+  [[ -n "$prompt" ]] || fail "Prompt '$prompt_id' not found in Handy's settings."
+  printf '%s\n' "$prompt" > "$prompt_file"
+
+  jq -S --arg id "$prompt_id" --arg marker "$prompt_marker" '
+    .settings
+    | del(
+        .post_process_api_keys,
+        .selected_microphone, .clamshell_microphone, .selected_channel,
+        .selected_output_device, .transcribe_gpu_device,
+        .settings_schema_version, .whats_new_last_seen_version
+      )
+    | .post_process_prompts |= map(select(.id | startswith("default_") | not))
+    | (.post_process_prompts[] | select(.id == $id) | .prompt) = $marker
+  ' "$settings_file" > "$snapshot_file"
+
+  printf 'Exported %s and %s\n' "${snapshot_file##*/}" "${prompt_file##*/}"
+}
+
+ensure_model() {
+  local selected target=$handy_dir/models/$model_file
+  selected=$(jq -r '.selected_model' "$snapshot_file")
+  if [[ ${selected##*/} != "$model_file" ]]; then
+    printf 'Selected model %s has no pinned download. Download it in Handy.\n' "$selected" >&2
+    return 0
+  fi
+  [[ ! -e "$target" ]] || return 0
+
+  printf 'Downloading %s\n' "$model_file"
+  mkdir -p "$handy_dir/models"
+  curl -fL --retry 3 -sS -o "$target.part" "$model_url"
+  printf '%s  %s\n' "$model_sha256" "$target.part" | sha256sum --check --quiet \
+    || fail "Checksum mismatch for $model_file."
+  mv "$target.part" "$target"
+}
+
+apply_settings() {
+  command -v handy > /dev/null || fail "Handy is not installed."
+  [[ -r "$snapshot_file" && -r "$prompt_file" ]] || fail "settings.json or cleanup-prompt.txt is missing in $here."
+
+  stop_handy
+  [[ -s "$settings_file" ]] || create_default_settings
+  ensure_model
+
+  local key_source=/dev/null merged
+  [[ ! -r "$key_file" ]] || key_source=$key_file
+
+  merged=$(mktemp "$settings_file.XXXXXX")
+  chmod 600 "$merged"
+  jq --slurpfile snapshot "$snapshot_file" \
+    --rawfile prompt "$prompt_file" \
+    --rawfile key "$key_source" \
+    --arg id "$prompt_id" '
+    .settings = ((.settings // {}) * $snapshot[0])
+    | (.settings.post_process_prompts[] | select(.id == $id) | .prompt) = ($prompt | sub("\\s+$"; ""))
+    | ($key | gsub("\\s"; "")) as $groq_key
+    | if $groq_key != "" and ((.settings.post_process_api_keys.custom // "") == "")
+      then .settings.post_process_api_keys.custom = $groq_key
+      else .
+      end
+  ' "$settings_file" > "$merged"
+  mv "$merged" "$settings_file"
+
+  start_handy
+  printf 'Applied Handy settings and restarted Handy.\n'
+  if [[ $(jq -r '.settings.post_process_api_keys.custom // "" | length' "$settings_file") == 0 ]]; then
+    printf 'No Groq key is set. Add it in Handy under Post Process, or create %s and apply again.\n' "$key_file" >&2
+  fi
+}
+
+case ${1:-} in
+  export) export_settings ;;
+  apply) apply_settings ;;
+  *) fail "Usage: handy-settings export|apply" ;;
+esac
