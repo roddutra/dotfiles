@@ -4,6 +4,10 @@ Standard library only. Every script takes a study directory laid out as:
 
     <study>/study.json        lead config (never shown to panellists)
     <study>/key.md            neutral label -> concept key (lead only)
+    <study>/forms.json        {concept id: form} for each "files" concept, the form its files reached
+                              the panel in (lead only: concept_forms(), below)
+    <study>/sites/            neutral copies of the "site" concepts, when panellists do not browse
+                              (lead only: sites_dir(), below)
     <study>/study-brief.md    what the lead agreed with the user, from assets/study-brief.md (lead
                               only: init_study.py refuses a copy of it anywhere under panel/)
     <study>/runs.json         one entry per run (schema below)
@@ -11,8 +15,12 @@ Standard library only. Every script takes a study directory laid out as:
                               and writer job, <job id>.md
     <study>/panel/            the only folder panellists may read
         _panel-instructions.md
-        sites/concept-<L>/    neutral copies of each concept. A text-only study keeps them in
-                              <study>/sites/ instead, where no panellist can open one
+        sites/concept-<L>/    neutral copies of each concept of kind "site", only in a study whose
+                              panellists browse: a copy holds the page source under its own file
+                              names, so a study that does not browse (a text-only study, "browse":
+                              false, or a "url" concept without "browse": true) keeps them in
+                              <study>/sites/ instead, where no panellist can read one. A "url" or
+                              "files" concept has no copy (concept kinds, below)
         materials/concept-<L>/<page>/
         personas/<pid>-<slug>--<key>.md, or ...--<key>-r<n>.md for replicate n > 1
         scratch/<run id>/
@@ -36,7 +44,54 @@ Standard library only. Every script takes a study directory laid out as:
                               ran as the CLI is no attempt: its files stay until the next
                               attempt, which has the same number, replaces them
     <study>/.launch.lock      launch.py only: present while a launcher has the study
+    <study>/.capture-<pid>-*/ capture.py only: the scratch folder of one capture, named after its
+                              process, where each page or item is captured before it moves
+                              under panel/materials, beside a record of any move under way. One
+                              whose process is gone is settled by the next capture, which
+                              finishes the move or puts the earlier capture back, and removed
+                              (capture.py, publish() and settle())
     <study>/followups.json    followup.py only: the follow-up questions asked (format below)
+
+Concept kinds. A concept in study.json is one of three kinds, named by its optional "kind":
+
+    site    (default) "path": a folder with index.html. init_study.py copies it to
+            concept-<L>/ under sites_dir(), and capture.py captures each <page>.html of the copy
+            into materials/concept-<L>/<page>/
+    url     "pages": [{"name", "url"}, ...], the first named "index", or "url" alone for a
+            concept of one page. Nothing is copied: capture.py opens each address and captures it
+            as it does a site page, into materials/concept-<L>/<name>/. "states" work as for a site
+    files   "files": image and PDF paths in the order to go through them, or "path": a folder
+            whose images and PDFs are taken in name order. Nothing is copied by init_study.py.
+            capture.py writes each file to materials/concept-<L>/item-<NN>/: an image as
+            image.<type>, with part-<NN>.png when it is much taller than a screen, and a PDF as
+            page-<NN>.png, one per page, with page-text.txt. A text-only study takes the PDFs only
+
+Nothing under panel/ and no run prompt carries a concept id, a source path, a file name or, unless
+the study browses, a URL: key.md maps them for the lead. concept_kind(), url_pages(),
+concept_items(), concept_pages() and concept_folders() read a concept, and check_concepts()
+validates its shape.
+
+Names that become paths. Every configured string that names a file or folder is checked when
+study.json is loaded, so none can leave the folder it belongs in: a url page's name and a state's
+name (PAGE_NAME, a folder under materials/), a pinned label (LABEL), a concept id, a persona id
+and a persona slug (name_problem(): one file-name part, with no separator and no leading dot or
+hyphen). A persona id holds no hyphen at all (persona_id_problem()), and a persona whose name
+gives an empty slug needs a "slug". Model keys are letters and digits (KEY_RE). capture.py checks again, on the paths
+themselves, that everything it writes or deletes is inside panel/materials.
+
+Forms. forms.json records the form each "files" concept reached the panel in ("image files",
+"PDF files" or "image and PDF files"), by concept id. init_study.py and capture.py write it from
+the source files, and concept_forms() reads it when those can no longer be read, as in an
+archived round, so that analyze.py still says when a PDF was compared with an image.
+
+Browsing ("browse") defaults to true for a study of sites. With any "url" concept it is off unless
+study.json says "browse": true, and then the instructions give each page's address. A "files"
+concept has nothing to open, and a study of nothing else never browses (apply_kinds()). Where the
+site copies are kept follows from it (sites_dir()).
+
+A study with one concept ranks and compares nothing: single_concept() says so, and the
+templates, checks and analysis follow it. Its instructions speak of one "artefact" (the singular
+of "artefact_plural"), which study.json must give when it sets the plural.
 
 A run is one persona on one model entry and one replicate. Its id is <pid>-<key>, or
 <pid>-<key>-r<n> for replicate n > 1, where <key> is the model entry's key (letters and digits).
@@ -269,6 +324,7 @@ import shutil
 import string
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 ASSETS = SKILL_DIR / "assets"
@@ -311,6 +367,16 @@ STUDY_TYPES = {
     "usability": {"unit": "task", "units": "tasks", "heading": "Task"},
 }
 MATERIALS = ("full", "text")
+KINDS = ("site", "url", "files")
+IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+DOCUMENT_TYPES = (".pdf",)
+PAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # a url page's name or a state's, which becomes a folder name
+LABEL = re.compile(r"[A-Za-z0-9]+")  # a pinned label: what the parsers read after "Concept", and a folder name
+NAME_PART = re.compile(r"[^\s./\\-][^/\\\x00-\x1f\x7f]*")  # one part of a file name: name_problem()
+NAME_RULE = ("must be one part of a file name: no slash, backslash or line break, and no dot, hyphen or space to "
+             "begin with")
+FILE_FORMS = ("image files", "PDF files", "image and PDF files")  # the forms of a "files" concept
+DEFAULT_ARTEFACT = ("draft website design", "draft website designs")  # singular, plural
 ENTRY_FIELDS = ("key", "runner", "model", "effort")
 KEY_RE = re.compile(r"[A-Za-z0-9]+")
 LIMIT_NAMES = ("minutes", "budget_usd")
@@ -327,6 +393,7 @@ MODIFICATIONS = "logs/modifications.json"  # the modification record, relative t
 EARLIER_SESSIONS = "logs/earlier-sessions.json"  # sessions of the runs a --force replaced, relative to it too
 STUDY_BRIEF = "study-brief.md"             # the lead's copy of assets/study-brief.md, beside study.json
 FOLLOWUPS = "followups.json"               # the follow-up questions asked, relative to the study directory
+FORMS = "forms.json"                       # the form of each "files" concept, relative to it too
 FOLLOWUP_OUTCOMES = ("answered", "answered from the reply", "rejected", "unanswered", "turned away",
                      "could not start", "not asked", "sent by hand")
 FOLLOWUP_ANSWERED = FOLLOWUP_OUTCOMES[:2]  # the outcomes that leave a section the launcher has checked
@@ -340,6 +407,20 @@ NOTICE = ("Synthetic panel: the feedback in this study was generated by AI perso
           "It is not user research.")
 # The name roster.py gives a skeleton persona. init_study.py refuses a study that still has one.
 SKELETON_NAME = "TODO"
+
+
+# ---------------------------------------------------------------- wording
+
+def agree(n: int, one: str, many: str | None = None) -> str:
+    """The word that agrees with a count of n: one for exactly 1, else many, which is one + "s"
+    when it is not given. Every sentence a script writes around a count takes its nouns, verbs
+    and pronouns from here ("is" or "are", "it" or "them"), so none says "1 runs"."""
+    return one if n == 1 else one + "s" if many is None else many
+
+
+def plural(n: int, noun: str, many: str | None = None) -> str:
+    """A count with its noun: "1 run", "2 runs", "1,200 pages", "2 model entries"."""
+    return f"{n:,} {agree(n, noun, many)}"
 
 
 # ---------------------------------------------------------------- config
@@ -369,16 +450,27 @@ def load_study(study_dir: Path) -> dict:
     cfg.setdefault("runner", None)
     asked_to_browse = cfg.get("browse") is True  # said in study.json, which a text-only study overrides
     cfg.setdefault("browse", True)
-    cfg.setdefault("artefact_plural", "draft website designs")
+    # The singular is known only for the default plural: a study of one concept that names its
+    # own "artefact_plural" names "artefact" too (init_study.py refuses it otherwise).
+    cfg.setdefault("artefact", None if "artefact_plural" in cfg else DEFAULT_ARTEFACT[0])
+    cfg.setdefault("artefact_plural", DEFAULT_ARTEFACT[1])
     for k in ("limits", "runners", "synthesis"):
         cfg.setdefault(k, {})
     cfg.setdefault("concepts", [])
     cfg["_dir"] = study_dir
     check_study(cfg)
     apply_materials(cfg, asked_to_browse)
+    apply_kinds(cfg, asked_to_browse)
+
+    def resolved(path):
+        p = Path(path).expanduser()
+        return (p if p.is_absolute() else study_dir / p).resolve()
+
     for c in cfg["concepts"]:
-        p = Path(c["path"]).expanduser()
-        c["_path"] = (p if p.is_absolute() else study_dir / p).resolve()
+        if "path" in c:
+            c["_path"] = resolved(c["path"])
+        if "files" in c:
+            c["_files"] = [resolved(f) for f in c["files"]]
     if cfg["factors"][-1]["key"] != "overall":
         raise SystemExit("study.json: the last factor must be 'overall'")
     return cfg
@@ -404,8 +496,14 @@ def check_study(cfg: dict):
         _fail('"runner" must be a runner name')
     if not isinstance(cfg["browse"], bool):
         _fail('"browse" must be true or false: whether panellists may open pages with agent-browser')
+    for key in ("artefact", "artefact_plural"):
+        if cfg[key] is not None and not (isinstance(cfg[key], str) and cfg[key].strip()):
+            _fail(f'"{key}" must be a few words for what is reviewed, such as "{DEFAULT_ARTEFACT[key == "artefact_plural"]}"')
     if cfg["type"] == "review" and not cfg["concepts"]:
         _fail("a review study needs at least one concept")
+    check_concepts(cfg)
+    check_personas(cfg)
+    check_capture(cfg)
     keys = model_keys(cfg)
 
     limits = cfg["limits"]
@@ -458,6 +556,437 @@ def check_study(cfg: dict):
                   "out, and put what the jobs need (the decisions and constraints that apply now) in a file of "
                   "its own")
     variants(cfg)
+
+
+def name_problem(name) -> str | None:
+    """Why a configured string cannot be one part of a file or folder name, else None. It names a
+    file or a folder, so it must stay in the folder it is put in: a string with no slash, no
+    backslash and no control character, that does not begin with a dot (".." is the folder above)
+    or with a hyphen (a tool given the name would read an option), and with no space at either
+    end."""
+    return None if isinstance(name, str) and NAME_PART.fullmatch(name) and name == name.strip() else NAME_RULE
+
+
+def persona_id_problem(pid) -> str | None:
+    """Why a string cannot be a persona id, else None, as the end of a sentence about it. An id
+    names the persona's files, so it is one part of a file name (name_problem()), and it holds no
+    hyphen: a persona file is <id>-<slug>--<key>.md and a run id <id>-<key>, and both are read
+    back by their first hyphen (FILE_RE). The one rule for study.json and for a roster file."""
+    if name_problem(pid):
+        return f"{NAME_RULE}, because it names the persona's files"
+    if "-" in pid:
+        return ("cannot hold a hyphen, because the persona file is named <id>-<slug>--<key>.md and is read back by "
+                "its first hyphen")
+    return None
+
+
+def check_personas(cfg: dict):
+    """Validate what of each persona names files: its id (the persona file, the run prompt, the
+    scratch folder and the logs are named after it) and its slug, given as "slug" or made from
+    its name. Two personas with one id would write the same files, each over the other's."""
+    people = cfg.get("personas") or []
+    if not isinstance(people, list) or not all(isinstance(p, dict) for p in people):
+        _fail('"personas" must be a list of objects')
+    seen = set()
+    for p in people:
+        pid = p.get("id")
+        if persona_id_problem(pid):
+            _fail(f"the persona id {json.dumps(pid)} {persona_id_problem(pid)}")
+        if pid.lower() in seen:
+            _fail(f'two personas have the id "{pid}". Ids must be unique, ignoring case, because they name files')
+        seen.add(pid.lower())
+        if p.get("slug") and name_problem(p["slug"]):
+            _fail(f'persona {pid}: its "slug" {json.dumps(p["slug"])} {name_problem(p["slug"])}, because it is '
+                  "part of the persona file's name")
+        name = p.get("name")  # a skeleton, with no name yet, is init_study.py's to refuse
+        if not p.get("slug") and isinstance(name, str) and name.strip() and not slugify(name):
+            _fail(f"persona {pid}: its name {json.dumps(name, ensure_ascii=False)} has no letter from a to z and no "
+                  'digit to make its file name from. Give it a "slug" of such letters, digits and hyphens, for '
+                  'example "slug": "persona-one"')
+
+
+def check_capture(cfg: dict):
+    """Validate study.json "capture": its values are sizes and counts that capture.py hands to the
+    browser, ImageMagick and Poppler as arguments, so each must be the number or the words it
+    stands for."""
+    cap = cfg.get("capture", {})
+    if not isinstance(cap, dict):
+        _fail('"capture" must be an object')
+    for key in ("max_screens", "max_pdf_pages", "pdf_pixels"):
+        if key in cap and not _positive(cap[key], whole=True):
+            _fail(f"capture.{key} must be a whole number, 1 or more")
+    for key in ("mobile_screens_home", "mobile_screens_other"):
+        if key in cap and not (isinstance(cap[key], int) and not isinstance(cap[key], bool) and cap[key] >= 0):
+            _fail(f"capture.{key} must be a whole number, 0 or more")
+    for key in ("desktop", "mobile"):
+        if key in cap and not (isinstance(cap[key], list) and len(cap[key]) == 2
+                               and all(_positive(v, whole=True) for v in cap[key])):
+            _fail(f"capture.{key} must be [width, height] in pixels")
+    media = cap.get("media", "")
+    if not isinstance(media, str) or not all(re.fullmatch(r"[a-z][a-z-]*", word) for word in media.split()):
+        _fail('capture.media must be words such as "light" or "light reduced-motion"')
+
+
+def concept_kind(c: dict) -> str:
+    return c.get("kind", "site")
+
+
+def url_pages(c: dict) -> list[dict]:
+    """The pages of a "url" concept, [{"name", "url"}, ...], home page first: its "pages", or its
+    one "url" as the page "index"."""
+    return c["pages"] if "pages" in c else [{"name": "index", "url": c["url"]}]
+
+
+def check_concepts(cfg: dict):
+    """Validate the shape of every concept for its kind. Whether a folder or a file exists is
+    checked when it is needed (init_study.py, capture.py), so that an archived study, whose
+    sources may be gone, still loads."""
+    concepts = cfg["concepts"]
+    if not isinstance(concepts, list) or not all(isinstance(c, dict) for c in concepts):
+        _fail('"concepts" must be a list of objects')
+    seen = set()
+    for c in concepts:
+        cid = c.get("id")
+        if not (isinstance(cid, str) and cid.strip()):
+            _fail(f'every concept needs an "id": {json.dumps(c)} has none')
+        if name_problem(cid) or "--" in cid:
+            _fail(f'the concept id {json.dumps(cid)} {name_problem(cid) or "must not contain two hyphens in a row"}, '
+                  "because the archive names a folder after it, and its screenshots <id>--<page>")
+        if cid.lower() in seen:
+            _fail(f'two concepts have the id "{cid}". Ids must be unique, ignoring case, because key.md, the '
+                  "labels and the archive's folders go by them")
+        seen.add(cid.lower())
+        where, kind = f"concept {cid}:", concept_kind(c)
+
+        def text(key):
+            return isinstance(c.get(key), str) and bool(c[key].strip())
+
+        def only(*allowed):
+            for key in ("path", "url", "pages", "files"):
+                if key in c and key not in allowed:
+                    hint = (f'. Add "kind": "{"url" if key in ("url", "pages") else "files"}" if that is what it is'
+                            if kind == "site" and "kind" not in c else "")
+                    _fail(f'{where} "{key}" does not belong to a concept of kind "{kind}"{hint}')
+
+        def states(pages=None):
+            """Check the concept's states, each of which capture.py writes to the folder
+            <page>@<name>. pages: the names of the concept's pages, when study.json gives them."""
+            listed, folders = c.get("states", []), set()
+            if not isinstance(listed, list) or not all(isinstance(st, dict) for st in listed):
+                _fail(f'{where} "states" must be a list of {{"name", "page", "js"}} objects')
+            for st in listed:
+                name, page = st.get("name"), st.get("page", "index")
+                if not (isinstance(name, str) and PAGE_NAME.fullmatch(name)):
+                    _fail(f"{where} the state name {json.dumps(name)} must be letters, digits, hyphens and "
+                          "underscores only, because it names a folder that panellists see")
+                if not isinstance(page, str) or (pages is not None and page not in pages):
+                    _fail(f"{where} a state names the page {json.dumps(page)}, which is not one of its pages"
+                          + (f" ({', '.join(pages)})" if pages else ""))
+                if not (isinstance(st.get("js"), str) and st["js"].strip()):
+                    _fail(f'{where} the state "{name}" needs "js": the script that sets it on the page')
+                if (page, name) in folders:
+                    _fail(f'{where} two states of the page "{page}" have the name "{name}", and each is captured '
+                          "to a folder of that name")
+                folders.add((page, name))
+
+        if kind not in KINDS:
+            _fail(f'{where} unknown "kind" {json.dumps(kind)} (use {", ".join(KINDS[:-1])} or {KINDS[-1]})')
+        if kind == "site":
+            only("path")
+            if not text("path"):
+                _fail(f'{where} a site concept needs "path": the folder that holds its index.html')
+            states()
+        elif kind == "url":
+            only("url", "pages")
+            if ("url" in c) == ("pages" in c):
+                _fail(f'{where} a url concept needs "pages": [{{"name": "index", "url": "https://..."}}, ...], '
+                      'or "url" alone for a concept of one page, and not both')
+            if "url" in c and not text("url"):
+                _fail(f'{where} "url" must be an address')
+            pages = url_pages(c)
+            if not isinstance(pages, list) or not pages or not all(
+                    isinstance(p, dict) and set(p) == {"name", "url"} and all(isinstance(v, str) for v in p.values())
+                    for p in pages):
+                _fail(f'{where} "pages" must be a list of {{"name", "url"}} objects, the home page first')
+            names = [p["name"] for p in pages]
+            for name in names:
+                if not PAGE_NAME.fullmatch(name):
+                    _fail(f'{where} the page name {json.dumps(name)} must be letters, digits, hyphens and '
+                          "underscores only, because it names a folder that panellists see")
+            if names[0] != "index":
+                _fail(f'{where} its first page must be the home page, named "index" (it is "{names[0]}"): the '
+                      "instructions tell panellists that the home page is always index")
+            if len(set(names)) < len(names):
+                _fail(f"{where} two pages have the same name")
+            for p in pages:
+                try:
+                    parts = urlsplit(p["url"])
+                    ok = parts.scheme in ("http", "https") and bool(parts.hostname)
+                except ValueError:
+                    ok = False
+                if not ok:
+                    _fail(f'{where} the address of page "{p["name"]}", {json.dumps(p["url"])}, must be a full '
+                          "http:// or https:// URL. A folder of HTML files is a site concept, with \"path\"")
+            states(names)
+        else:
+            only("path", "files")
+            if ("path" in c) == ("files" in c):
+                _fail(f'{where} a files concept needs "files": the images and PDFs in the order to go through '
+                      'them, or "path": a folder whose images and PDFs are taken in name order, and not both')
+            if "path" in c and not text("path"):
+                _fail(f'{where} "path" must be a folder')
+            if "files" in c:
+                files = c["files"]
+                if not isinstance(files, list) or not files or not all(isinstance(f, str) and f.strip() for f in files):
+                    _fail(f'{where} "files" must be a list of file paths, in the order to go through them')
+                for f in files:
+                    if Path(f).suffix.lower() not in (*IMAGE_TYPES, *DOCUMENT_TYPES):
+                        _fail(f'{where} "{f}" is not a file type a panel can review. {SUPPORTED_FILES}')
+                if cfg["materials"] == "text" and not any(Path(f).suffix.lower() in DOCUMENT_TYPES for f in files):
+                    _fail(f"{where} {NO_TEXT}")
+            if c.get("states"):
+                _fail(f'{where} "states" run a script on a page, and a files concept has no page to run one on')
+    pinned = cfg.get("labels")
+    if pinned:  # {label: concept id}, in place of the shuffle (label_map())
+        if not isinstance(pinned, dict):
+            _fail('"labels" must be an object, {label: concept id}')
+        for label in pinned:
+            if not LABEL.fullmatch(label):
+                _fail(f"labels: the label {json.dumps(label)} must be letters and digits only, because it names a "
+                      'folder and is what a panellist writes after "Concept"')
+        if len({label.lower() for label in pinned}) < len(pinned):
+            _fail("labels: two labels differ only in case, and each names a folder")
+        if sorted(map(str, pinned.values())) != sorted(c["id"] for c in concepts):
+            _fail(f"labels: every concept id needs one label, and no label another id (ids: "
+                  f"{', '.join(c['id'] for c in concepts)})")
+
+
+SUPPORTED_FILES = (f"Images: {', '.join(t[1:] for t in IMAGE_TYPES)}. Documents: "
+                   f"{', '.join(t[1:] for t in DOCUMENT_TYPES)}.")
+NO_TEXT = ('it has only images, and a text-only study ("materials": "text") reads text alone. Give it a PDF, take '
+           'the concept out, or review it with "materials": "full"')
+
+
+def apply_kinds(cfg: dict, asked_to_browse: bool):
+    """Set what follows from the concepts' kinds, and cfg["_browse_off"]: why the study does not
+    browse although study.json did not say "browse": false, for the plan to say, else None.
+
+    "url": the study has a "url" concept and study.json does not say "browse": true. A live page
+    is opened by panellists only when the study sets it. "files": every concept is of kind
+    "files", which has nothing to open, so the study never browses whatever "browse" says. A
+    text-only study has its own reason (apply_materials) and none here.
+    """
+    kinds = {concept_kind(c) for c in cfg["concepts"]}
+    cfg["_browse_off"] = None
+    if cfg["materials"] == "text" or not cfg["browse"]:
+        return
+    if kinds == {"files"}:
+        cfg["_browse_off"], cfg["browse"] = "files", False
+    elif "url" in kinds and not asked_to_browse:
+        cfg["_browse_off"], cfg["browse"] = "url", False
+
+
+def natural(name: str) -> list:
+    """A sort key that puts screen-9 before screen-10."""
+    return [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", name)]
+
+
+def concept_items(cfg: dict, c: dict) -> tuple[list[tuple[str, Path]], list[Path]]:
+    """The items of a "files" concept, [(folder name, source file), ...] in the order to go
+    through them, and the files left out: the images, in a text-only study, which reads text.
+
+    Folder names are item-01, item-02 and so on, never the file names, which would leak intent
+    as a concept's folder name does. Exits, naming the concept, when its folder or one of its
+    files is missing, when a file is of no supported type, or when nothing is left to review.
+    """
+    where = f"Concept {c['id']}:"
+    if "_files" in c:
+        files = c["_files"]
+    else:
+        folder = c["_path"]
+        if not folder.is_dir():
+            raise SystemExit(f"{where} no folder {folder}")
+        files = sorted((f for f in folder.iterdir() if f.is_file()
+                        and f.suffix.lower() in (*IMAGE_TYPES, *DOCUMENT_TYPES)), key=lambda f: natural(f.name))
+        if not files:
+            raise SystemExit(f"{where} no image or PDF in {folder}. {SUPPORTED_FILES}")
+    for f in files:
+        if not f.is_file():
+            raise SystemExit(f"{where} no file {f}")
+        if f.suffix.lower() not in (*IMAGE_TYPES, *DOCUMENT_TYPES):
+            raise SystemExit(f"{where} {f.name} is not a file type a panel can review. {SUPPORTED_FILES}")
+    text_only = cfg["materials"] == "text"
+    kept = [f for f in files if not text_only or f.suffix.lower() in DOCUMENT_TYPES]
+    if not kept:
+        raise SystemExit(f"{where} {NO_TEXT}.")
+    return [(f"item-{i:02d}", f) for i, f in enumerate(kept, start=1)], [f for f in files if f not in kept]
+
+
+def concept_pages(cfg: dict, c: dict, site: Path | None = None) -> list[str] | None:
+    """The names of a concept's page folders under panel/materials, without its states: the
+    HTML files of a site (of the folder site, default its source), the page names of a url
+    concept, the items of a files concept. None when the source cannot be read yet."""
+    kind = concept_kind(c)
+    if kind == "url":
+        return [p["name"] for p in url_pages(c)]
+    try:
+        if kind == "files":
+            return [name for name, _ in concept_items(cfg, c)[0]]
+        return sorted(p.stem for p in (site or c["_path"]).glob("*.html"))
+    except SystemExit:
+        return None
+
+
+def concept_folders(cfg: dict, c: dict, site: Path | None = None) -> list[str] | None:
+    """The name of every folder capture.py makes for a concept under panel/materials: its pages
+    (concept_pages()) and <page>@<state> for each state of a page it has. None when the source
+    cannot be read yet. capture.py captures these and removes any other, and the plan holds a
+    run back until each one is there (launch_plan.materials())."""
+    pages = concept_pages(cfg, c, site)
+    if pages is None:
+        return None
+    return pages + [f"{st.get('page', 'index')}@{st['name']}" for st in c.get("states", [])
+                    if st.get("page", "index") in pages]
+
+
+def source_problem(cfg: dict, c: dict) -> str | None:
+    """Why a concept cannot be scaffolded or captured as its source stands, else None: a site
+    folder with no index.html or with a page file whose name cannot name a folder, or what
+    concept_items() says of a "files" concept. A url concept has no source to read."""
+    kind = concept_kind(c)
+    if kind == "site" and not (c["_path"] / "index.html").exists():
+        return f"Concept {c['id']}: no index.html in {c['_path']}"
+    if kind == "site":  # a page is captured to a folder named after its file: "...html" would be the folder above
+        odd = sorted(p.name for p in c["_path"].glob("*.html") if name_problem(p.stem))
+        if odd:
+            return (f"Concept {c['id']}: the page file {json.dumps(odd[0])} in {c['_path']} cannot be captured, "
+                    f"because its capture goes to a folder of that name, which {NAME_RULE}. Rename it")
+    if kind == "files":
+        try:
+            concept_items(cfg, c)
+        except SystemExit as err:
+            return str(err)
+    return None
+
+
+def poppler_needed(cfg: dict) -> tuple[list[str], list[str]]:
+    """(the Poppler tools capture.py needs for this study's PDFs, the ids of the concepts that
+    have one): pdftotext for the text, and pdftoppm for the page images of a full-materials
+    study. Both empty when no concept has a PDF that can be found."""
+    with_pdf = []
+    for c in cfg["concepts"]:
+        if concept_kind(c) == "files":
+            try:
+                items = concept_items(cfg, c)[0]
+            except SystemExit:
+                continue
+            if any(f.suffix.lower() in DOCUMENT_TYPES for _, f in items):
+                with_pdf.append(c["id"])
+    tools = ["pdftotext", *(["pdftoppm"] if cfg["materials"] == "full" else [])] if with_pdf else []
+    return tools, with_pdf
+
+
+def poppler_missing(cfg: dict) -> str | None:
+    """What to tell the lead when the study has a PDF to capture and Poppler is not installed,
+    else None."""
+    tools, with_pdf = poppler_needed(cfg)
+    missing = [t for t in tools if not shutil.which(t)]
+    if not missing:
+        return None
+    return (f"Poppler is required for the {agree(len(with_pdf), 'PDF')} of {agree(len(with_pdf), 'concept')} "
+            f"{', '.join(with_pdf)}: {' and '.join(missing)} {agree(len(missing), 'is', 'are')} not on PATH. "
+            "Install Poppler (the package is poppler-utils on Debian and Ubuntu, poppler on Homebrew and Arch)")
+
+
+KIND_NAMES = {"site": "site", "url": "live URL", "files": "files"}  # how the lead's files name a concept's kind
+
+
+def read_forms(study_dir: Path) -> dict[str, str]:
+    """The forms record, forms.json: {concept id: form} for the "files" concepts whose form was
+    known when it was written. Empty when there is none, as in a study scaffolded before the
+    record existed, and an entry that is not one of FILE_FORMS is left out."""
+    try:
+        held = json.loads((Path(study_dir) / FORMS).read_text())
+    except (OSError, ValueError):
+        return {}
+    return {cid: form for cid, form in held.items() if form in FILE_FORMS} if isinstance(held, dict) else {}
+
+
+def file_forms(cfg: dict) -> dict[str, str]:
+    """{concept id: form} for each "files" concept whose form is known: "image files", "PDF
+    files" or "image and PDF files", worked out from its source files (the images a text-only
+    study leaves out among them), or taken from the forms record when they can no longer be read,
+    as in an archived round or once the sources have moved."""
+    recorded, forms = read_forms(cfg["_dir"]), {}
+    for c in cfg["concepts"]:
+        if concept_kind(c) != "files":
+            continue
+        try:
+            kept, left_out = concept_items(cfg, c)
+        except SystemExit:
+            if c["id"] in recorded:
+                forms[c["id"]] = recorded[c["id"]]
+            continue
+        pdf = {f.suffix.lower() in DOCUMENT_TYPES for f in [*(f for _, f in kept), *left_out]}
+        forms[c["id"]] = " and ".join(["image"] * (False in pdf) + ["PDF"] * (True in pdf)) + " files"
+    return forms
+
+
+def write_forms(study_dir: Path, forms: dict[str, str]):
+    """Write the forms record of a study directory, or of an archive of one: file_forms() as it
+    stands. With no form to record the file is removed, so none outlives the concepts it was for.
+    Lead only, like key.md: it sits beside study.json and never under panel/."""
+    path = Path(study_dir) / FORMS
+    if forms:
+        write_atomic(path, json.dumps(forms, indent=2) + "\n")
+    else:
+        path.unlink(missing_ok=True)
+
+
+def concept_forms(cfg: dict) -> dict[str, str]:
+    """{label: the form the concept reached the panel in}, in label order: "site", "live URL", and
+    for a "files" concept what file_forms() knows of it, "image files", "PDF files" or "image and
+    PDF files" ("files" when neither its source nor the forms record can say). For the lead's
+    files only: a panellist is never told what a concept is made of beyond what its folders show."""
+    known = file_forms(cfg)
+    return {label: known.get(c["id"], KIND_NAMES[concept_kind(c)]) if concept_kind(c) == "files"
+            else KIND_NAMES[concept_kind(c)] for label, c in label_map(cfg).items()}
+
+
+def mixed_forms(cfg: dict) -> dict[str, str] | None:
+    """concept_forms() when the concepts did not all reach the panel in one form, else None. A
+    site and a live URL are captured the same way, as sheets and page text, and count as one
+    form. A PDF, an image and a captured page do not: a file cannot be scrolled or clicked and
+    shows a phone only if it holds one, so part of any difference in score is the format. In a
+    text-only study every concept reached the panel as text, and no factor that needs the design
+    is scored, so it has one form."""
+    forms = concept_forms(cfg)
+    paged = (KIND_NAMES["site"], KIND_NAMES["url"])
+    mixed = len({"pages" if form in paged else form for form in forms.values()}) > 1
+    return forms if mixed and cfg["materials"] != "text" else None
+
+
+def form_caution(cfg: dict) -> dict | None:
+    """What the analysis and the briefs say of a study whose concepts differ in form
+    (mixed_forms()), else None: "forms" (label -> form), "concepts", the same in a phrase ("A is
+    a live URL and B is PDF files"), "factors", the labels of the scored factors that need the
+    design ("needs_design"), which a format moves most, and "exposed", the clause that names them."""
+    forms = mixed_forms(cfg)
+    if not forms:
+        return None
+    named = [f"{label} is {'a ' if form in (KIND_NAMES['site'], KIND_NAMES['url']) else ''}{form}"
+             for label, form in forms.items()]
+    factors = [f["label"] for f in cfg["factors"] if needs_design(f)]
+    listed = ", ".join(factors[:-1]) + (" and " if factors[:-1] else "") + (factors[-1] if factors else "")
+    return {"forms": forms, "concepts": ", ".join(named[:-1]) + " and " + named[-1], "factors": factors,
+            "exposed": (f"{listed} {agree(len(factors), 'is the factor', 'are the factors')} most exposed" if factors
+                        else "Any score that turns on how a concept looks or behaves is exposed")}
+
+
+def single_concept(cfg: dict) -> bool:
+    """Whether the study has one concept: there is then nothing to rank or compare, so the
+    templates ask for no ranking and no score summary, and the checks and analysis expect none."""
+    return len(cfg["concepts"]) == 1
 
 
 def study_brief_copy(study_dir: Path, files) -> Path | None:
@@ -533,11 +1062,15 @@ def apply_materials(cfg: dict, asked_to_browse: bool):
     cfg["fit_factors"], cfg["browse"] = fit, False
 
 
-def sites_dir(cfg: dict) -> Path:
-    """Where the neutral copies of the concepts are: panel/sites, where a panellist may open a
-    page in the browser, or <study>/sites for a text-only study, whose panellists must not be
-    able to open a page or its source. Runs work in panel/, and read nothing outside it."""
-    return cfg["_dir"] / ("sites" if cfg["materials"] == "text" else "panel/sites")
+def sites_dir(cfg: dict, used: bool = True) -> Path:
+    """Where the neutral copies of the "site" concepts are: panel/sites in a study whose
+    panellists browse, which is where a run opens a page from, and <study>/sites in every other.
+    A copy is the page source under its own file names, and a run may read anything under
+    panel/, so it is there only while the browser needs it. cfg["browse"] alone decides:
+    load_study() has turned it off for a text-only study, for a "url" concept without "browse":
+    true, and for a study of files alone. used=False gives the other of the two folders, where a
+    scaffold made under the other setting left its copies: init_study.py clears it."""
+    return cfg["_dir"] / ("panel/sites" if cfg["browse"] == used else "sites")
 
 
 def factor_keys(cfg: dict) -> list[str]:
@@ -691,6 +1224,22 @@ def review_order(cfg: dict, pid: str, labels: list[str]) -> list[str]:
     order = list(labels)
     random.Random(f"{cfg['seed']}:order:{variants(cfg).get(pid, pid)}").shuffle(order)
     return order
+
+
+def shared_order(cfg: dict) -> str | None:
+    """What to tell the lead when every persona reviews in the same order, else None. The seeded
+    shuffle can land two or three personas on one order, and order is then confounded with
+    concept: whatever is read first is always the same concept. A variant takes its parent's
+    order on purpose, so variants are not counted, and one concept has no order."""
+    labels, own = list(label_map(cfg)), [p["id"] for p in cfg["personas"] if p["id"] not in variants(cfg)]
+    orders = {tuple(review_order(cfg, pid, labels)) for pid in own}
+    if len(labels) < 2 or len(own) < 2 or len(orders) > 1:
+        return None
+    return (f"every persona reviews in the same order ({', '.join(orders.pop())}), so order is confounded with "
+            "concept: the concept read first is the same for everyone, and the order effect in the analysis measures "
+            f'nothing. Set another "seed" in study.json (it is {json.dumps(cfg["seed"])}) and scaffold again '
+            "(init_study.py --force) before any run. A new seed reshuffles the labels too, unless study.json pins "
+            "them.")
 
 
 def slugify(name: str) -> str:

@@ -157,7 +157,7 @@ def capabilities() -> dict:
         ],
         "browse_gaps": [
             "With browsing on, the agent-browser CLI can open any file:// path the user can read "
-            "and save screenshots outside the working directory.",
+            "and any address on the network, and save screenshots outside the working directory.",
             "With browsing on, read-only shell commands inside the working directory (such as "
             "ls) run without being asked for.",
         ],

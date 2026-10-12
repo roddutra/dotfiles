@@ -75,7 +75,7 @@ import runners  # noqa: E402
 MESSAGE = "followup-message.md"  # what a panellist is sent: the question, word for word, inside this frame
 DRY_RUN = "Dry run: nothing was asked and nothing was recorded. Leave out --dry-run to ask."
 
-say, plural = launch.say, launch.plural
+say, agree, plural = launch.say, pl.agree, pl.plural
 
 
 def message(number: int, question: str, file: Path) -> str:
@@ -173,10 +173,10 @@ def allowance_lines(cfg: dict, fit: list[dict]) -> list[str]:
     for e in fit:
         group = capped if runners.get(e["runner"]).capabilities()["budget_cap"] else loose
         group.setdefault(e["runner"], []).append(e)
-    out = [f"  {'It' if len(fit) == 1 else 'Each'} has up to {limits['minutes']:g} min and "
+    out = [f"  {agree(len(fit), 'It', 'Each')} has up to {limits['minutes']:g} min and "
            f"{planning.money(limits['budget_usd'])} for this question (limits.followup), apart from its run limits"
-           + ("." if len(fit) == 1 else f": at most {planning.span(limits['minutes'] * 60 * len(fit))} of run time "
-              "between them.")]
+           + agree(len(fit), ".", f": at most {planning.span(limits['minutes'] * 60 * len(fit))} of run time "
+                               "between them.")]
     n = sum(map(len, capped.values()))
     if n:
         out.append(f"  At most {planning.money(limits['budget_usd'] * n)} for the {plural(n, 'run')} on "
@@ -186,7 +186,7 @@ def allowance_lines(cfg: dict, fit: list[dict]) -> list[str]:
     n = sum(map(len, loose.values()))
     if n:
         out.append(f"  No budget cap for the {plural(n, 'run')} on {planning.listed(list(loose))}: the harness "
-                   f"enforces none, so the time limit is what bounds {'it' if n == 1 else 'them'}.")
+                   f"enforces none, so the time limit is what bounds {agree(n, 'it', 'them')}.")
     out.append("  This is outside the plan's ceiling.")
     return out
 

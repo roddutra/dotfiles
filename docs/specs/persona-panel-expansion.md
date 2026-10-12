@@ -691,6 +691,170 @@ A concept gains an optional `kind`:
 - The existing capture checks (forbidden terms, leak terms) run on text from
   every kind.
 
+### Deviations decided during milestone 3
+
+Config:
+
+- **A `url` concept's pages are named:** `"pages": [{"name", "url"}, ...]`,
+  the first named `index`, or `"url"` alone for one page. A URL is `http` or
+  `https`. `states` work on them as on site pages.
+- **A `files` concept is `"files"`, an ordered list, or `"path"`, a folder**
+  whose images and PDFs are taken in natural name order (`screen-9` before
+  `screen-10`). Other files in the folder are ignored.
+- **Kinds can mix in one study.** Labels and orders are shuffled over all.
+- **Concept ids must be unique,** and a key that belongs to another kind is
+  refused with the `kind` it implies.
+- **A study with one concept needs `artefact`,** the singular of
+  `artefact_plural`, when it sets the plural. The default has both.
+- **Two capture settings:** `capture.max_pdf_pages` (default 20) and
+  `capture.pdf_pixels` (default 1600, the long side of a page image).
+
+Materials:
+
+- **A file is a folder `item-<NN>`,** numbered in reading order, never named
+  after the file. An image is `image.<type>`, a PDF is `page-<NN>.png` and
+  `page-text.txt`, set out as on the page, with a `[Page N]` line before each
+  page.
+- **A very tall image is also cut into overlapping `part-<NN>.png` pieces.**
+  The PRD said images as they are: the original is kept, but a full-page
+  export is shrunk by whatever reads it until its text is unreadable.
+  Panellists review it from the parts, and the default `haiku` note rules out
+  opening the whole image.
+- **A PDF past the page limit is cut, images and text alike,** with a loud
+  warning. A PDF with no text warns, and stops a text-only capture.
+- **Nothing is copied for `url` or `files` at scaffold time.** `capture.py`
+  reads the live page and the source files, and nothing but `key.md` holds a
+  file name or URL.
+- **`capture.py` removes page folders a concept no longer has,** when it
+  captures the whole concept, and keeps an earlier capture when a page
+  cannot be opened. It warns when a server answers 400 or above.
+- **A text-only study takes a `files` concept's PDFs and leaves its images
+  out.** A concept of images alone is refused.
+- **Poppler is checked by `init_study.py`, `capture.py` and `plan`.** The
+  first two stop, and the plan lists it as missing.
+
+Browsing:
+
+- **A study of `files` concepts alone never browses,** whatever `browse`
+  says.
+- **With `"browse": true` the instructions list each URL page's address,**
+  tell panellists to stay on those sites and to submit, buy, download or log
+  in to nothing, and to score from the materials when the live page differs.
+  A `files` concept is named as having nothing to open.
+- **Nothing limits the browser to those hosts.** The plan says so, names the
+  external hosts and the ones on this machine, and the Claude runner's
+  browsing gap now names network addresses beside `file://` paths.
+- **The instructions drop "They are drafts, not live"** when a study has a
+  `url` concept. The lead says which it is in `context_notes`.
+- **`init_study.py` makes `panel/scratch/<run id>/` for each run that may
+  browse,** and the instructions say to run each `agent-browser` command on
+  its own: a runner may allow that command and no other. This changes the
+  scaffold of a study of sites that browses.
+
+Single-concept studies:
+
+- **The persona file has no "Review order" row,** `key.md` no review orders,
+  and the concept template carries the label itself.
+- **`rankings.csv` is the header alone,** whatever a panellist wrote.
+- **`analyze.py` reports "Scores"** (mean, median, SD, lowest and highest of
+  each factor) in the leaderboard's place, every factor by segment and by
+  model, and model agreement on the one concept: the mean absolute
+  difference between a persona's runs on two models, and the Spearman across
+  their factor scores. `quant.json` has `concept` and `scores`, and no
+  `leaderboard` or `order`.
+- **`quant.json` never holds `NaN`,** in any study: a value that could not be
+  computed is `null`, so a strict JSON reader can load the file.
+- **The briefs take three new placeholders:** `<REVIEWED>` (in place of the
+  count, labels and plural), `<ONE_CONCEPT_NOTE>` and `<KINDS_NOTE>`, filled
+  from `assets/*-brief-one.md` and `assets/brief-kinds-*.md`.
+- **Counts in the briefs are placeholders with their noun,** so one persona
+  or one model reads right: `<PERSONAS>`, `<MODELS>`, `<RUNS>`,
+  `<OWN_PERSONAS>` and `<FILES>` replace `<N_PERSONAS>`, `<N_MODELS>`,
+  `<N_RUNS>`, `<PERSONA_RANGE>` and `<N_FILES>`.
+
+Plan and archive:
+
+- **The plan lists each concept's kind, when a live page was captured,** a
+  concept with nothing captured, a source the scaffold or the capture will
+  refuse (a folder of images alone in a text-only study, a file that is
+  gone), and a folder under `panel/materials` that belongs to no concept. It
+  notes that Mobile is a guess for `files` concepts, and that the token
+  estimate is one too.
+- **The plan counts a PDF as a PDF with its pages and an image as one
+  image.** The estimate before a pilot multiplies the method's figure per
+  page by what a run opens: each web page, PDF page and supplied image.
+- **`run`, `pilot` and `resume` start no panellist run while a concept has
+  nothing captured,** and name the concept and `capture.py` as the plan
+  does. Analyst and writer jobs are not held back.
+- **`archive.py --concepts` copies a `files` concept's files** and takes no
+  screenshot of them. For a `url` it copies nothing: `key.md` has the
+  addresses, and `snapshot.py --url` screenshots the live page as it is at
+  archive time, skipping one that cannot be opened.
+- **A second example, `assets/study.files.example.json`:** one concept made
+  of files.
+
+Found in the first real run on two vendors:
+
+- **Concepts of different forms get a format caution.** A form is a captured
+  page (site or URL), image files or PDF files, so a PDF beside a screenshot
+  counts though both are `files`. `quant.md` says so above "Key numbers" and
+  under "By factor", naming each concept's form and the `needs_design`
+  factors, `quant.json` has `forms`, and the briefs add
+  `assets/brief-kinds-mixed.md`. A text-only study gets none.
+- **`init_study.py` and the plan warn when every persona reviews in the same
+  order,** variants apart, and suggest another `seed`. The shuffle is
+  unchanged, so existing studies keep their orders.
+- **`resume` names a section written without its score row** and asks for
+  the score table to be added to it, with nothing else changed.
+- **`archive.py --concepts` says, for each `url` concept, how many pages were
+  screenshotted and how many skipped.** It calls `snapshot.take()` in place
+  of running `snapshot.py`.
+- **One helper makes every counted sentence agree:** `agree()` and its
+  counted form `plural()` in `panel_lib.py`. "N of M runs complete" is "1 of
+  1 run complete" for one run.
+
+Found in review:
+
+- **Site copies are in `panel/sites/` only when panellists browse.** A copy
+  is page source under its own file names, so every other study (`"browse":
+  false`, a `url` concept without `"browse": true`, a text-only study) keeps
+  them in `<study>/sites/`. `init_study.py --force` moves them when `browse`
+  changes, and the plan notes copies left in the wrong place.
+- **Names that become paths are validated when `study.json` is loaded:**
+  state names (the page-name rule), concept ids, persona ids and slugs (one
+  part of a file name, with no leading dot or hyphen), and pinned `labels`
+  (letters and digits, one for every concept). Concept ids and persona ids
+  are unique ignoring case, a concept id has no `--`, and two states of a
+  page cannot share a name. `capture` settings must be numbers and words.
+  A persona id holds no hyphen, the rule `roster.py` already had, and a
+  persona whose name gives an empty slug needs a `"slug"`.
+- **`capture.py` checks every path it fills or deletes** resolves inside
+  `panel/materials`, and refuses before touching anything. A site page file
+  whose name cannot name a folder stops the scaffold.
+- **A page or item is captured whole or not at all.** Each is captured in
+  `<study>/.capture-*/` and moved into place on success. A failure leaves an
+  earlier capture as it was, the rest are captured, and `capture.py` exits
+  non-zero with every failure. An address that cannot be opened no longer
+  stops the capture. A killed capture's scratch folder is settled and
+  removed by the next one, and is never archived: a move into place that was
+  under way is recorded there, and the next capture finishes it or puts the
+  earlier capture back, so an earlier capture is never lost with the folder.
+- **The plan and `run` need every page, state and item,** not one folder per
+  concept: a page folder counts with its `page-text.txt`, an image item with
+  its image. `plan --json` has `materials.incomplete`.
+- **External tools get no name from `study.json`.** ImageMagick runs in the
+  folder it writes to, with file names the script chose, and Poppler and
+  `agent-browser` get absolute paths. `snapshot.py` refuses two pages that
+  would share a file name, and a `--url` that is not `http`, `https` or
+  `file`.
+- **`archive.py --concepts` names each copied file `item-<NN>-<its name>`,**
+  so files of one name from different folders are all kept, and says when it
+  replaces an earlier archive's file of other content.
+- **`forms.json`, beside `key.md`, records each `files` concept's form.**
+  `init_study.py` and `capture.py` write it, `archive.py` carries it, and the
+  analysis reads it when the source files are gone, so an archived PDF beside
+  an image keeps its format caution.
+
 ## Part 5: A runner for OpenAI-compatible endpoints
 
 A third runner, for Pi, reaches any OpenAI-compatible endpoint and other

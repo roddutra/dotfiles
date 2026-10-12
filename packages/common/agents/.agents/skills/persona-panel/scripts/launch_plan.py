@@ -5,6 +5,9 @@ knows no harness: everything about one comes from its runner's capabilities() an
 
     unfit(cfg, entry)             why a run or job cannot be started on its runner as study.json
                                   has it. The same judgement stops "plan" and "run"
+    materials(cfg)                what is captured under panel/materials, per concept and in all
+    no_materials(cfg, mat)        why no panellist run may start as the materials stand. The
+                                  plan lists it as missing, and "run" refuses on it
     usage_of(entry)               a run's own usage: its sessions' totals, less its follow-ups
     followup_usage(entry)         what the follow-up questions put to a run used
     unallocated(entry)            what a follow-up reported in one total with a process of the
@@ -42,17 +45,23 @@ left out of the mean tokens and cost of its model key, and the plan says how man
 from __future__ import annotations
 
 import os
+import re
+import time
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import panel_lib as pl
 import runners
 
 # references/method.md, "Budget": images dominate a run's context, at roughly 20k tokens per
-# concept page reviewed. It is the size of the context a run builds up, not the tokens a
-# harness bills (every turn reads the context again), so it stands in only until a pilot has
-# measured the real figure.
+# concept page reviewed. It was measured on captured web pages, each read as its sheets and its
+# page text, and it is the size of the context a run builds up, not the tokens a harness bills
+# (every turn reads the context again). The estimate multiplies it by what a run opens
+# (folder_counts(), "opens"), where a page of a PDF and a supplied image each count as one such
+# page: nothing has measured those, so it stands in only until a pilot has measured the real figure.
 TOKENS_PER_CONCEPT_PAGE = 20_000
 
-IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+IMAGE_TYPES = pl.IMAGE_TYPES
 TO_GO = ("pending", "running", "partial", "blocked", "failed")  # a limited run starts again only with --extend
 FIGURES = ("input_tokens", "output_tokens", "cached_tokens", "cost_usd", "duration_s")
 LIST_PRICE = ("Dollar figures are list-price equivalents: under a subscription login nothing is charged per "
@@ -68,8 +77,7 @@ STOPPED = ("a process the launcher stops, at its time limit or by the stop comma
 
 # ---------------------------------------------------------------- wording
 
-def plural(n: int, noun: str) -> str:
-    return f"{n:,} {noun}{'' if n == 1 else 's'}"
+agree, plural = pl.agree, pl.plural  # number agreement, the same in every script
 
 
 def money(x) -> str:
@@ -88,15 +96,15 @@ def listed(words: list[str]) -> str:
 
 
 def attempts_named(numbers: list[int]) -> str:
-    return f"attempt{'' if len(numbers) == 1 else 's'} {listed([str(n) for n in numbers])}"
+    return f"{agree(len(numbers), 'attempt')} {listed([str(n) for n in numbers])}"
 
 
 def earlier_sessions(n: int) -> str:
     """What the plan, "status" and "purge-sessions" say of the sessions that the runs replaced by
     init_study.py --force left with their harnesses (the earlier-sessions record, panel_lib.py)."""
-    return (f"{plural(n, 'harness session')} of an earlier scaffold of this study {'is' if n == 1 else 'are'} "
+    return (f"{plural(n, 'harness session')} of an earlier scaffold of this study {agree(n, 'is', 'are')} "
             f"still on record in {pl.EARLIER_SESSIONS}: init_study.py --force replaced the runs that started "
-            f"{'it' if n == 1 else 'them'}.")
+            f"{agree(n, 'it', 'them')}.")
 
 
 def purge_hint(sd) -> str:
@@ -167,33 +175,198 @@ def lacks(cfg: dict, entry: dict, caps: dict) -> list[dict]:
 
 # ---------------------------------------------------------------- materials
 
+COUNTS = ("folders", "pages", "pdfs", "pdf_pages", "images", "parts", "opens", "text_files", "bytes", "text_bytes")
+PDF_PAGE = re.compile(r"page-\d+\.png")
+PAGE_MARK = re.compile(r"^\[Page \d+\]$", re.M)
+
+
+def captured_folder(folder: Path) -> bool:
+    """Whether a page or item folder holds what a run reviews it from: its page text, or the
+    image itself for an item that is an image. A folder with neither is no capture, whatever
+    else it holds: capture.py puts a folder in place whole, so one like that was not made by it."""
+    return (folder / "page-text.txt").is_file() or any(
+        f.is_file() and f.name.startswith("image.") for f in folder.iterdir())
+
+
+def folder_counts(folder: Path, filed: bool) -> dict:
+    """What one captured folder of a concept's materials holds, as the counts materials() adds
+    up. It is one of three things. A PDF: "pdfs" 1 and "pdf_pages" its page images, or the "[Page N]"
+    lines of its text in a text-only study, which has no image (filed: the folder is an item of
+    a "files" concept). A supplied image: "images" 1, and "parts" the pieces a tall one was also
+    cut into, which are the same image again. A captured web page or state: "pages" 1 and
+    "images" every image file of it, sheets and raw screens alike.
+    "opens" is what the unmeasured estimate counts: a web page, a PDF page and a supplied image
+    are each one thing a run opens."""
+    names = [f.name for f in folder.iterdir() if f.is_file()]
+    rendered, supplied = sum(bool(PDF_PAGE.fullmatch(n)) for n in names), sum(n.startswith("image.") for n in names)
+    if rendered or (filed and not supplied):
+        text = folder / "page-text.txt"
+        pages = rendered or (len(PAGE_MARK.findall(text.read_text(errors="replace"))) if text.is_file() else 0)
+        return {"pdfs": 1, "pdf_pages": pages, "opens": max(pages, 1)}
+    if supplied:
+        return {"images": supplied, "parts": sum(n.startswith("part-") for n in names), "opens": 1}
+    return {"pages": 1, "images": sum(f.suffix.lower() in IMAGE_TYPES for f in folder.rglob("*") if f.is_file()),
+            "opens": 1}
+
+
 def materials(cfg: dict) -> dict:
-    """What is under panel/materials, per concept and in all: pages (one folder per captured
-    page or state), images, text files and bytes. When nothing is captured yet, "pages" is
-    counted from the site copies or the concept folders, and "pages_from" says which.
-    "text_only" is None for a full-materials study, else what "materials": "text" changed
-    (panel_lib.apply_materials)."""
+    """What is under panel/materials, per concept and in all, with each concept's kind:
+    "folders" (one per captured page, state or item: captured_folder()), the counts of
+    folder_counts() added up, text files and bytes. "captured" says whether any such folder is
+    there. When none is, "pages", "pdfs", "images" and "opens" are counted from the site copies
+    or the concepts' sources, "pages_from" says which, and "pdf_pages" is None: a PDF's pages are
+    not known until it is captured, so it counts as one in "opens". "uncaptured" lists the
+    concepts of the study with no captured folder. "incomplete" lists the others that are short
+    of one, each {"concept", "lacks"}: the pages, states and items the concept has
+    (panel_lib.concept_folders) with no captured folder, and any folder there that is no capture.
+    "strays" lists the concept folders that belong to no concept of the study, which a
+    panellist could still read. "text_only" is None for a full-materials study, else what
+    "materials": "text" changed (panel_lib.apply_materials). "live" has one entry per "url"
+    concept: its pages, the hosts they are on, and when it was captured (browsing())."""
     sd = cfg["_dir"]
     root = sd / "panel" / "materials"
-    concepts = []
+    lmap = pl.label_map(cfg)
+    kinds = {f"concept-{label}": pl.concept_kind(c) for label, c in lmap.items()}
+    concepts, captured_at, ready, hollow = [], {}, {}, {}  # ready, hollow: concept folder -> folder names
     for folder in sorted(root.glob("concept-*")) if root.is_dir() else []:
         files = [f for f in folder.rglob("*") if f.is_file()]
         text = [f for f in files if f.suffix == ".txt"]
-        concepts.append({
-            "concept": folder.name, "pages": sum(p.is_dir() for p in folder.iterdir()),
-            "images": sum(f.suffix.lower() in IMAGE_TYPES for f in files), "text_files": len(text),
-            "bytes": sum(f.stat().st_size for f in files), "text_bytes": sum(f.stat().st_size for f in text)})
-    out = {k: sum(c[k] for c in concepts) for k in ("pages", "images", "text_files", "bytes", "text_bytes")}
-    out.update(mode=cfg["materials"], captured=out["pages"] > 0, pages_from="panel/materials", concepts=concepts,
-               text_only=cfg["_text_only"])
+        captured_at[folder.name] = max((f.stat().st_mtime for f in files), default=None)
+        held = {"concept": folder.name, "kind": kinds.get(folder.name), **dict.fromkeys(COUNTS, 0),
+                "text_files": len(text), "bytes": sum(f.stat().st_size for f in files),
+                "text_bytes": sum(f.stat().st_size for f in text)}
+        for page in sorted(d for d in folder.iterdir() if d.is_dir()):
+            if not captured_folder(page):
+                hollow.setdefault(folder.name, []).append(page.name)
+                continue
+            held["folders"] += 1
+            ready.setdefault(folder.name, []).append(page.name)
+            for k, v in folder_counts(page, held["kind"] == "files").items():
+                held[k] += v
+        concepts.append(held)
+    out = {k: sum(c[k] for c in concepts) for k in COUNTS}
+    sites, incomplete = pl.sites_dir(cfg), []
+    for name, c in ((f"concept-{label}", c) for label, c in lmap.items() if f"concept-{label}" in ready):
+        expected = pl.concept_folders(cfg, c, sites / name if kinds[name] == "site" else None) or []
+        lacks = [x for x in expected if x not in ready[name]]
+        lacks += [x for x in hollow.get(name, []) if x not in lacks]
+        if lacks:
+            incomplete.append({"concept": name, "lacks": lacks})
+    out.update(mode=cfg["materials"], captured=out["folders"] > 0, pages_from="panel/materials", concepts=concepts,
+               text_only=cfg["_text_only"], uncaptured=[name for name in kinds if name not in ready],
+               incomplete=incomplete,
+               strays=[c["concept"] for c in concepts if c["kind"] is None],
+               live=[{"concept": f"concept-{label}", "pages": pl.url_pages(c),
+                      "hosts": list(dict.fromkeys(host(p["url"]) for p in pl.url_pages(c))),
+                      "captured_at": captured_at.get(f"concept-{label}")}
+                     for label, c in lmap.items() if pl.concept_kind(c) == "url"])
     if not out["captured"]:
-        states = sum(len(c.get("states", [])) for c in cfg["concepts"])
-        sites = pl.sites_dir(cfg)
         copies = list(sites.glob("concept-*/*.html"))
-        sources = [p for c in cfg["concepts"] for p in c["_path"].glob("*.html")]
-        out.update(pages=len(copies or sources) + states,
-                   pages_from=str(sites.relative_to(sd)) if copies else "the concept folders")
+        pages, pdfs, images = sum(len(c.get("states", [])) for c in cfg["concepts"]), 0, 0
+        for label, c in lmap.items():
+            if pl.concept_kind(c) == "files":  # its items are its files
+                try:
+                    items = pl.concept_items(cfg, c)[0]
+                except SystemExit:  # a source the capture will refuse: build() says so
+                    continue
+                documents = sum(f.suffix.lower() in pl.DOCUMENT_TYPES for _, f in items)
+                pdfs, images = pdfs + documents, images + len(items) - documents
+            else:  # a site's pages are its copy's, or its source's before it is scaffolded. A url's are in study.json
+                pages += len(pl.concept_pages(cfg, c, sites / f"concept-{label}" if copies else None) or [])
+        sourced = "study.json and the concepts' sources"
+        if set(kinds.values()) <= {"site"}:
+            sourced = str(sites.relative_to(sd)) if copies else "the concept folders"
+        out.update(pages=pages, pdfs=pdfs, pdf_pages=None, images=images, opens=pages + pdfs + images,
+                   pages_from=sourced)
     return out
+
+
+def held(c: dict, captured: bool = True, images: bool = True) -> str:
+    """What a concept's materials hold, or all of them, in words: "2 pages, 9 images", and for
+    files "1 PDF of 3 pages, 2 images". A PDF's page images count as its pages and a tall
+    image's parts as that image, so "images" is never a count of files. captured: these are
+    materials, where a web page with no image is worth saying, not sources still to capture."""
+    out = [plural(c["pages"], "page")] if c["pages"] else []
+    if c["pdfs"]:
+        out.append(plural(c["pdfs"], "PDF") + (f" of {plural(c['pdf_pages'], 'page')}" if c["pdf_pages"] is not None
+                                               else ""))
+    if images and (c["images"] or (captured and c["pages"])):
+        out.append(plural(c["images"], "image") + (f" (plus {plural(c['parts'], 'part')} cut from a tall image)"
+                                                   if c["parts"] else ""))
+    return ", ".join(out) or plural(0, "page")
+
+
+def no_materials(cfg: dict, mat: dict) -> str | None:
+    """Why no panellist run may start as the materials stand, else None: nothing is captured,
+    nothing for one of the study's concepts, or one of them is short of a page, state or item
+    (materials(), "incomplete"), each named. The plan lists it as missing, and "run", "pilot" and
+    "resume" refuse on it (launch.preflight), so what one says the other does."""
+    if not mat["captured"]:
+        return f"panel/materials has no captured page. Run capture.py {cfg['_dir']} before the runs."
+    short = []
+    if mat["uncaptured"]:
+        n = len(mat["uncaptured"])
+        short.append(f"nothing is captured for {listed(mat['uncaptured'])}, so a run would review "
+                     f"{agree(n, 'it', 'them')} from nothing")
+    short += [f"{c['concept']} has no capture of {listed(c['lacks'])}, so a run would review it with that missing"
+              for c in mat["incomplete"]]
+    return f"{', and '.join(short)}. Run capture.py {cfg['_dir']} before the runs." if short else None
+
+
+def host(url: str) -> str:
+    """The host a URL is on, with its port when it names one."""
+    return urlsplit(url).netloc.rsplit("@", 1)[-1]
+
+
+def on_this_machine(named: str) -> bool:
+    name = named.rsplit(":", 1)[0] if not named.endswith("]") else named
+    return name in ("localhost", "127.0.0.1", "[::1]") or name.endswith(".localhost")
+
+
+def browsing(cfg: dict, mat: dict) -> dict | None:
+    """What the plan says about the browser in a study with a "url" or "files" concept, None for
+    a study of sites alone: whether panellists may browse, why not when the reason is the
+    concepts' kinds, the hosts the instructions send them to, and the concepts with nothing to
+    open."""
+    kinds = {c["concept"]: c["kind"] for c in mat["concepts"]}
+    kinds.update({f"concept-{label}": pl.concept_kind(c) for label, c in pl.label_map(cfg).items()})
+    if set(kinds.values()) <= {"site", None}:
+        return None
+    hosts = list(dict.fromkeys(h for live in mat["live"] for h in live["hosts"]))
+    return {"on": cfg["browse"], "off_because": cfg["_browse_off"],
+            "sites": [name for name, kind in kinds.items() if kind == "site"],
+            "hosts": hosts, "external_hosts": [h for h in hosts if not on_this_machine(h)],
+            "local_hosts": [h for h in hosts if on_this_machine(h)],
+            "not_browsable": [name for name, kind in kinds.items() if kind == "files"]}
+
+
+def kind_notes(cfg: dict, mat: dict) -> list[str]:
+    """What the lead should know about concepts that are not sites, and about anything under
+    panel/ that the study as it is now would not have put there."""
+    notes = []
+    filed = [f"concept-{label}" for label, c in pl.label_map(cfg).items() if pl.concept_kind(c) == "files"]
+    phone = [f["key"] for f in cfg["factors"] if f["key"] == "mobile"]
+    if filed and phone and cfg["materials"] == "full":
+        notes.append(f'the study scores "mobile", and {listed(filed)} {agree(len(filed), "is", "are")} made of '
+                     "files, with no phone screens unless a file shows one. Panellists are told to score such a "
+                     'factor on what they can see and to say so: read that score as a guess, or leave the factor '
+                     'out with a "factors" list.')
+    # Site copies where a scaffold made under the other "browse" left them. text_only_notes() says it
+    # of a text-only study.
+    if any(pl.sites_dir(cfg, used=False).glob("concept-*")) and not mat["text_only"]:
+        again = (f"init_study.py {cfg['_dir']} --force scaffolds the study for the setting as it is now, and resets "
+                 "every run.")
+        notes.append(("the site copies are in sites/, outside panel/, from a scaffold made when the study did not "
+                      "browse, and study.json now lets panellists browse: the instructions offer no browser, and "
+                      "capture.py finds no site to capture. " if cfg["browse"] else
+                      "panel/sites holds site copies from a scaffold that browsed, and this study's panellists do not "
+                      "browse: a run could read a page's source there. ") + again)
+    if mat["strays"]:
+        n = len(mat["strays"])
+        notes.append(f"panel/materials holds {listed(mat['strays'])}, which {agree(n, 'is', 'are')} no concept of this "
+                     f"study, and a panellist could read {agree(n, 'it', 'them')}. Delete "
+                     f"{agree(n, 'that folder', 'those folders')}.")
+    return notes
 
 
 def text_only_notes(cfg: dict, mat: dict) -> list[str]:
@@ -439,7 +612,8 @@ def usage_markdown(figures: dict) -> str:
 
 def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
     """What the runs still to go are likely to use, per model entry and in all. rows are
-    usage_figures() rows with "entry" added, the name of each run's model entry."""
+    usage_figures() rows with "entry" added, the name of each run's model entry, and pages is
+    what a run opens (materials(), "opens"), for a model entry with no finished run to measure."""
     entries = []
     for name, role in dict.fromkeys((r["entry"], r["role"]) for r in rows):
         own = [r for r in rows if (r["entry"], r["role"]) == (name, role)]
@@ -540,10 +714,24 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     gone = [e["prompt"] for e in runs if not (sd / e["prompt"]).is_file()]
     if scaffolded and gone:
         missing.append(f"{plural(len(gone), 'run prompt')} ({', '.join(gone[:3])}{', ...' if len(gone) > 3 else ''})")
-    if not mat["captured"]:
-        missing.append(f"the materials: panel/materials has no captured page. Run capture.py {sd} before the "
-                       f"runs. The estimate counts the pages in {mat['pages_from']}.")
-    notes += text_only_notes(cfg, mat)
+    uncaptured = no_materials(cfg, mat)
+    if uncaptured:
+        missing.append(f"the materials: {uncaptured}" + (
+            "" if mat["captured"] else f" The estimate counts the pages in {mat['pages_from']}."))
+    # A source the scaffold or the capture will refuse: a site not copied yet, files not captured yet.
+    short = {*mat["uncaptured"], *(c["concept"] for c in mat["incomplete"])}
+    for name, c in ((f"concept-{label}", c) for label, c in pl.label_map(cfg).items()):
+        needed = not scaffolded if pl.concept_kind(c) == "site" else name in short
+        problem = pl.source_problem(cfg, c) if needed else None
+        if problem:
+            missing.append(f"{stop(problem)} init_study.py and capture.py stop on it, so no run can start.")
+    no_poppler = pl.poppler_missing(cfg)
+    if no_poppler and short:
+        missing.append(f"{no_poppler}. capture.py cannot turn a PDF into materials without it.")
+    notes += text_only_notes(cfg, mat) + kind_notes(cfg, mat)
+    one_order = pl.shared_order(cfg)
+    if one_order:
+        notes.append(one_order)
     earlier = len(pl.read_earlier_sessions(sd))
     if earlier:
         notes.append(f"{earlier_sessions(earlier)} {purge_hint(sd)}")
@@ -595,14 +783,21 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         if not check["ok"]:
             problems.append(f"{name}: cannot be used: {check['message']}")
 
-    held = (f"{plural(mat['pages'], 'page')}, {plural(mat['images'], 'image')}, {size(mat['bytes'])}"
-            if mat["captured"] else "not captured yet")
+    there = f"{held(mat)}, {size(mat['bytes'])}" if mat["captured"] else "not captured yet"
+    browse = browsing(cfg, mat)
+    # With browsing on, the instructions every run reads give the address of each live page.
+    told = " (which give the addresses of the live pages)" if browse and browse["on"] and browse["hosts"] else ""
     receives = {
-        "full": f"its run prompt, the panel instructions and everything under panel/materials ({held})",
+        "full": f"its run prompt, the panel instructions{told} and everything under panel/materials ({there})",
         "text": "its run prompt, the panel instructions and the page text under panel/materials ("
-                + (f"{plural(mat['text_files'], 'file')}, {size(mat['text_bytes'])}" if mat["captured"] else held)
+                + (f"{plural(mat['text_files'], 'file')}, {size(mat['text_bytes'])}" if mat["captured"] else there)
                 + "), with no images",
     }[cfg["materials"]]
+    opens = []  # what a run that browses can open, besides what it reads
+    if not browse or browse["sites"]:
+        opens.append("any page of panel/sites it opens in the browser")
+    if browse and browse["hosts"]:
+        opens.append(f"any page it opens at {listed(browse['hosts'])}, as that page is at the time")
     providers = []
     for provider in dict.fromkeys(m["provider"] for m in models if not native):
         entries = []
@@ -611,7 +806,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                        and runners.get(m["runner"]).capabilities()["browser"])
             entries.append({
                 "entry": m["entry"], "role": m["role"], "runner": m["runner"], "runs": m["runs"],
-                "receives": (receives + (", and any page of panel/sites it opens in the browser" if browses else "")
+                "receives": (receives + (", and " + " and ".join(opens) if browses else "")
                              if m["role"] == "panellist" else
                              "the persona files it is given, analysis/ and whatever else in the study "
                              "directory it opens, where it works")})
@@ -627,15 +822,22 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     costed = {name: runners.get(name).capabilities()["usage"]["cost"] for name in {e["runner"] for e in runs + planned}
               if name}
     rows = [{**r, "entry": names[r["run"]], "reports_cost": costed.get(r["runner"], False)} for r in usage["runs"]]
+    forecast = estimate(rows, mat["opens"], cfg["materials"] == "text")
+    if browse and browse["not_browsable"] and any(e["basis"] == "method" for e in forecast["entries"]):
+        unread = mat["pdfs"] and mat["pdf_pages"] is None  # its pages are not known until it is captured
+        notes.append("the estimate's figure per page was measured on captured web pages. It counts every page of a "
+                     "PDF and every supplied image as one such page, which is a guess until a pilot has measured one."
+                     + (" A PDF that is not captured yet counts as one page." if unread else ""))
     return {
         "study": cfg.get("study") or sd.name, "dir": str(sd), "native": native, "launcher": launcher,
         "missing": missing, "notes": notes,
-        "materials": mat, "models": models, "runs": run_rows, "runners": checked, "providers": providers,
+        "materials": mat, "browsing": browse, "models": models, "runs": run_rows, "runners": checked,
+        "providers": providers,
         "synthesis": None if native else {
             "pool": pool, "share": pl.synthesis_share(cfg), "shares": cfg["synthesis"].get("analysts", 1) + 1,
             "jobs": job_rows,
             "missing": [role for role in pl.JOB_ROLES if not any(j["role"] == role for j in planned)]},
-        "estimate": estimate(rows, mat["pages"], cfg["materials"] == "text"),
+        "estimate": forecast,
         "used": summed(usage["runs"]),  # the runs and jobs: follow-ups are apart, under "followups"
         "ceiling": None if native else ceiling(run_rows, job_rows, pool),
         "followups": followups, "earlier_sessions": earlier,
@@ -668,15 +870,16 @@ def render(plan: dict) -> list[str]:
         out.append("  Text-only study: panellists receive the page text only, page-text.txt for each page, with no "
                    "images and no browser." + (f" They do not score {listed(dropped)}." if dropped else ""))
     if not mat["captured"]:
-        out.append(f"  Not captured yet. {plural(mat['pages'], 'page')} to capture, counted from {mat['pages_from']}.")
+        out.append(f"  Not captured yet. {held(mat, captured=False)} to capture, counted from {mat['pages_from']}.")
     elif mat["mode"] == "text":
         out.append(f"  {plural(mat['text_files'], 'page text file')}, {size(mat['text_bytes'])} "
-                   f"({plural(mat['pages'], 'page')}).")
+                   f"({held(mat, images=False)}).")
     else:
-        out.append(f"  {plural(mat['pages'], 'page')}, {plural(mat['images'], 'image')}, {size(mat['bytes'])} in all, "
-                   f"of which page text {size(mat['text_bytes'])}.")
-        out += table([[c["concept"], plural(c["pages"], "page"), plural(c["images"], "image"), size(c["bytes"])]
-                      for c in mat["concepts"]], "    ")
+        out.append(f"  {held(mat)}, {size(mat['bytes'])} in all, of which page text {size(mat['text_bytes'])}.")
+        kinds = plan["browsing"] is not None  # a study of sites alone has no kind to tell apart
+        out += table([[c["concept"], *([pl.KIND_NAMES.get(c["kind"], "no concept of this study")] if kinds else []),
+                       held(c), size(c["bytes"])] for c in mat["concepts"]], "    ")
+    out += browsing_lines(plan)
 
     panel = [m for m in plan["models"] if m["role"] == "panellist"]
     out += ["", f"Model entries ({len(panel)})"
@@ -738,6 +941,49 @@ def render(plan: dict) -> list[str]:
     return out
 
 
+def browsing_lines(plan: dict) -> list[str]:
+    """What the plan says of live pages and of the browser, in a study with a "url" or "files"
+    concept: when each live page was captured, whether panellists may browse and where the
+    instructions send them, and which concepts have nothing to open."""
+    mat, browse = plan["materials"], plan["browsing"]
+    if browse is None:
+        return []
+    out = []
+    for live in mat["live"]:
+        when = (time.strftime("on %Y-%m-%d at %H:%M", time.localtime(live["captured_at"])) if live["captured_at"]
+                else None)
+        out.append(f"  {live['concept']} is a live URL ({plural(len(live['pages']), 'page')} at "
+                   f"{listed(live['hosts'])}). " + (
+            f"It was captured {when}: the materials show the page as it was then, and it may have changed since."
+            if when else "It is not captured yet: the capture will show the page as it is at that moment."))
+    if browse["on"]:
+        places = (["the copies in panel/sites"] if browse["sites"] else []) + (
+            [f"the live pages at {listed(browse['hosts'])}"] if browse["hosts"] else [])
+        out.append(f"  Browsing is on: panellists may open {' and '.join(places)} with agent-browser, on runners "
+                   "that can.")
+        if browse["hosts"]:
+            out.append("  A panellist who browses a live page sees it as it is at review time, which may differ from "
+                       "the capture. The instructions say to score from the materials and to note any difference.")
+            out.append("  External hosts the instructions send panellists to: "
+                       + (listed(browse["external_hosts"]) if browse["external_hosts"] else "none") + "."
+                       + (f" On this machine: {listed(browse['local_hosts'])}, whose server must be running during "
+                          "the runs." if browse["local_hosts"] else ""))
+            out.append("  Nothing limits agent-browser to those hosts. The instructions tell panellists to stay on "
+                       "them and to submit nothing, and every visit reaches the site's server and its analytics.")
+        if browse["not_browsable"]:
+            out.append(f"  {listed(browse['not_browsable'])} cannot be opened in a browser: "
+                       f"{agree(len(browse['not_browsable']), 'it is', 'they are')} reviewed from the files, and "
+                       "the instructions say so.")
+    elif browse["off_because"] == "url":
+        out.append('  Browsing is off: a study with a live URL browses only when study.json says "browse": true. '
+                   "Panellists see the capture alone, and are given no address.")
+    elif browse["off_because"] == "files":
+        out.append("  Browsing is off: every concept is made of files, which have nothing to open.")
+    elif mat["mode"] != "text":
+        out.append('  Browsing is off ("browse": false): panellists see the capture alone.')
+    return out
+
+
 def estimate_lines(plan: dict) -> list[str]:
     est, used = plan["estimate"], plan["used"]
     out = ["Estimate of what the runs still to go will use (a forecast, not a limit):"]
@@ -765,8 +1011,9 @@ def estimate_lines(plan: dict) -> list[str]:
                 line += f"{go}: about {', '.join(parts)}" + (
                     "." if e["cost_usd"] is not None else ". No dollar figure, so judge it by the time.")
         elif e["basis"] == "method":
-            line = (f"no finished run to measure. From the method's figure of about {est['tokens_per_concept_page']:,} "
-                    f"tokens of context per concept page per run, and {plural(est['pages'], 'page')}: about "
+            line = ("no finished run to measure. A rough forecast, from the method's figure of about "
+                    f"{est['tokens_per_concept_page']:,} tokens of context per concept page per run, and "
+                    f"{plural(est['pages'], 'page')} for a run to open: about "
                     f"{per['tokens']:,} tokens a run, {e['tokens']:,} for {go}. No dollar figure: "
                     + ("native mode records no usage." if plan["native"]
                        else "a pilot will provide one." if e["reports_cost"]
@@ -777,7 +1024,7 @@ def estimate_lines(plan: dict) -> list[str]:
         out.append(f"  {e['entry']}: {line}")
     if est["tokens"] is not None or est["cost_usd"] is not None:
         def without(names, what):  # a sum covers only the model entries that have the figure: name the others
-            return (f" (without {listed(names)}, which {'has' if len(names) == 1 else 'have'} no {what} figure)"
+            return (f" (without {listed(names)}, which {agree(len(names), 'has', 'have')} no {what} figure)"
                     if names else "")
 
         parts = ([f"{est['tokens']:,} tokens" + without(est["no_tokens_for"], "token")]
@@ -789,7 +1036,7 @@ def estimate_lines(plan: dict) -> list[str]:
     if used["started"]:
         tokens = (f"{used['input_tokens'] + (used['output_tokens'] or 0):,} tokens"
                   if used["input_tokens"] is not None else "tokens not reported")
-        out.append(f"  Used so far, by {plural(used['started'], 'run')} and jobs started: {tokens}, "
+        out.append(f"  Used so far, by the {plural(used['started'], 'run or job', 'runs and jobs')} started: {tokens}, "
                    f"{money(used['cost_usd']) if used['cost_usd'] is not None else 'cost not reported'}.")
     elif not plan["native"]:
         out.append("  Nothing has run yet: launch.py pilot runs one persona on each model entry, and the next plan "
@@ -808,13 +1055,16 @@ def ceiling_lines(c: dict, syn: dict) -> list[str]:
                "jobs' caps. Panellist runs never spend it.")
     if c["uncapped"]:
         shown = ", ".join(c["uncapped"][:8]) + (", ..." if len(c["uncapped"]) > 8 else "")
-        out.append(f"  {plural(len(c['uncapped']), 'run')} on a runner without a budget cap are left out of the figure "
-                   f"({shown}). The time limit is what bounds them: at most {span(c['uncapped_minutes'] * 60)} of "
-                   "run time between them.")
+        n = len(c["uncapped"])
+        out.append(f"  {plural(n, 'run')} on a runner without a budget cap {agree(n, 'is', 'are')} left out of the "
+                   f"figure ({shown}). The time limit is what bounds {agree(n, 'it', 'them')}: at most "
+                   f"{span(c['uncapped_minutes'] * 60)} of run time{agree(n, '', ' between them')}.")
     if c["uncapped_jobs"]:
-        out.append(f"  {plural(len(c['uncapped_jobs']), 'job')} on a runner without a budget cap have their share "
+        n = len(c["uncapped_jobs"])
+        out.append(f"  {plural(n, 'job')} on a runner without a budget cap {agree(n, 'has its', 'have their')} share "
                    f"of the pool counted, but nothing enforces it ({', '.join(c['uncapped_jobs'])}). The time limit "
-                   f"is what bounds them: at most {span(c['uncapped_job_minutes'] * 60)} of run time between them.")
+                   f"is what bounds {agree(n, 'it', 'them')}: at most {span(c['uncapped_job_minutes'] * 60)} of run "
+                   f"time{agree(n, '', ' between them')}.")
     out += [f"  Caveat: {stop(caveat)}" for caveat in c["caveats"]]
     if not c["holds"]:
         out.append(f"  The ceiling no longer holds: resume --extend gave more than one allowance of the limits to "

@@ -27,6 +27,23 @@ style, spacing and a closing full stop). Without those files the tables are left
 
 quant.json has "replicates", "variants", "answers" and "lines" when their tables were written.
 
+A study with one concept has nothing to rank or compare, so its report has no leaderboard, no
+winner, no Borda count and no order effect, and says so. It has "Scores" in their place: each
+factor's mean, median and spread across the runs. "By segment" and "By model" give every factor's
+mean, and model agreement is measured on the one concept: the mean absolute difference between a
+persona's runs on two models, in Overall and over all factors, and the Spearman across the factor
+scores the two runs gave (whether the models agree on what is strong and weak). Spearman across
+concepts needs three of them and is named as not available. quant.json then has "concept" and
+"scores" and no "leaderboard" or "order".
+
+When the concepts did not all reach the panel in one form (a PDF beside a captured page, or beside
+a screenshot: panel_lib.mixed_forms), part of any difference between them is the format. The
+report says so above "Key numbers" and under "By factor", naming each concept's form and the
+factors most exposed, the ones that need the design. quant.json then has "forms". Both are the
+lead's files: nothing a panellist reads says what a concept is made of. Whether a "files" concept
+is images or PDFs is read from its source files, and from forms.json when they are gone, as in an
+archived round (panel_lib.py, "Forms").
+
 Every one of those tables uses complete runs only, and the output states "N of M runs complete",
 where M is the runs expected after the filters. Incomplete runs that wrote something, or that
 stopped as partial, limited, blocked or failed, get their own table, "Incomplete runs", with
@@ -60,7 +77,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
-from panel_lib import fmt, mean  # noqa: E402
+from panel_lib import fmt, mean, plural  # noqa: E402
 
 
 # Incomplete runs in these states are listed even when they wrote nothing: they ran and stopped.
@@ -159,6 +176,22 @@ def signed(x, nd=2):
     return "-" if x is None or x != x else f"{x:+.{nd}f}"
 
 
+def known(xs):
+    """The mean of xs, or None when there is nothing to take one of."""
+    xs = [x for x in xs if x is not None and x == x]
+    return mean(xs) if xs else None
+
+
+def without_nan(x):
+    """x with every NaN made None, through dicts and lists: NaN is not JSON, and a reader that
+    is strict about it cannot load the file."""
+    if isinstance(x, dict):
+        return {k: without_nan(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [without_nan(v) for v in x]
+    return None if isinstance(x, float) and x != x else x
+
+
 def under_parents(pids: list[str], variant_of: dict[str, str]) -> list[str]:
     """pids with each variant moved to sit directly under its parent, when the parent is listed."""
     kids = defaultdict(list)
@@ -252,13 +285,24 @@ def main():
     if no_models or no_personas or args.segment:
         md += [f"Filters: excluded models {', '.join(no_models) or 'none'}; excluded personas "
                f"{', '.join(no_personas) or 'none'}; segment {args.segment or 'all'}.", ""]
+    # Concepts of different forms are compared partly on format: said before any number, and by the factors
+    caution = pl.form_caution(cfg)
+    if caution:
+        res["forms"] = {"concepts": caution["forms"], "exposed_factors": caution["factors"]}
+        md += [f"Format caution: the concepts did not all reach the panel in one form. Concept {caution['concepts']}. "
+               "Part of any difference between them is the format, not the design: a PDF or an image cannot be "
+               f"scrolled or clicked, and shows a phone only if the file holds one. {caution['exposed']}: compare "
+               "those within one form only, or leave them out, and remember that Overall and the rankings carry them "
+               "too.", ""]
     n_runs = len({run_key(r) for r in rows})
     base = args.out or ("quant" + (f"-{args.segment.replace(',', '+')}" if args.segment else "") +
                         "".join(f"-no-{x}" for x in [*no_models, *no_personas]))
+    if pl.name_problem(base):  # it names analysis/<base>.md and .json, and must stay there
+        raise SystemExit(f"The output name {base!r} {pl.NAME_RULE}. Give another with --out.")
 
     def write(printed):
         (sd / "analysis" / f"{base}.md").write_text("\n".join(md))
-        (sd / "analysis" / f"{base}.json").write_text(json.dumps(res, indent=2, default=str))
+        (sd / "analysis" / f"{base}.json").write_text(json.dumps(without_nan(res), indent=2, default=str))
         print("\n".join(printed))
         print(f"Wrote analysis/{base}.md and analysis/{base}.json")
 
@@ -275,7 +319,7 @@ def main():
     not_started = len(unfinished) - len(listed)
     res["runs"] = {"complete": len(runs) - len(unfinished), "expected": len(runs), "not_started": not_started,
                    "incomplete": listed}
-    runs_line = f"- {res['runs']['complete']} of {len(runs)} runs complete." + (
+    runs_line = f"- {res['runs']['complete']} of {plural(len(runs), 'run')} complete." + (
         ' Every table uses complete runs only, except "Incomplete runs".' if unfinished and rows else "")
     inc_md = []
     if unfinished:
@@ -293,9 +337,11 @@ def main():
         md += ["## Key numbers", "", runs_line, "- No run is complete, so there is nothing to rank.", "", *inc_md]
         return write(md)
 
-    # Leaderboard
+    # Leaderboard. One concept is not ranked: its scores are reported in the leaderboard's place.
+    single = pl.single_concept(cfg)
     lb, ranked_runs, k = leaderboard(rows, ranks, labels)
-    res["leaderboard"] = lb
+    if not single:
+        res["leaderboard"] = lb
 
     # Factors
     fac = {c: {f: mean([r[f] for r in rows if r["concept"] == c]) for f in keys} for c in labels}
@@ -366,6 +412,41 @@ def main():
     res["models"] = {"level": level, "per_model": per_model, "pair_spearman": pair_agree, "drop_one": sens,
                      "persona_agreement": persona_agree}
 
+    # One concept: the spread across runs, and model agreement on that concept's scores
+    if single:
+        only = labels[0]
+        profile = {run_key(r): [r[f] for f in keys] for r in rows}  # run -> its score for every factor
+        scores = {}
+        for f in keys:
+            xs = [r[f] for r in rows]
+            scores[f] = {"n": len(xs), "mean": mean(xs), "median": statistics.median(xs), "sd": pl.sd(xs),
+                         "min": min(xs), "max": max(xs)}
+        pair_diff = {}
+        for a, b in itertools.combinations(models, 2):
+            ov, fa, rho = [], [], []
+            for pid in sorted({r["persona_id"] for r in rows}):
+                for ka, kb in itertools.product(runs_of(pid, a), runs_of(pid, b)):
+                    ov.append(abs(profile[ka][-1] - profile[kb][-1]))
+                    fa.append(mean([abs(x - y) for x, y in zip(profile[ka], profile[kb])]))
+                    rho.append(pl.spearman(profile[ka], profile[kb]))
+            pair_diff[f"{a}-{b}"] = {"pairs": len(ov), "overall": known(ov), "factors": known(fa),
+                                     "profile_spearman": known(rho)}
+        by_persona = []
+        for pid in sorted({r["persona_id"] for r in rows}):
+            per = {m: known([profile[run][-1] for run in runs_of(pid, m)]) for m in models}
+            got = [v for v in per.values() if v is not None]
+            by_persona.append({"persona": pid, "overall": per, "spread": max(got) - min(got) if len(got) > 1 else None})
+        whole = scores["overall"]["mean"]
+        drop_one = {m: {"mean": known([r["overall"] for r in rows if r["model"] != m])} for m in models
+                    if len(models) > 1}
+        for d in drop_one.values():
+            d["change"] = d["mean"] - whole
+        res.update(concept=only, scores=scores)
+        res["segment_factors"] = {s: {f: mean([r[f] for r in rows if r["segment"] == s]) for f in keys} for s in segs}
+        res["model_factors"] = {m: {f: mean([r[f] for r in rows if r["model"] == m]) for f in keys} for m in models}
+        res["models"] = {"level": level, "per_model": per_model, "pair_difference": pair_diff, "drop_one": drop_one,
+                         "persona_agreement": by_persona}
+
     # Replicate spread: how far one persona's repeats on one model sit from each other
     pids = sorted({r["persona_id"] for r in rows})
     spread = []
@@ -407,7 +488,8 @@ def main():
     pos = [(r["position"], r["overall"]) for r in rows if r["position"]]
     order_r = pl.pearson([p for p, _ in pos], [o for _, o in pos]) if pos else float("nan")
     by_pos = {p: mean([o for q, o in pos if q == p]) for p in sorted({p for p, _ in pos})}
-    res["order"] = {"pearson_position_overall": order_r, "mean_by_position": by_pos}
+    if not single:  # one concept has no order to review in
+        res["order"] = {"pearson_position_overall": order_r, "mean_by_position": by_pos}
 
     # Persona fit on the strongest concepts
     top_n = min(3, len(labels))
@@ -473,30 +555,58 @@ def main():
         res["lines"] = lines
 
     # ---------------------------------------------------------------- markdown
-    w = lb[0]
-    gap = w["mean"] - lb[1]["mean"] if len(lb) > 1 else 0
-    md += ["## Key numbers", "", runs_line,
-           f"- {n_runs} runs, {len(rows)} concept reviews, {len(pids)} personas, models: {', '.join(models)}.",
-           f"- Winner on mean Overall: **{w['concept']}** ({fmt(w['mean'])}), {fmt(gap)} ahead of {lb[1]['concept']}."
-           if len(lb) > 1 else f"- Only concept: {w['concept']}.",
-           f"- Ranked first in {w['first']} of {ranked_runs} runs with a ranking."]
-    strong = sorted(drivers.items(), key=lambda kv: -(kv[1] if kv[1] == kv[1] else -9))[:3]
-    md.append("- Overall tracks " + ", ".join(f"{fl[f]} (r {fmt(v)})" for f, v in strong) + " most closely.")
+    fs = {f["key"]: f.get("short", f["label"]) for f in cfg["factors"]}
     ranked = len(labels) >= 3  # Spearman needs three concepts
-    if pair_agree:
-        md.append("- Within-persona model agreement (Spearman): " + (
-            ", ".join(f"{k2} {fmt(v)}" for k2, v in pair_agree.items()) + "." if ranked
-            else f"not computed for {', '.join(pair_agree)}: it needs at least three concepts. See each persona's "
-                 "top concept by model."))
-    if sens:
-        flips = [m for m, s in sens.items() if s["winner"] != w["concept"]]
-        md.append("- Dropping any single model keeps the winner." if not flips
-                  else f"- Winner changes when dropping: {', '.join(flips)}.")
+    strong = sorted(((f, v) for f, v in drivers.items() if v == v), key=lambda kv: -kv[1])
+    md += ["## Key numbers", "", runs_line,
+           f"- {plural(n_runs, 'run')}, {plural(len(rows), 'concept review')}, {plural(len(pids), 'persona')}, "
+           f"{pl.agree(len(models), 'model')}: {', '.join(models)}."]
+    if single:
+        ov = scores["overall"]
+        md += [f"- One concept, {only}, so nothing is ranked or compared: this report has no leaderboard, ranking, "
+               "Borda count or order effect. A score here has no other concept to be read against.",
+               f"- Mean Overall {fmt(ov['mean'])} across {plural(ov['n'], 'run')} (median "
+               f"{fmt(ov['median'], 1)}, SD {fmt(ov['sd'])}, lowest {ov['min']:g}, highest {ov['max']:g})."]
+        others = sorted(keys[:-1], key=lambda f: -scores[f]["mean"])
+        if len(others) >= 4:
+            md.append("- Strongest factors: " + ", ".join(f"{fl[f]} {fmt(scores[f]['mean'])}" for f in others[:2])
+                      + ". Weakest: " + ", ".join(f"{fl[f]} {fmt(scores[f]['mean'])}" for f in others[:-3:-1]) + ".")
+        md.append("- Overall tracks " + ", ".join(f"{fl[f]} (r {fmt(v)})" for f, v in strong[:3]) + " most closely."
+                  if strong else "- What drives Overall is not computed: it needs at least three reviews whose "
+                  "scores differ.")
+        if pair_diff:
+            md.append("- Model agreement: Spearman across concepts is not available with one concept. Mean absolute "
+                      "difference in Overall between a persona's runs on two models: "
+                      + ", ".join(f"{k2} {fmt(d['overall'])}" for k2, d in pair_diff.items()) + ".")
+        if drop_one:
+            widest = max(drop_one.items(), key=lambda kv: abs(kv[1]["change"]))
+            md.append(f"- Dropping a model moves the mean Overall by at most {fmt(abs(widest[1]['change']))} "
+                      f"(without {widest[0]}: {fmt(widest[1]['mean'])}).")
+    else:
+        w = lb[0]
+        gap = w["mean"] - lb[1]["mean"]
+        md += [f"- Winner on mean Overall: **{w['concept']}** ({fmt(w['mean'])}), {fmt(gap)} ahead of "
+               f"{lb[1]['concept']}.",
+               f"- Ranked first in {w['first']} of {plural(ranked_runs, 'run')} with a ranking."]
+        top3 = sorted(drivers.items(), key=lambda kv: -(kv[1] if kv[1] == kv[1] else -9))[:3]
+        md.append("- Overall tracks " + ", ".join(f"{fl[f]} (r {fmt(v)})" for f, v in top3) + " most closely.")
+        if pair_agree:
+            md.append("- Within-persona model agreement (Spearman): " + (
+                ", ".join(f"{k2} {fmt(v)}" for k2, v in pair_agree.items()) + "." if ranked
+                else f"not computed for {', '.join(pair_agree)}: it needs at least three concepts. See each persona's "
+                     "top concept by model."))
+        if sens:
+            flips = [m for m, s in sens.items() if s["winner"] != w["concept"]]
+            md.append("- Dropping any single model keeps the winner." if not flips
+                      else f"- Winner changes when dropping: {', '.join(flips)}.")
     if spread:
         md.append("- Replicate spread (mean absolute difference in Overall between a persona's replicates on one "
                   "model): " + ", ".join(f"{m} {fmt(d['mean_abs_diff'])}" for m, d in spread_by_model.items()) + ".")
-    md.append(f"- Order effect: r {fmt(order_r)} between review position and Overall.")
-    if fit:
+    if not single:
+        md.append(f"- Order effect: r {fmt(order_r)} between review position and Overall.")
+    if len(fit) == 1:  # one persona is neither the best fit nor the weakest
+        md.append(f"- Persona fit: {fit[0]['persona']} {fit[0]['name']} {fmt(fit[0]['fit'])}, the only persona.")
+    elif fit:
         md.append(f"- Best-fit persona: {fit[0]['persona']} {fit[0]['name']} (fit {fmt(fit[0]['fit'])}); "
                   f"weakest: {fit[-1]['persona']} {fit[-1]['name']} ({fmt(fit[-1]['fit'])}).")
     for d in pairs:
@@ -507,80 +617,147 @@ def main():
     if answers:
         total = {k: sum(q["concepts"][c][k] for q in answers["questions"] for c in labels)
                  for k in [*ANSWER_COUNTS.values(), "unparsed"]}
-        md.append(f"- Find the answer, over {answers['runs']} runs: {total['found']} Found, {total['partly']} "
-                  f"Partly, {total['not_found']} Not found, {total['missing']} missing, {total['unparsed']} unparsed.")
+        md.append(f"- Find the answer, over {plural(answers['runs'], 'run')}: {total['found']} Found, "
+                  f"{total['partly']} Partly, {total['not_found']} Not found, {total['missing']} missing, "
+                  f"{total['unparsed']} unparsed.")
     if lines:
         total = {k: sum(d[k] for d in lines["forward"].values()) for k in [*FORWARD_COUNTS, "unparsed"]}
-        md.append(f"- Would forward it, over {lines['runs']} runs and {len(labels)} concepts: {total['yes']} yes, "
+        md.append(f"- Would forward it, over {plural(lines['runs'], 'run')} and {plural(len(labels), 'concept')}: "
+                  f"{total['yes']} yes, "
                   f"{total['no']} no, {total['maybe']} maybe, {total['missing']} missing, "
                   f"{total['unparsed']} unparsed.")
     md += ["", "Differences under about 0.4 are within noise for small panels.", ""]
 
-    md += ["## Leaderboard", "", table(
-        ["Concept", "n", "Mean", "Median", "SD", "Min", "Ranked 1st", "Borda", f"Top {k}", f"Bottom {k}", "Mean rank"],
-        [[d["concept"], d["n"], fmt(d["mean"]), fmt(d["median"], 1), fmt(d["sd"]), fmt(d["min"], 0), d["first"],
-          d["borda"], d["top"], d["bottom"], fmt(d["mean_rank"])] for d in lb]), ""]
+    if single:
+        n_done = scores["overall"]["n"]
+        md += ["## Scores", "",
+               f"Concept {only} over {plural(n_done, 'complete run')}. SD, Min and Max are the "
+               "spread across runs.", "",
+               table(["Factor", "n", "Mean", "Median", "SD", "Min", "Max"],
+                     [[fl[f], d["n"], fmt(d["mean"]), fmt(d["median"], 1), fmt(d["sd"]), fmt(d["min"], 0),
+                       fmt(d["max"], 0)] for f, d in scores.items()]), ""]
+        md += ["## What drives Overall", ""]
+        md += ["Pearson correlation of each factor with Overall across all reviews.", "",
+               table(["Factor", "r"], [[fl[f], fmt(v)] for f, v in strong]), ""] if strong else [
+            "Not computed: the correlation of a factor with Overall needs at least three reviews whose scores "
+            "differ.", ""]
+        if segs:
+            md += ["## By segment", "", "Mean of each factor.", "", table(
+                ["Segment", "Runs", *[fs[f] for f in keys]],
+                [[cfg["segments"].get(s, s), len({run_key(r) for r in rows if r["segment"] == s}),
+                  *[fmt(res["segment_factors"][s][f]) for f in keys]] for s in segs]), ""]
+        md += ["## By model", "", "Mean of each factor.", "", table(
+            ["Model", "Runs", *[fs[f] for f in keys]],
+            [[m, len({run_key(r) for r in rows if r["model"] == m}),
+              *[fmt(res["model_factors"][m][f]) for f in keys]] for m in models]), ""]
+        if pair_diff:
+            md += ["Agreement between models, over each pairing of one persona's runs on the two: the mean absolute "
+                   f"difference in Overall and over all {len(keys)} factors, and the factor profile, which is the "
+                   "Spearman across the factor scores the two runs gave (whether the models agree on what is strong "
+                   "and weak, whatever level each marks at). Spearman across concepts needs at least three concepts, "
+                   "so this study has none. A dash means no pairing could be compared: no persona has a complete "
+                   "run on both, or a run gave every factor the same score.", "",
+                   table(["Pair", "Pairings", "Overall, mean abs diff", "All factors, mean abs diff", "Factor profile"],
+                         [[k2, d["pairs"], fmt(d["overall"]), fmt(d["factors"]), fmt(d["profile_spearman"])]
+                          for k2, d in pair_diff.items()]), ""]
+        if drop_one:
+            md += ["Sensitivity (mean Overall without one model):", "",
+                   table(["Dropped", "Mean Overall", "Change"],
+                         [[m, fmt(d["mean"]), signed(d["change"])] for m, d in drop_one.items()]), ""]
+        if len(models) > 1:
+            apart = [d["persona"] for d in by_persona if d["spread"] is not None and d["spread"] >= 2]
+            md += ["## Model agreement by persona", "",
+                   "Each persona's mean Overall on each model, and the spread between the highest and the lowest. "
+                   "A persona whose models sit 2 points or more apart tells you about model taste, not the persona: "
+                   "report its result as unsettled.", "",
+                   table(["Persona", *models, "Spread"],
+                         [[who(d["persona"]), *[fmt(d["overall"][m], 1) for m in models], fmt(d["spread"], 1)]
+                          for d in by_persona]), ""]
+            if apart:
+                md += [f"Unsettled personas (models 2 points or more apart): {', '.join(apart)}.", ""]
+    else:
+        md += ["## Leaderboard", "", table(
+            ["Concept", "n", "Mean", "Median", "SD", "Min", "Ranked 1st", "Borda", f"Top {k}", f"Bottom {k}", "Mean rank"],
+            [[d["concept"], d["n"], fmt(d["mean"]), fmt(d["median"], 1), fmt(d["sd"]), fmt(d["min"], 0), d["first"],
+              d["borda"], d["top"], d["bottom"], fmt(d["mean_rank"])] for d in lb]), ""]
 
-    md += ["## By factor", "", table(
-        ["Factor", *labels, "Leader"],
-        [[fl[f], *[fmt(fac[c][f]) for c in labels], leaders[f]] for f in keys]), ""]
+        md += ["## By factor", "", table(
+            ["Factor", *labels, "Leader"],
+            [[fl[f], *[fmt(fac[c][f]) for c in labels], leaders[f]] for f in keys]), ""]
+        if caution:
+            md += [f"Format caution: Concept {caution['concepts']}. {caution['exposed']}, so a gap between concepts "
+                   "of different forms on those rows is partly the format: read them within one form only.", ""]
 
-    md += ["## What drives Overall", "", "Pearson correlation of each factor with Overall across all reviews.", "",
-           table(["Factor", "r"], [[fl[f], fmt(v)] for f, v in sorted(drivers.items(), key=lambda kv: -kv[1])]), ""]
+        md += ["## What drives Overall", "", "Pearson correlation of each factor with Overall across all reviews.", "",
+               table(["Factor", "r"], [[fl[f], fmt(v)] for f, v in sorted(drivers.items(), key=lambda kv: -kv[1])]), ""]
 
-    if segs:
-        md += ["## By segment", "", table(
-            ["Segment", "Runs", *labels],
-            [[cfg["segments"].get(s, s), len({run_key(r) for r in rows if r["segment"] == s}),
-              *[fmt(seg_tab[s][c]) for c in labels]] for s in segs]), ""]
+        if segs:
+            md += ["## By segment", "", table(
+                ["Segment", "Runs", *labels],
+                [[cfg["segments"].get(s, s), len({run_key(r) for r in rows if r["segment"] == s}),
+                  *[fmt(seg_tab[s][c]) for c in labels]] for s in segs]), ""]
 
-    md += ["## By model", "", table(
-        ["Model", "Level", *labels, "Top"],
-        [[m, fmt(level[m]), *[fmt(per_model[m][c]) for c in labels],
-          max(labels, key=lambda c: per_model[m][c])] for m in models]), ""]
-    if pair_agree:
-        md += ["Within-persona agreement between models (mean Spearman over each persona's concept scores):", "",
-               table(["Pair", "Spearman"], [[k2, fmt(v)] for k2, v in pair_agree.items()]), ""]
-        if not ranked:
-            md += ["Spearman needs at least three concepts, so this study has none: compare the models by each "
-                   'persona\'s top concept, under "Model agreement by persona".', ""]
-    if sens:
-        md += ["Sensitivity (leaderboard without one model):", "",
-               table(["Dropped", "Winner", "Spearman vs full"],
-                     [[m, s["winner"], fmt(s["rho_vs_full"])] for m, s in sens.items()]), ""]
+        md += ["## By model", "", table(
+            ["Model", "Level", *labels, "Top"],
+            [[m, fmt(level[m]), *[fmt(per_model[m][c]) for c in labels],
+              max(labels, key=lambda c: per_model[m][c])] for m in models]), ""]
+        if pair_agree:
+            md += ["Within-persona agreement between models (mean Spearman over each persona's concept scores):", "",
+                   table(["Pair", "Spearman"], [[k2, fmt(v)] for k2, v in pair_agree.items()]), ""]
+            if not ranked:
+                md += ["Spearman needs at least three concepts, so this study has none: compare the models by each "
+                       'persona\'s top concept, under "Model agreement by persona".', ""]
+        if sens:
+            md += ["Sensitivity (leaderboard without one model):", "",
+                   table(["Dropped", "Winner", "Spearman vs full"],
+                         [[m, s["winner"], fmt(s["rho_vs_full"])] for m, s in sens.items()]), ""]
 
-    if len(models) > 1:
-        weak = [d["persona"] for d in persona_agree
-                if not d["same_top"] and (d["spearman"] is None or d["spearman"] < 0.3)]
-        md += ["## Model agreement by persona", "",
-               "Spearman across a persona's model runs, and each run's first-ranked concept (ties shown as 12=13 when a run has no ranking). A persona whose models disagree "
-               "tells you about model taste, not the persona: report its result as unsettled.", "",
-               table(["Persona", "Spearman", *models, "Same top"],
-                     [[who(d["persona"]), fmt(d["spearman"]),
-                       *[d["tops"].get(m, "-") for m in models], "yes" if d["same_top"] else "no"]
-                      for d in persona_agree]), ""]
-        if weak:
-            md += [f"Unsettled personas (different top concepts{' and Spearman under 0.3' if ranked else ''}): "
-                   f"{', '.join(weak)}.", ""]
+        if len(models) > 1:
+            weak = [d["persona"] for d in persona_agree
+                    if not d["same_top"] and (d["spearman"] is None or d["spearman"] < 0.3)]
+            md += ["## Model agreement by persona", "",
+                   "Spearman across a persona's model runs, and each run's first-ranked concept (ties shown as 12=13 when a run has no ranking). A persona whose models disagree "
+                   "tells you about model taste, not the persona: report its result as unsettled.", "",
+                   table(["Persona", "Spearman", *models, "Same top"],
+                         [[who(d["persona"]), fmt(d["spearman"]),
+                           *[d["tops"].get(m, "-") for m in models], "yes" if d["same_top"] else "no"]
+                          for d in persona_agree]), ""]
+            if weak:
+                md += [f"Unsettled personas (different top concepts{' and Spearman under 0.3' if ranked else ''}): "
+                       f"{', '.join(weak)}.", ""]
 
-    if spread:
+    if spread and single:
         md += ["## Replicate spread", "",
-               "One persona's replicates on one model, compared pair by pair: "
-               + ("the Spearman across their Overall scores, " if ranked else "")
-               + "the share of concepts they gave the same Overall, the mean absolute difference in Overall per "
-               "concept, and the concept each replicate put first. Read it beside model agreement: a result that "
-               "moves this much between two runs of the same persona and model is not stable, and a gap between "
-               "models no wider than this is noise.", "",
-               table(["Persona", "Model", "Replicates", *(["Spearman"] if ranked else []), "Same score",
-                      "Mean abs diff", "Top by replicate", "Same top"],
+               "One persona's replicates on one model: the Overall each gave, and the mean absolute difference "
+               "between them, pair by pair. Read it beside model agreement: a result that moves this much between "
+               "two runs of the same persona and model is not stable, and a gap between models no wider than this "
+               "is noise.", "",
+               table(["Persona", "Model", "Replicates", "Overall by replicate", "Mean abs diff"],
                      [[who(d["persona"]), d["model"], len(d["replicates"]),
-                       *([fmt(d["spearman"])] if ranked else []), f"{d['same_score']:.0%}", fmt(d["mean_abs_diff"]),
-                       ", ".join(d["tops"]), "yes" if d["same_top"] else "no"] for d in spread]), ""]
-        md += [f"- {m}: {d['personas']} persona{'s' if d['personas'] != 1 else ''} with replicates, "
-               + (f"mean Spearman {fmt(d['spearman'])}, " if ranked else "")
-               + f"same score on {d['same_score']:.0%} of concepts, mean absolute difference "
-               f"{fmt(d['mean_abs_diff'])}, same top concept for {d['same_top']} of {d['personas']}."
+                       ", ".join(f"{overall[run][only]:g}" for run in runs_of(d["persona"], d["model"])),
+                       fmt(d["mean_abs_diff"])] for d in spread]), ""]
+        md += [f"- {m}: {plural(d['personas'], 'persona')} with replicates, mean absolute "
+               f"difference {fmt(d['mean_abs_diff'])}, the same Overall from every replicate for "
+               f"{sum(x['same_score'] == 1 for x in spread if x['model'] == m)} of {d['personas']}."
                for m, d in spread_by_model.items()] + [""]
+    elif spread:
+            md += ["## Replicate spread", "",
+                   "One persona's replicates on one model, compared pair by pair: "
+                   + ("the Spearman across their Overall scores, " if ranked else "")
+                   + "the share of concepts they gave the same Overall, the mean absolute difference in Overall per "
+                   "concept, and the concept each replicate put first. Read it beside model agreement: a result that "
+                   "moves this much between two runs of the same persona and model is not stable, and a gap between "
+                   "models no wider than this is noise.", "",
+                   table(["Persona", "Model", "Replicates", *(["Spearman"] if ranked else []), "Same score",
+                          "Mean abs diff", "Top by replicate", "Same top"],
+                         [[who(d["persona"]), d["model"], len(d["replicates"]),
+                           *([fmt(d["spearman"])] if ranked else []), f"{d['same_score']:.0%}", fmt(d["mean_abs_diff"]),
+                           ", ".join(d["tops"]), "yes" if d["same_top"] else "no"] for d in spread]), ""]
+            md += [f"- {m}: {plural(d['personas'], 'persona')} with replicates, "
+                   + (f"mean Spearman {fmt(d['spearman'])}, " if ranked else "")
+                   + f"same score on {d['same_score']:.0%} of concepts, mean absolute difference "
+                   f"{fmt(d['mean_abs_diff'])}, same top concept for {d['same_top']} of {d['personas']}."
+                   for m, d in spread_by_model.items()] + [""]
 
     def beside_parent(pid, value, of, nd):  # a variant's figure, with its difference from its parent's
         parent = variant_of.get(pid)
@@ -594,14 +771,16 @@ def main():
         [[who(p), *[beside_parent(p, pmat[p][c], {q: pmat[q][c] for q in pids}, 1) for c in labels]]
          for p in under_parents(pids, variant_of)]), ""]
 
-    if by_pos:
+    if by_pos and not single:
         md += ["## Order effect", "", f"Pearson r between review position and Overall: {fmt(order_r)}.", "",
                table(["Position", "Mean Overall"], [[p, fmt(v)] for p, v in by_pos.items()]), ""]
 
     md += ["## Persona fit (ICP signal)", "",
-           f"Mean of {', '.join(fl[f] for f in ff)} on the strongest concepts ({', '.join(best)}). "
-           "Read as: how strongly the best version of the offer resonated with each persona.", "",
-           table(["Persona", "Role", "Segment", "Fit", "Best Overall per run"],
+           (f"Mean of {', '.join(fl[f] for f in ff)} on the concept. Read as: how strongly the offer resonated "
+            "with each persona." if single else
+            f"Mean of {', '.join(fl[f] for f in ff)} on the strongest concepts ({', '.join(best)}). "
+            "Read as: how strongly the best version of the offer resonated with each persona."), "",
+           table(["Persona", "Role", "Segment", "Fit", "Mean Overall" if single else "Best Overall per run"],
                  [[who(p), d["role"], d["segment"], beside_parent(p, d["fit"], {q: fit_of[q]["fit"] for q in pids}, 2),
                    fmt(d["best_overall"])]
                   for p in under_parents([d["persona"] for d in fit], variant_of) for d in [fit_of[p]]]), ""]
@@ -613,17 +792,20 @@ def main():
         compared = [d for d in pairs if d["models"]]
         md += ["## Variants", "",
                "A variant is its parent persona with one trait changed, so the difference between the two is "
-               "what that trait did. Each cell is parent / variant (difference): mean Overall on the strongest "
-               f"concepts ({', '.join(best)}), then persona fit, over the complete runs on the model keys both "
+               "what that trait did. Each cell is parent / variant (difference): mean Overall on "
+               + ("the concept" if single else f"the strongest concepts ({', '.join(best)})")
+               + ", then persona fit, over the complete runs on the model keys both "
                "have. In every other table a variant counts as a persona of its own.", ""]
         if compared:
             md += [table(
-                ["Variant", "Parent", "Differs in", "Models", "Runs", *best, "Fit", "Top concept"],
+                ["Variant", "Parent", "Differs in", "Models", "Runs", *best, "Fit",
+                 *([] if single else ["Top concept"])],
                 [[f"{d['variant']} {names.get(d['variant'], '')}", f"{d['parent']} {names.get(d['parent'], '')}",
                   ", ".join(d["differs_in"]) or "-", ", ".join(d["models"]),
                   f"{d['runs']['parent']} / {d['runs']['variant']}",
                   *[both(d["concepts"][c]["parent"], d["concepts"][c]["variant"]) for c in best],
-                  both(d["fit"]["parent"], d["fit"]["variant"], 2), f"{d['top']['parent']} / {d['top']['variant']}"]
+                  both(d["fit"]["parent"], d["fit"]["variant"], 2),
+                  *([] if single else [f"{d['top']['parent']} / {d['top']['variant']}"])]
                  for d in compared]), ""]
         if len(compared) < len(pairs):
             md += ["Nothing to compare, because the runs analysed here have no parent and variant on the same "
@@ -631,15 +813,15 @@ def main():
                    + ".", ""]
 
     def behind(what, n):  # says so when a tally covers fewer runs than the tables above
-        return "" if n == len(done) else (f" The {what} cover {n} of the {len(done)} complete runs: run "
+        return "" if n == len(done) else (f" The {what} cover {n} of the {plural(len(done), 'complete run')}: run "
                                           "extract_answers.py again.")
 
     if answers:
         md += ["## Find the answer", "",
-               f"Whether each panellist could find the answer to each question, over {answers['runs']} complete "
-               "runs. Unparsed means the answer does not start with Found, Partly or Not found: read those in "
-               "analysis/answers.csv, they are counted nowhere else. Missing means the panellist gave the "
-               "question no answer." + behind("answers", answers["runs"]), "",
+               "Whether each panellist could find the answer to each question, over "
+               f"{plural(answers['runs'], 'complete run')}. Unparsed means the answer does not start with Found, "
+               "Partly or Not found: read those in analysis/answers.csv, they are counted nowhere else. Missing "
+               "means the panellist gave the question no answer." + behind("answers", answers["runs"]), "",
                table(["Question", "Concept", "Found", "Partly", "Not found", "Missing", "Unparsed"],
                      [[f"{q['question']}. {q['text']}" if c == labels[0] else "", c,
                        *[q["concepts"][c][k] for k in [*ANSWER_COUNTS.values(), "unparsed"]]]
@@ -647,8 +829,8 @@ def main():
 
     if lines:
         md += ["## Forward test", "",
-               f"Whether each panellist would forward the page, over {lines['runs']} complete runs. Unparsed "
-               "means the answer starts with none of yes, no and maybe: read those in analysis/lines.csv, where "
+               f"Whether each panellist would forward the page, over {plural(lines['runs'], 'complete run')}. "
+               "Unparsed means the answer starts with none of yes, no and maybe: read those in analysis/lines.csv, where "
                "who they would send it to and the message are too." + behind("lines", lines["runs"]), "",
                table(["Concept", "Yes", "No", "Maybe", "Missing", "Unparsed"],
                      [[c, *[lines["forward"][c][k] for k in [*FORWARD_COUNTS, "unparsed"]]] for c in labels]), ""]
@@ -657,14 +839,15 @@ def main():
                "Lines more than one run quoted for a concept, with how many runs quoted each as the line to keep, "
                "the line to cut and the one they don't believe. Two quotations are the same line when they "
                "differ only in case, quote style, spacing or a closing full stop."
-               + (f" {lines['unparsed']} line entries could not be read and are not counted: see "
-                  "analysis/lines.csv." if lines["unparsed"] else ""), ""]
+               + (f" {plural(lines['unparsed'], 'line entry', 'line entries')} could not be read and "
+                  f"{pl.agree(lines['unparsed'], 'is', 'are')} not counted: see analysis/lines.csv."
+                  if lines["unparsed"] else ""), ""]
         md += [table(["Concept", "Line", "Runs", "Keep", "Cut", "Not believed"],
                      [[c, '"' + d["line"].replace("|", "\\|") + '"', d["runs"], *[d[k] for k in pl.LINE_FIELDS]]
                       for c, d in recurring]) if recurring else "No line was quoted by more than one run.", ""]
 
     md += inc_md
-    write(md[: md.index("## Leaderboard")])
+    write(md[: md.index("## Scores" if single else "## Leaderboard")])
 
 
 if __name__ == "__main__":

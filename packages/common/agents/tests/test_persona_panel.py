@@ -6,12 +6,14 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 import venv
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -46,6 +48,34 @@ def finals(ranking):
     lines += [f"{i + 1}. Concept {l} - reason" for i, l in enumerate(ranking)]
     lines += ["", "## Out of character: researcher notes", "Notes."]
     return "\n".join(lines) + "\n"
+
+
+def png(width, height):
+    """A white PNG image of that size."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\x00" + b"\xff\xff\xff" * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def pdf(pages):
+    """A PDF with one page for each line of text given."""
+    font = "<< /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>"
+    objects = ["<< /Type /Catalog /Pages 2 0 R >>",
+               f"<< /Type /Pages /Kids [{' '.join(f'{3 + 2 * i} 0 R' for i in range(len(pages)))}] "
+               f"/Count {len(pages)} >>"]
+    for i, text in enumerate(pages):
+        stream = f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET"
+        objects += [f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {4 + 2 * i} 0 R "
+                    f"/Resources {font} >>", f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream"]
+    out, offsets = "%PDF-1.4\n", []
+    for n, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{n} 0 obj\n{body}\nendobj\n"
+    table = "".join(f"{offset:010d} 00000 n \n" for offset in offsets)
+    return (f"{out}xref\n0 {len(objects) + 1}\n0000000000 65535 f \n{table}trailer\n<< /Size {len(objects) + 1} "
+            f"/Root 1 0 R >>\nstartxref\n{len(out)}\n%%EOF\n").encode("latin-1")
 
 
 class PersonaPanelTest(unittest.TestCase):
@@ -136,6 +166,21 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertEqual(first_key, self.sd.joinpath("key.md").read_text())
         self.assertIn("Read nothing outside", self.sd.joinpath(self.runs[0]["prompt"]).read_text())
 
+    def test_scaffold_and_plan_warn_when_every_persona_reviews_in_the_same_order(self):
+        warning, seen = "every persona reviews in the same order", set()
+        for seed in range(1, 7):
+            sd = self.study(f"seed-{seed}", seed=seed, concepts=self.cfg["concepts"][:2])
+            scaffolded = run("init_study.py", sd).stdout
+            same = len(set(re.findall(r"^\| P0\d [^|]+\| (.+) \|$", sd.joinpath("key.md").read_text(), re.M))) == 1
+            planned = run("launch.py", sd, "plan").stdout
+            self.assertEqual((f"WARNING: {warning}" in scaffolded, f"Note: {warning}" in planned), (same, same),
+                             f"seed {seed}")
+            seen.add(same)
+        self.assertEqual(seen, {True, False})  # the seeds cover an order shared by all, and orders that differ
+        dana = self.cfg["personas"][0]  # a variant takes its parent's order on purpose
+        sd = self.study("pair", personas=[dana, {**dana, "id": "P02", "personality": "Blunt", "variant_of": "P01"}])
+        self.assertNotIn(warning, run("init_study.py", sd).stdout)
+
     def test_init_refuses_to_overwrite_runs(self):
         r = run("init_study.py", self.sd, check=False)
         self.assertNotEqual(r.returncode, 0)
@@ -173,6 +218,42 @@ class PersonaPanelTest(unittest.TestCase):
                                             '"sonnet" is not a model key'),
             "the study brief as a file for the analysts": (
                 {"synthesis": {"context_files": ["notes/Study-Brief.md"]}}, "is the study brief"),
+            "unknown concept kind": ({"concepts": [{"id": "x", "kind": "figma", "path": "../concepts/01-plain"}]},
+                                     'unknown "kind" "figma"'),
+            "a url that is not http or https": (
+                {"concepts": [{"id": "x", "kind": "url", "url": "file:///srv/site/index.html"}]},
+                "must be a full http:// or https:// URL"),
+            "a url whose first page is not the home page": (
+                {"concepts": [{"id": "x", "kind": "url", "pages": [{"name": "pricing", "url": "https://a.test/p"}]}]},
+                'named "index"'),
+            "a file of a type no panellist can open": (
+                {"concepts": [{"id": "x", "kind": "files", "files": ["../mock/home.psd"]}]},
+                '"../mock/home.psd" is not a file type a panel can review'),
+            "a file that is not there": ({"concepts": [{"id": "x", "kind": "files", "files": ["../mock/gone.png"]}]},
+                                         "Concept x: no file"),
+            "only images in a text-only study": (
+                {"materials": "text", "concepts": [{"id": "x", "kind": "files", "files": ["../mock/home.png"]}]},
+                "it has only images, and a text-only study"),
+            "one concept and no singular for what it is": (
+                {"concepts": self.cfg["concepts"][:1], "artefact_plural": "pricing pages"},
+                'a study with one concept needs "artefact"'),
+            # Names that become part of a path: none may leave the folder it is put in.
+            "a state name that leaves its folder": (
+                {"concepts": [{**self.cfg["concepts"][0], "states": [{"name": "../../x", "js": "1"}]}]},
+                'the state name "../../x" must be letters, digits, hyphens and underscores only'),
+            "a concept id that leaves the archive": (
+                {"concepts": [{"id": "../x", "path": "../concepts/01-plain"}]},
+                'the concept id "../x" must be one part of a file name'),
+            "a persona id that leaves the personas folder": (
+                {"personas": [{**dana, "id": "../../P01"}, sam]}, 'the persona id "../../P01" must be one part of'),
+            "a persona id with a hyphen, which file names split on": (
+                {"personas": [{**dana, "id": "P-01"}, sam]}, 'the persona id "P-01" cannot hold a hyphen'),
+            "a persona whose name gives no file name": (
+                {"personas": [{**dana, "name": "\u674e\u96f7"}, sam]}, 'has no letter from a to z and no digit'),
+            "two personas with one id": ({"personas": [dana, {**sam, "id": "p01"}]}, 'two personas have the id "p01"'),
+            "a pinned label that leaves the materials folder": (
+                {"labels": {"A/../../x": "01-plain", "B": "02-story", "C": "03-console"}},
+                'the label "A/../../x" must be letters and digits only'),
         }
         for i, (name, (overrides, message)) in enumerate(cases.items()):
             with self.subTest(name):
@@ -181,6 +262,20 @@ class PersonaPanelTest(unittest.TestCase):
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn(message, r.stderr)
                 self.assertFalse((sd / "runs.json").exists())
+
+    def test_folder_of_images_alone_in_a_text_only_study_is_refused_and_the_plan_says_why(self):
+        mock_ups = Path(self.tmp.name) / "mock"
+        mock_ups.mkdir()
+        (mock_ups / "home.png").write_bytes(png(40, 30))
+        sd = self.study("words", materials="text",
+                        concepts=[*self.cfg["concepts"][:1], {"id": "mock-ups", "kind": "files", "path": "../mock"}])
+        why = "Concept mock-ups: it has only images, and a text-only study"
+        planned = run("launch.py", sd, "plan")  # read before anything is scaffolded, and it starts nothing
+        self.assertIn(f"Missing: {why}", planned.stdout)
+        refused = run("init_study.py", sd, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn(why, refused.stderr)
+        self.assertFalse((sd / "runs.json").exists())
 
     def test_model_entries_and_replicates_name_runs_and_files(self):
         sd = self.study("entries", runner="claude", replicates=2, models=[
@@ -218,6 +313,9 @@ class PersonaPanelTest(unittest.TestCase):
             "native study, browsing by default": ({}, True, {"opus": offered, "fable": offered}),
             "browsing switched off": ({"browse": False, "models": both}, False, {"a": None, "b": None}),
             "a runner that cannot drive a browser": ({"models": both}, True, {"a": offered, "b": ruled_out}),
+            "a live URL beside a site, with browsing not asked for": (
+                {"concepts": [*self.cfg["concepts"][:1], {"id": "live", "kind": "url", "url": "https://a.test/"}]},
+                False, {"opus": None, "fable": None}),
         }
         for i, (name, (settings, in_instructions, prompts)) in enumerate(cases.items()):
             with self.subTest(name):
@@ -230,6 +328,18 @@ class PersonaPanelTest(unittest.TestCase):
                     prompt = sd.joinpath(f"prompts/P01-{key}.md").read_text()
                     self.assertEqual([x for x in (offered, ruled_out) if x in prompt], [says] if says else [])
                     self.assertEqual("agent-browser" in prompt, bool(says))
+                    # A run allowed agent-browser and no other command cannot make its screenshot folder.
+                    self.assertEqual((sd / f"panel/scratch/P01-{key}").is_dir(), says == offered)
+                # A site copy is the page source under its own file names: it is inside panel/, which a
+                # panellist may read, only where the browser opens it, and no instruction names it elsewhere.
+                copies = {str(f.relative_to(sd).parent.parent) for f in sd.rglob("pricing.html")}
+                self.assertEqual(copies, {"panel/sites" if in_instructions else "sites"})
+                self.assertEqual("/sites/concept-" in instructions, in_instructions)
+        sd = Path(self.tmp.name) / "browse-0"  # scaffolded with browsing on: the copies follow the setting
+        for browse in (False, True):
+            sd.joinpath("study.json").write_text(json.dumps({**self.cfg, "browse": browse}))
+            run("init_study.py", sd, "--force")
+            self.assertEqual(((sd / "panel/sites").exists(), (sd / "sites").exists()), (browse, not browse))
 
     def test_native_and_runner_studies_keep_to_their_own_tools(self):
         through_runners = self.study("through-runners", runner="claude")
@@ -281,7 +391,52 @@ class PersonaPanelTest(unittest.TestCase):
         out = run("runs.py", sd, "status").stdout
         self.assertIn(f"{whole['run']:<16} done", out)
         self.assertIn(f"{cut_off['run']:<16} started", out)
-        self.assertIn("2 score rows from 2 runs; 1 runs incomplete", run("extract_scores.py", sd).stdout)
+        self.assertIn("2 score rows from 2 runs; 1 run incomplete", run("extract_scores.py", sd).stdout)
+
+    def test_single_concept_study_passes_checks_and_analysis_with_nothing_ranked_or_compared(self):
+        sd = self.study("one", concepts=self.cfg["concepts"][:1], artefact="pricing page",
+                        artefact_plural="pricing pages", models=["opus", "haiku"])  # haiku has default notes
+        run("init_study.py", sd)
+        runs = json.loads(sd.joinpath("runs.json").read_text())
+        told = [sd.joinpath("panel/_panel-instructions.md").read_text(),
+                *(sd.joinpath(r[k]).read_text() for r in runs for k in ("prompt", "file"))]
+        self.assertIn("give honest feedback on one pricing page for", told[0])
+        self.assertIn("There is one concept to review, Concept A:", told[0])
+        for text in told:  # one design: nothing to compare it with, rank it against or order it among
+            for word in ("alternative", "anking", "Comparison", "Score summary", "Review order", "the order",
+                         "each concept", "top concept", "pricing pages", "1 concepts"):
+                self.assertNotIn(word, text)
+        # Four runs that disagree, none with a ranking, since the template asks for none.
+        for r, overall in zip(runs, (8, 6, 9, 4)):
+            f = sd / r["file"]
+            f.write_text(f.read_text() + filled_section("A", [*range(1, FACTORS), overall])
+                         + "## Out of character: researcher notes\nNotes.\n")
+        checked = run("check_runs.py", sd)
+        self.assertNotIn("ranking", checked.stdout)
+        self.assertIn("4 run files of 4 expected; 0 with blocking problems", checked.stdout)
+        self.assertIn("4 score rows from 4 runs; 0 runs incomplete", run("extract_scores.py", sd).stdout)
+        self.assertEqual(sd.joinpath("analysis/rankings.csv").read_text().splitlines(),
+                         ["persona_id,model,replicate,complete,segment,rank,concept"])
+        printed = run("analyze.py", sd).stdout
+        report = sd.joinpath("analysis/quant.md").read_text()
+        self.assertIn("- Mean Overall 6.75 across 4 runs (median 7.0, SD 2.22, lowest 4, highest 9).", printed)
+        self.assertIn("| Overall | 4 | 6.75 | 7.0 | 2.22 | 4 | 9 |", report)
+        self.assertIn("Spearman across concepts is not available with one concept", printed)
+        for text in (printed, report):
+            for heading in ("## Leaderboard", "Winner", "Ranked", "| Borda", "## Order effect", "Top 1", "Same top"):
+                self.assertNotIn(heading, text)
+            self.assertIsNone(re.search(r"\bnan\b", text, re.I))
+        lines = report.splitlines()  # no table is a header alone
+        for i, line in enumerate(lines):
+            if line.startswith("|---"):
+                self.assertTrue(lines[i + 1].startswith("| "), lines[i - 1])
+
+        def strict(constant):
+            raise AssertionError(f"quant.json holds {constant}, which is not JSON")
+        quant = json.loads(sd.joinpath("analysis/quant.json").read_text(), parse_constant=strict)
+        self.assertEqual((quant["concept"], "leaderboard" in quant, "order" in quant), ("A", False, False))
+        # Model agreement on the one concept: each persona's two models, 2 and 5 points apart.
+        self.assertEqual(quant["models"]["pair_difference"]["opus-haiku"]["overall"], 3.5)
 
     def test_runs_status_and_next(self):
         out = run("runs.py", self.sd, "next", "--limit", "3", "--running", "P01-opus").stdout
@@ -307,6 +462,38 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertIn("| Top 1 | Bottom 1 |", self.sd.joinpath("analysis/quant.md").read_text())
         seg = run("analyze.py", self.sd, "--segment", "owner").stdout
         self.assertIn("2 runs", seg)
+
+    def test_analysis_says_when_concepts_of_different_forms_are_compared_and_no_panellist_is_told(self):
+        base = Path(self.tmp.name)
+        (base / "screenshot.png").write_bytes(png(40, 40))
+        (base / "deck.pdf").write_bytes(pdf(["One page"]))
+        # An image beside a PDF where Poppler is installed, which a PDF needs, and beside a site where it is not.
+        other = ({"id": "02-story", "kind": "files", "files": ["../deck.pdf"]}
+                 if all(shutil.which(tool) for tool in ("pdftotext", "pdftoppm")) else self.cfg["concepts"][1])
+        sd = self.study("forms", concepts=[{"id": "01-plain", "kind": "files", "files": ["../screenshot.png"]}, other,
+                                           {"id": "03-console", "kind": "files", "files": ["../screenshot.png"]}])
+        run("init_study.py", sd)
+        self.key = sd.joinpath("key.md").read_text()
+        self.fill_all(json.loads(sd.joinpath("runs.json").read_text()), sd)
+        run("extract_scores.py", sd)
+        run("analyze.py", sd)
+        report, filed = sd.joinpath("analysis/quant.md").read_text(), self.labels_for("03-console")
+        top, by_factor = report.index("Format caution: the concepts did not all reach the panel in one form"), \
+            report.index("## By factor")
+        self.assertLess(top, report.index("## Key numbers"))
+        self.assertIn(f"{filed} is image files", report[top:report.index("## Key numbers")])
+        self.assertIn("Visual design and Mobile are the factors most exposed", report[by_factor:])
+        told = "".join(f.read_text() for folder in ("panel", "prompts") for f in (sd / folder).rglob("*.md"))
+        self.assertNotIn("image files", told)
+        # An archive without --concepts has no source file left to tell a PDF from an image.
+        dest = base / "archive/forms"
+        run("archive.py", sd, "--dest", dest)
+        run("analyze.py", dest)
+        self.assertIn(report[top:report.index("## Key numbers")], dest.joinpath("analysis/quant.md").read_text())
+        self.fill_all()  # concepts all of one form have no format to tell apart
+        run("extract_scores.py", self.sd)
+        run("analyze.py", self.sd)
+        self.assertNotIn("Format caution", self.sd.joinpath("analysis/quant.md").read_text())
 
     def test_run_stopped_by_a_limit_is_listed_apart_from_the_headline_tables(self):
         stopped, *whole = self.runs
@@ -381,6 +568,12 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertIn(f"=== {r1['run']} (pending, agent: not recorded", out)
         nxt = run("runs.py", self.sd, "next", "--limit", "20").stdout
         self.assertNotIn(f"=== {r0['run']}", nxt)
+        # A section written without its score row counts for nothing, so the run is asked for the row.
+        unscored = self.labels_for("02-story")
+        f.write_text(f.read_text() + f"### Concept {unscored}\n**5-second take (in my words):** fine.\n")
+        out = run("runs.py", self.sd, "resume", r0["run"]).stdout
+        self.assertIn(f"Written, but with no score row: {unscored}.", out)
+        self.assertIn("add the score table at the end of that section", out)
 
     def test_runs_json_from_before_model_entries_still_works(self):
         old = self.runs_before_model_entries()
@@ -438,6 +631,87 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertTrue((dest / "key.md").exists())
         self.assertFalse((dest / "materials").exists())
         self.assertFalse((dest / "sites").exists())
+
+    def test_archive_keeps_every_file_of_a_concept_when_files_from_different_folders_share_a_name(self):
+        base = Path(self.tmp.name)
+        sources = {"a/foo.png": png(1, 1), "b/foo.png": png(2, 2), "c/item-02-foo.png": png(3, 3)}
+        for name, image in sources.items():
+            (base / name).parent.mkdir()
+            (base / name).write_bytes(image)
+        sd = self.study("clash", concepts=[{"id": "shots", "kind": "files", "files": [f"../{name}" for name in sources]}])
+        run("init_study.py", sd)
+        run("archive.py", sd, "--dest", base / "archive/topic/panel/round-1", "--concepts")
+        self.assertEqual({f.name: f.read_bytes() for f in (base / "archive/topic/concepts/shots").iterdir()},
+                         dict(zip(("item-01-foo.png", "item-02-foo.png", "item-03-item-02-foo.png"), sources.values())))
+
+    def test_capture_refuses_a_path_that_leaves_the_materials_directory_before_it_writes_or_deletes(self):
+        base, sd = Path(self.tmp.name), self.study("leaving", materials="text")  # words alone need no ImageMagick
+        materials, study_json = sd / "panel/materials", sd / "study.json"
+        run("init_study.py", sd)
+        fakes.install(base, "agent-browser")
+
+        def planted(folder):  # the sheets of an earlier capture, which a capture of the page replaces
+            for name in ("raw/d-00.png", "desktop-sheet-01.png"):
+                (folder / name).parent.mkdir(parents=True, exist_ok=True)
+                (folder / name).write_bytes(png(1, 1))
+            return folder
+
+        def refused(why, outside):
+            captured = subprocess.run([sys.executable, str(SCRIPTS / "capture.py"), str(sd)],
+                                      env={"PATH": str(base)}, capture_output=True, text=True)
+            self.assertEqual(len(list(outside.rglob("*.png"))), 2)
+            self.assertEqual(list(materials.rglob("page-text.txt")), [])
+            self.assertNotEqual(captured.returncode, 0)
+            self.assertIn(why, captured.stderr)
+
+        # A state is captured to the folder <page>@<name>: this name would make that <tmp>/external.
+        scaffolded = json.loads(study_json.read_text())
+        climbing = {**self.cfg["concepts"][0], "states": [{"name": "x/../../../../../external", "js": "1"}]}
+        study_json.write_text(json.dumps({**scaffolded, "concepts": [climbing, *self.cfg["concepts"][1:]]}))
+        refused('the state name "x/../../../../../external" must be letters', planted(base / "external"))
+        # With every name in order, a folder under panel/materials that links elsewhere still leads out.
+        study_json.write_text(json.dumps(scaffolded))
+        (materials / "concept-A").symlink_to(base / "linked")
+        refused("Refusing to write or delete", planted(base / "linked/index").parent)
+
+    def test_capture_killed_while_it_published_a_page_leaves_one_whole_capture_of_it_to_the_next(self):
+        base, sd = Path(self.tmp.name), self.study("killed", materials="text")  # words alone need no ImageMagick
+        run("init_study.py", sd)
+        fakes.install(base, "agent-browser")
+        ended = subprocess.Popen([sys.executable, "-c", ""])
+        ended.wait()
+        page, folders = "panel/materials/concept-A/index", {"new": "000", "earlier": "000.earlier"}
+        # What a capture of concept A's index left: its record of the publication, the new capture and the
+        # earlier one, each in the scratch folder, in place or nowhere. The next capture is of concept B.
+        for case, pid, place, held, before, after, stays, says in (
+                ("killed with the earlier capture moved aside", ended.pid, page, ("new", "earlier"), None, "new", False,
+                 f"Finished publishing {page}"),
+                ("killed with the new capture moved in", ended.pid, page, ("earlier",), "new", "new", False, None),
+                ("left with the earlier capture alone", ended.pid, page, ("earlier",), None, "earlier", False,
+                 f"Put back the earlier capture of {page}"),
+                ("still at work", os.getpid(), page, ("new", "earlier"), None, None, True, None),
+                ("recorded for a place outside the materials", ended.pid, "../outside/index", ("new", "earlier"), None,
+                 None, True, "Refusing to move a capture to")):
+            with self.subTest(case):
+                scratch, dest = sd / f".capture-{pid}-left", sd / place
+                for folder, text in [*((scratch / folders[kept], kept) for kept in held),
+                                     *([(dest, before)] if before else [])]:
+                    folder.mkdir(parents=True)
+                    (folder / "page-text.txt").write_text(text)
+                (scratch / "000.publish").write_text(json.dumps({"dest": place, **folders}))
+                captured = subprocess.run([sys.executable, str(SCRIPTS / "capture.py"), str(sd), "--label", "B"],
+                                          env={"PATH": str(base)}, capture_output=True, text=True)
+                self.assertEqual(captured.returncode == 0, place == page, captured.stderr)
+                if says:
+                    self.assertIn(says, captured.stdout + captured.stderr)
+                self.assertEqual({f.parent.name: f.read_text() for f in sd.glob("panel/materials/concept-A/*/*")},
+                                 {"index": after} if after else {})
+                self.assertFalse((base / "outside").exists())
+                self.assertEqual(sorted(f.read_text() for f in scratch.glob("*/page-text.txt")),
+                                 sorted(held) if stays else [])
+                self.assertEqual(scratch.exists(), stays)
+                shutil.rmtree(scratch, True)
+                shutil.rmtree(sd / page, True)
 
     def test_archived_study_from_before_run_completeness_still_analyses(self):
         self.fill_all()
@@ -1139,7 +1413,8 @@ class LauncherTest(unittest.TestCase):
                 pass
 
     def study(self, plan=None, personas=2, models=None, name="study", **settings):
-        """Scaffold a study and set the plan the fakes follow. Becomes self.sd."""
+        """Scaffold a study, with the text of each site page standing in for its capture, and set the
+        plan the fakes follow. Becomes self.sd."""
         for cid in ("one", "two", "three"):
             d = self.tmp / "concepts" / cid
             d.mkdir(parents=True, exist_ok=True)
@@ -1153,6 +1428,10 @@ class LauncherTest(unittest.TestCase):
                          for i in range(1, personas + 1)], **settings})
         subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd)], check=True,
                        capture_output=True, text=True)
+        for page in [*self.sd.glob("panel/sites/concept-*/*.html"), *self.sd.glob("sites/concept-*/*.html")]:
+            captured = self.sd / "panel/materials" / page.parent.name / page.stem
+            captured.mkdir(parents=True)
+            (captured / "page-text.txt").write_text(page.stem)
         shutil.rmtree(self.fake, True)
         (self.fake / "go").mkdir(parents=True)
         (self.fake / "plan.json").write_text(json.dumps(plan or {}))
@@ -1383,6 +1662,136 @@ class LauncherTest(unittest.TestCase):
         checked = run("check_runs.py", self.sd, check=False)
         self.assertEqual(checked.returncode, 1)
         self.assertIn("| P01-opus | no parseable score row:", checked.stdout)
+
+    def test_url_and_files_concepts_reach_panellists_under_neutral_names_and_a_url_only_when_the_study_browses(self):
+        poppler = all(shutil.which(tool) for tool in ("pdftotext", "pdftoppm"))
+        mock = self.tmp / "mock"
+        mock.mkdir()
+        (mock / "hero-shot-final.png").write_bytes(png(40, 3000))  # far taller than a screen
+        (mock / "sales-deck.pdf").write_bytes(pdf(["Books done by Friday", "Lorem ipsum pricing"]))
+        address = "http://shop.example.test/launch-offer"
+        self.study(personas=1, models=[self.CLAUDE], leak_terms=["secret codename"], forbidden_terms=["lorem ipsum"],
+                   concepts=[{"id": "live-pricing", "kind": "url", "url": address},
+                             {"id": "investor-mockups", "kind": "files",
+                              "files": ["../mock/hero-shot-final.png", *(["../mock/sales-deck.pdf"] if poppler else [])]}])
+        key = self.sd.joinpath("key.md").read_text()
+        live, filed = (re.search(rf"^\| (\w) \| {cid} \|", key, re.M).group(1)
+                       for cid in ("live-pricing", "investor-mockups"))
+        named = ["live-pricing", "investor-mockups", "hero-shot", "sales-deck", "shop.example.test", "launch-offer"]
+
+        def leaked():  # everything a panellist can read, and the name of every file it could list
+            seen = [f for folder in ("panel", "prompts") for f in sorted((self.sd / folder).rglob("*"))]
+            return {str(f.relative_to(self.sd)) for f in seen for word in named
+                    if word in str(f.relative_to(self.sd)) or (f.is_file() and word.encode() in f.read_bytes())}
+
+        def argv_of_a_run():
+            started = len(self.starts())
+            self.launch("pilot")
+            return " ".join(self.starts(started)[0]["argv"])
+
+        # Scaffolded: key.md maps what no panellist is told, and a live URL is not browsed unless the study says so.
+        for word in (address, "hero-shot-final.png", *(["sales-deck.pdf"] if poppler else [])):
+            self.assertIn(word, key)
+        self.assertEqual(leaked(), set())
+        self.assertFalse((self.sd / "panel/sites").exists())
+        self.assertNotIn("agent-browser", self.sd.joinpath("panel/_panel-instructions.md").read_text())
+
+        # Captured: the live page as a page, each file as a numbered item, and the term scan over both.
+        tools = self.tmp / "tools"
+        tools.mkdir()
+        for tool in ("magick", "convert", "identify", "montage", "pdftotext", "pdftoppm"):
+            if shutil.which(tool):
+                os.symlink(shutil.which(tool), tools / tool)
+        if not ((tools / "magick").exists() or all((tools / t).exists() for t in ("convert", "identify", "montage"))):
+            self.skipTest("ImageMagick is not installed, so nothing can be captured")
+        captured = subprocess.run(
+            [sys.executable, str(self.scripts / "capture.py"), str(self.sd)], capture_output=True, text=True,
+            env={**self.env, "PATH": f"{self.bin}:{tools}", "FAKE_PAGE_TEXT": "Our secret codename is Atlas."})
+        self.assertEqual(captured.returncode, 0, captured.stderr)
+        materials = self.sd / "panel/materials"
+        self.assertEqual(sorted(str(f.relative_to(materials)) for f in materials.rglob("*") if f.is_file()), sorted([
+            f"concept-{live}/index/page-text.txt",
+            *(f"concept-{filed}/item-01/{name}" for name in ("image.png", "part-01.png", "part-02.png")),
+            *((f"concept-{filed}/item-02/{name}" for name in ("page-01.png", "page-02.png", "page-text.txt"))
+              if poppler else [])]))
+        self.assertIn(f"panel/materials/concept-{live}/index/page-text.txt: 'secret codename'", captured.stdout)
+        if poppler:
+            self.assertEqual(materials.joinpath(f"concept-{filed}/item-02/page-text.txt").read_text(),
+                             "[Page 1]\nBooks done by Friday\n\n[Page 2]\nLorem ipsum pricing\n")
+            self.assertIn(f"panel/materials/concept-{filed}/item-02/page-text.txt: 'lorem ipsum'", captured.stdout)
+        self.assertEqual(leaked(), set())
+        # The plan counts a PDF by its pages and a tall image once, and estimates from what a run opens.
+        plan = self.plan()
+        counted = next(c for c in plan["materials"]["concepts"] if c["concept"] == f"concept-{filed}")
+        self.assertEqual(({k: counted[k] for k in ("pdfs", "pdf_pages", "images", "parts")}, plan["estimate"]["pages"]),
+                         ({"pdfs": 1, "pdf_pages": 2, "images": 1, "parts": 2}, 4) if poppler else
+                         ({"pdfs": 0, "pdf_pages": 0, "images": 1, "parts": 2}, 2))
+        self.assertNotIn("Bash", argv_of_a_run())
+
+        # "browse": true puts the address in the instructions' browser rules and nowhere else.
+        self.settings({"browse": True})
+        subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd), "--force"], check=True,
+                       capture_output=True, text=True)
+        instructions = self.sd.joinpath("panel/_panel-instructions.md").read_text()
+        rules = instructions[instructions.index("   - Optional: open a page in a real browser"):
+                             instructions.index("3. **Write only to your own persona file.**")]
+        self.assertIn(f"Concept {live}: `index` is at `{address}`.", rules)
+        self.assertIn(f"Concept {filed} cannot be opened in a browser", rules)
+        self.assertEqual(instructions.count("shop.example.test"), 1)
+        self.assertEqual(leaked(), {"panel/_panel-instructions.md"})
+        self.assertIn("Bash(agent-browser:*)", argv_of_a_run())
+        self.assertIn("External hosts the instructions send panellists to: shop.example.test.", self.launch("plan").stdout)
+
+    def test_item_that_cannot_be_captured_leaves_no_folder_keeps_an_earlier_capture_and_holds_the_runs_back(self):
+        if not all(shutil.which(tool) for tool in ("pdftotext", "pdftoppm")):
+            self.skipTest("Poppler is not installed, so no PDF can be captured")
+        deck, appendix = self.tmp / "deck.pdf", self.tmp / "appendix.pdf"
+        deck.write_bytes(pdf(["Books done by Friday"]))
+        appendix.write_bytes(b"%PDF-1.4\nnothing a reader can open\n")
+        self.study(personas=1, models=[self.CLAUDE],
+                   concepts=[{"id": "deck", "kind": "files", "files": ["../deck.pdf", "../appendix.pdf"]}])
+        items = self.sd / "panel/materials/concept-A"
+
+        def capture():
+            done = subprocess.run([sys.executable, str(self.scripts / "capture.py"), str(self.sd)],
+                                  capture_output=True, text=True)
+            return done.returncode, done.stdout + done.stderr
+
+        # The item that failed has no folder, the rest are captured, and the script says so by its exit code.
+        code, said = capture()
+        self.assertNotEqual(code, 0)
+        self.assertIn("FAILED A/item-02: pdftotext could not read the PDF", said)
+        self.assertIn("1 of 2 pages and items could not be captured", said)
+        self.assertEqual(sorted(d.name for d in items.iterdir()), ["item-01"])
+        text = items.joinpath("item-01/page-text.txt").read_text()
+        self.assertEqual(text, "[Page 1]\nBooks done by Friday\n")
+        # The plan names what is missing, and no run starts on a concept short of an item.
+        why = "concept-A has no capture of item-02, so a run would review it with that missing"
+        self.assertEqual(self.plan()["materials"]["incomplete"], [{"concept": "concept-A", "lacks": ["item-02"]}])
+        self.assertIn(f"Missing: the materials: {why}", self.launch("plan").stdout)
+        held_back = self.launch("run")
+        self.assertIn(f"Nothing was started: {why}", held_back.stdout + held_back.stderr)
+        self.assertEqual(self.starts(), [])
+        # A capture that fails where an earlier one succeeded leaves the earlier one as it was.
+        deck.write_bytes(appendix.read_bytes())
+        self.assertNotEqual(capture()[0], 0)
+        self.assertEqual(sorted(str(f.relative_to(items)) for f in items.rglob("*") if f.is_file()),
+                         ["item-01/page-01.png", "item-01/page-text.txt"])
+        self.assertEqual(items.joinpath("item-01/page-text.txt").read_text(), text)
+
+    def test_pdf_concept_without_poppler_is_refused_before_anything_is_scaffolded(self):
+        (self.tmp / "deck.pdf").write_bytes(pdf(["One page"]))
+        self.sd = self.tmp / "study"
+        self.sd.mkdir()
+        self.settings({"product": "Acme", "models": [self.CLAUDE],
+                       "concepts": [{"id": "deck", "kind": "files", "files": ["../deck.pdf"]}],
+                       "personas": [{"id": "P01", "name": "Person 1", "role": "Owner", "personality": "Sceptic"}]})
+        refused = subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd)], env=self.env,
+                                 capture_output=True, text=True)  # PATH holds the fake CLIs and no Poppler
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("Poppler is required for the PDF of concept deck: pdftotext and pdftoppm are not on PATH",
+                      refused.stderr)
+        self.assertEqual(sorted(f.name for f in self.sd.iterdir()), ["study.json"])
 
     def test_persona_file_changed_by_another_run_is_flagged_and_a_lead_edit_is_not(self):
         self.study({"P02-opus": [["meddle:P01-opus", "write:all"]]}, personas=3, models=[self.CLAUDE],
@@ -1773,6 +2182,14 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(refused.returncode, 1)
         self.assertIn('P01-cx: codex has no effort "ultra"', refused.stdout)
         self.assertEqual(self.starts(1), [])
+
+        # A concept with nothing captured would be reviewed from nothing: it is named, with the command.
+        self.study(personas=1, name="uncaptured")
+        shutil.rmtree(self.sd / "panel/materials/concept-B")
+        refused = self.launch("run")
+        self.assertEqual((refused.returncode, self.starts(1)), (1, []))
+        self.assertIn(f"Nothing was started: nothing is captured for concept-B, so a run would review it from "
+                      f"nothing. Run capture.py {self.sd}", refused.stdout)
 
     def test_process_that_cannot_be_started_is_reported_and_nothing_is_marked_failed(self):
         cases = [  # what the sandbox does, the runner it hits, what the launcher says about the first run

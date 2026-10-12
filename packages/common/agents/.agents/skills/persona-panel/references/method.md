@@ -4,8 +4,8 @@
 
 | Control | How | Why |
 |---|---|---|
-| Neutral labels | `init_study.py` copies each concept to `panel/sites/concept-<L>/` with a shuffled label; the key lives outside `panel/` | Folder names like `13-before-and-after` leak the designer's intent |
-| Randomised order | Seeded per persona, identical across that persona's models and replicates. A variant takes its parent's order | Removes order and fatigue effects without confounding model comparisons, or a variant's comparison with its parent |
+| Neutral labels | `init_study.py` copies each site to `concept-<L>/` with a shuffled label, and `capture.py` writes every kind of concept to `panel/materials/concept-<L>/`, a file as `item-<NN>`; the key lives outside `panel/`. The site copies, which are page source under its own file names, are in `panel/sites/` only when panellists browse, and in `<study>/sites/` otherwise | Folder names like `13-before-and-after` leak the designer's intent, and so do file names and URLs |
+| Randomised order | Seeded per persona, identical across that persona's models and replicates. A variant takes its parent's order. `init_study.py` and `plan` warn when the seed gives every persona the same order: set another `seed` | Removes order and fatigue effects without confounding model comparisons, or a variant's comparison with its parent |
 | Isolation | The launcher starts each panellist in `panel/` and switches off instruction files, memory, hooks, plugins and MCP servers where the harness has a switch (`references/runners.md`) | Panellists that inherited project instructions leaked internal terms into reviews |
 | Sandboxed reading | Run prompt restricts reading to `panel/`; "ignore background in your system context" | No harness's isolation is complete, and `launch.py plan` lists what each could not switch off |
 | No cross-talk | "Do not read any other persona file"; the launcher records a persona file changed by another run | Runs otherwise copy each other's opinions |
@@ -52,7 +52,7 @@ What follows from it:
 - **What it finds.** Contradictions between lines, claims nobody believes, jargon and unanswered questions. The trial's text-only readers caught contradictions the visual panel missed, in about four minutes.
 - **What it cannot find.** Anything about layout, visual design or mobile. In the trial the personas whose scores fell furthest were the ones whose questions are answered on pages they could not open, so capture every page a prospect would open, and check what a low-scoring run read.
 - **The flattened-page artefact.** `page-text.txt` is the page in one column: navigation and footer labels repeat, and a label, number or button loses the layout that explains it. The instructions tell panellists not to report either, and the briefs tell the analysts and the writer, whose method section must name it. Discount any that slip through.
-- **Capture** still renders each page in a browser, writes the text only and removes the images of an earlier capture. The site copies go to `<study>/sites/`, outside `panel/`, so no run can open a page or its source. Read one `page-text.txt` per concept before launching.
+- **Capture** still renders each page in a browser, writes the text only and removes the images of an earlier capture. The site copies are in `<study>/sites/`, outside `panel/`, as in every study that does not browse, so no run can open a page or its source. Read one `page-text.txt` per concept before launching.
 - **The plan** has no token figure for a text-only run until a pilot has measured one.
 
 ## When to run a panel
@@ -97,8 +97,8 @@ Every run has two limits, and they cover all its attempts: the first, the retry 
 - **Set limits from the materials.** A 14-concept run took about 7 minutes in Sept 2026. Raise one slow model entry with `limits.overrides` instead of raising everyone.
 - **The synthesis pool is separate.** It is divided equally among the analysts and the writer, each share a cap, and panellist runs never spend it.
 - **Follow-up questions are separate too, and outside the ceiling.** Each run asked has `limits.followup` for each question, apart from its run limits. `plan` and `status` say how many were asked.
-- **Read `launch.py plan` before anything starts, and again after the pilot.** It works before scaffolding and capture too, and says what is missing.
-- **The estimate is a forecast.** Before any run has finished it is a token figure only (about 20k tokens of context per concept page, times the pages), with no dollar figure, because the skill keeps no price tables. After a pilot it is the mean of what each model entry's finished runs reported, times the runs to go. A pilot is one run per model entry, so treat it as rough.
+- **Read `launch.py plan` before anything starts, and again after the pilot.** It works before scaffolding and capture too, and says what is missing. `run`, `pilot` and `resume` start no panellist run while a concept has nothing captured or is short of a page, state or item: they name the concept, what it lacks and `capture.py`.
+- **The estimate is a forecast.** Before any run has finished it is a token figure only (about 20k tokens of context per concept page, times what a run opens: each web page, each page of a PDF and each supplied image counts as one), with no dollar figure, because the skill keeps no price tables. After a pilot it is the mean of what each model entry's finished runs reported, times the runs to go. A pilot is one run per model entry, so treat it as rough.
 - **A run whose reported usage is known to be short counts for the time only.** That is a finished run with a process that was stopped before reporting, or whose usage came in one total with a follow-up's. The plan says how many it left out of the mean tokens and cost, so a run measures the same whether or not it was asked a follow-up.
 - **Billed tokens are several times the context figure.** Every turn re-reads the context, mostly from cache: one ten-command run in discovery reported 182,000 input tokens, 167,000 of them cached. Expect the pilot's figure to be well above the pre-pilot one.
 - **The ceiling is a maximum only when every run and job has an enforced cap.** Otherwise it is labelled an estimate and the uncapped runs are left out of it.
@@ -149,6 +149,7 @@ Native mode has its own running notes in `references/runners.md`.
 | `failed` | The process ended with nothing written | `run` | "Incomplete runs" only |
 
 - **The persona file decides `done`**, never the exit code.
+- **A section without its score row is not scored,** so its run stays `partial`. `resume` names the section and asks for the score table to be added to it, with nothing else changed.
 - **Incomplete runs stay out of the headline tables** because a run that stopped early scored only the first concepts in its review order, and concepts are compared within a run. Their Overall scores appear in the "Incomplete runs" table of `quant.md` and nowhere else.
 - **Report "N of M runs complete"** with the results. A persona left with one complete model has no model agreement, so its preference is one model's taste.
 - **Several `limited` runs on one model entry** point at the entry, not the runs: raise its limit with `limits.overrides`, or cut what it views with `model_notes`, before extending run by run.
@@ -209,6 +210,55 @@ What is enforced, on a study that runs through runners:
 - Remove build notes and placeholder markers from concepts, or declare them in `context_notes`.
 - Names and towns in concept demo content that match a persona bias that persona. Check the roster against the concepts.
 
+## Concept kinds
+
+A concept is a site folder, a live URL or a set of images and PDFs (`references/runners.md`, Concepts). Each kind has its own traps.
+
+Every kind:
+
+- **A page or item is captured whole or not at all.** One that fails (an address that will not open, a PDF or image that cannot be read) is printed as `FAILED`, the rest are captured, and `capture.py` exits non-zero with the list. An earlier capture of it stays as it was. One never captured has no folder, so the plan lists it as missing and no run starts.
+- **Changing `browse` needs `init_study.py --force`:** it moves the site copies into or out of `panel/` and rewrites the instructions. The plan says when the copies are in the wrong place.
+
+Live URLs (`"kind": "url"`):
+
+- **A capture is one moment.** The page can change between capture and runs, and between runs. Capture just before the pilot, and again if the page changes. The plan prints the capture time.
+- **Say whether the page is live.** The instructions call site and file concepts drafts. They say nothing either way about a study with a URL, so add a `context_notes` line: a draft on a local host, or the page customers see today.
+- **Browsing is off unless `"browse": true`.** With it on, a panellist sees the page as it is at review time, and is told to score from the materials and note any difference. Every visit reaches the site's server and its analytics, and only the instructions stop a panellist submitting a form. Leave it off for a production page unless the interaction is what is being tested.
+- **A local host must be serving** during capture, and during the runs when browsing is on.
+- **The URL is in the provider's hands** once browsing is on: it is in the instructions every run reads.
+- **An error page captures like any other.** `capture.py` warns when the server answers 400 or above. Look at a sheet.
+
+Images and PDFs (`"kind": "files"`):
+
+- **File names leak** the way folder names do ("pricing-v3-FINAL-bold.png"). Panellists see `item-01`, `item-02`, and `key.md` has the names.
+- **Order is yours.** List `files` in the order a reader would meet them, or number the names in a folder.
+- **No interaction, and no phone view** unless a file shows one. Panellists are told to score a factor they cannot see from what is shown and to say so. Read the Mobile score of such a concept as a guess, drop the factor with a `factors` list, or supply a phone screenshot.
+- **An image has no text.** The term scan and "search `page-text.txt`" cover PDFs only, so read the images yourself for build notes.
+- **A very tall image** (a full-page export) is also cut into `part-NN.png`, because whatever reads a tall image shrinks it until the text is unreadable. Panellists are told to review it from the parts, in order. Both haiku runs of the first real study opened the whole image instead and could not read it, so the default haiku note now rules the whole image out.
+- **A long PDF is cut at `capture.max_pdf_pages`** (default 20), and `capture.py` says so loudly. Panellists are told the materials are complete: raise the limit or add a `context_notes` line.
+- **A scanned PDF has no text.** `capture.py` warns, and a text-only study refuses it.
+- **PDF text keeps the page's layout,** so a table stays in rows and columns sit side by side.
+- **The plan's token estimate is a guess** for files until a pilot has measured one: the method's figure comes from captured web pages, and the plan counts each PDF page and each image as one such page.
+
+Mixing kinds is allowed, since a real round may compare a live page with a mock-up. The comparison is then partly between formats: a mock-up cannot be scrolled or clicked.
+
+- **Format moves scores.** In the first mixed study a PDF scored far lower on Mobile than a screenshot and a live page, and one panellist ranked it down "because it's a PDF".
+- **What counts as a different form:** a captured page (site or URL, which are captured alike), image files, and PDF files. A PDF beside a screenshot is a mix, though both are `files`.
+- **`quant.md` says so** above "Key numbers" and under "By factor" when forms differ, with each concept's form, and the analyst and writer briefs carry the same caution (`assets/brief-kinds-mixed.md`).
+- **`forms.json` keeps each `files` concept's form** (images, PDFs or both) beside `key.md`, so an archived round, which has no source file to tell a PDF from an image, still gets the caution when it is analysed again.
+- **The factors most exposed** are the ones marked `needs_design`: Visual design and Mobile by default. Compare them within one form only, or leave them out. Overall and the rankings carry them too, so say so when reporting.
+
+## Single-concept studies
+
+A study with one concept answers "how does this land, and for whom", not "which is better".
+
+- **What changes.** The instructions say there is one design to review. The final sections have no ranking and no score summary, and the persona files have no review order. `check_runs.py` expects no ranking.
+- **Set `artefact`** when the study sets `artefact_plural`: the instructions use the singular.
+- **What `analyze.py` reports.** "Scores": each factor's mean, median, SD, lowest and highest across runs. Every factor's mean by segment and by model. Persona fit, replicate spread and the answer tallies as usual. No leaderboard, winner, Borda count or order effect.
+- **Model agreement** is measured on the one concept: the mean absolute difference between a persona's runs on two models, in Overall and over all factors, and the Spearman across the factor scores the two runs gave. The last says whether the models agree on what is strong and weak, whatever level each marks at. A persona whose models sit 2 points or more apart is unsettled.
+- **A level means little alone.** With nothing to compare against, 7.2 is not good or bad: models mark at different levels, and simulated readers are generous. Report which factors are strong and weak, where personas differ, and the quotes. Compare levels only with an earlier round that used the same personas, models and factors, and then only as a direction.
+- **Use replicates.** With no ranking to steady the result, the spread between two runs of the same persona and model is the only measure of noise.
+
 ## Designing concepts for a panel
 
 - Concepts that share a demo story (the same client across three concepts) scored lower when read later: repetition fatigue cost one concept 1.3 points. Give each concept its own cast.
@@ -247,7 +297,7 @@ How to read them:
 - Next step, Why care and Relevance usually track Overall most closely; Visual and Trust move it less. Check `What drives Overall` in quant.md rather than assuming.
 - Rankings sometimes contradict the run's own scores (`check_runs.py` flags these). Use Borda from rankings alongside mean scores.
 - Check `Model agreement by persona` in quant.md. Personas whose models pick different winners (the aggregator, compliance, asset finance and NZ personas in Sept 2026, Spearman under 0.25) are unsettled: report their preferences as model-dependent, not as that segment's view.
-- With fewer than three concepts there is no Spearman figure for model agreement. The model pairs and "Same top" are still shown, and "Same top" is then the only agreement signal.
+- With fewer than three concepts there is no Spearman figure for model agreement. The model pairs and "Same top" are still shown, and "Same top" is then the only agreement signal. With one concept, see Single-concept studies.
 - Comparing rounds is directional only. A small round of strong, similar concepts scores lower than a wide round whose weak concepts flattered the winners; compare factor changes (Structure fell 1.4 while Trust rose), not overall levels.
 - The synthesis is split between two analysts by persona (not by model), so each sees all models of a persona and can separate persona signal from model taste. The launcher does this when `synthesis.analysts` is 2.
 - The persona-fit table (mean of `fit_factors` on the strongest concepts) is the ICP signal: it says which profile the best version of the offer resonates with. Pair it with each persona's "What I'd need to see to say yes" before naming an ICP, and call it a hypothesis for real customer interviews.

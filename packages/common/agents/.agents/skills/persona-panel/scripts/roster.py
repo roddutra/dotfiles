@@ -94,8 +94,7 @@ def text(x) -> bool:
     return isinstance(x, str) and bool(x.strip())
 
 
-def plural(n: int, noun: str, many: str | None = None) -> str:
-    return f"{n} {noun if n == 1 else many or noun + 's'}"
+plural = pl.plural  # number agreement, the same in every script
 
 
 def read_json(path: Path, what: str) -> dict:
@@ -332,8 +331,8 @@ def check_cards(cards: list[dict], where):
     ids = {c["id"] for c in cards}
     for c in cards:
         who = f"{where}: persona {c['id']}"
-        if "-" in c["id"] or c["id"] != c["id"].strip():
-            stop(f"{who}: an id cannot hold a hyphen or a space at either end, because file names split on hyphens")
+        if pl.persona_id_problem(c["id"]):  # the rule study.json is held to when it is loaded
+            stop(f"{who}: its id {pl.persona_id_problem(c['id'])}")
         if str(c["name"] or "").strip() in ("", pl.SKELETON_NAME):
             stop(f"{who} is still a skeleton, with no name written. A roster file holds whole personas.")
         for field in ("role", "personality"):

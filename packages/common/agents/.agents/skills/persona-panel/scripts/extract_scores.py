@@ -6,7 +6,8 @@ rankings.csv: persona_id, model, replicate, complete, segment, rank, concept
 runs.csv:     run, persona_id, model, replicate, segment, state, complete, written, scored, has_final
 
 "model" is the model key. "position" is where the concept sat in that persona's review order
-(1-based), for order-effect checks. "complete" is 1 when panel_lib.run_progress says the run is
+(1-based), for order-effect checks. A study with one concept has no ranking: rankings.csv is then
+the header alone, whatever a panellist wrote. "complete" is 1 when panel_lib.run_progress says the run is
 complete and 0 otherwise: analyze.py keeps the rows of incomplete runs out of its headline tables.
 
 runs.csv has one row per expected run (panel_lib.run_records), whether or not it wrote anything.
@@ -69,9 +70,10 @@ def main():
                     w.writerow([run["pid"], r["slug"], *who[1:], complete, run["segment"], label, pos,
                                 *[f"{x:g}" for x in r["scores"][label]]])
                     n_rows += 1
-            for i, label in enumerate(r["ranking"], start=1):
+            for i, label in enumerate([] if pl.single_concept(cfg) else r["ranking"], start=1):
                 rw.writerow([*who, complete, run["segment"], i, label])
-    print(*pl.unsettled_lines(runs), f"{n_rows} score rows from {len(runs)} runs; {incomplete} runs incomplete "
+    print(*pl.unsettled_lines(runs), f"{pl.plural(n_rows, 'score row')} from {pl.plural(len(runs), 'run')}; "
+          f"{pl.plural(incomplete, 'run')} incomplete "
           "(run check_runs.py for details)", sep="\n")
 
 

@@ -63,6 +63,10 @@ How it behaves:
   printed and then failed is failed, and retried once.
 - Before anything starts, every runner needed is checked (installed, signed in, options still
   accepted). If one fails nothing starts, unless --allow-missing, which leaves its runs alone.
+- No panellist run starts while a concept of the study has nothing captured under
+  panel/materials, or is short of a page, state or item: "run", "pilot" and "resume" name the
+  concepts, what each lacks and capture.py, as "plan" does. Analyst and writer jobs do not read
+  the materials and are not held back.
 - One launcher per study (.launch.lock). Processes outlive the launcher and write to
   <study>/logs/, so a launcher that was killed loses nothing: the next one settles the runs
   that have ended, from their end records, and adopts the ones still alive, without starting a
@@ -83,7 +87,19 @@ The plan. "plan" starts no run, makes no model call and changes no file. It work
 init_study.py and capture.py have run, and says what is missing. It prints:
 - every run with its persona, model key, runner, model, effort, limits in force and prompt file
 - what each run can read under panel/materials (pages, images, bytes), and which provider
-  receives it through which model entries
+  receives it through which model entries. A PDF is counted as a PDF with its pages, and an
+  image as an image: the page images of a PDF and the parts of a tall image are not counted
+  again. In a study with a "url" or "files" concept
+  (panel_lib.py, "Concept kinds") the figures are per concept with its kind, and the plan also
+  says: when each live page was captured, and that the materials show it as it was then; whether
+  panellists may browse, and if so that one who opens a live page sees it as it is at review
+  time; the external hosts the instructions send panellists to, the ones on this machine, and
+  that nothing limits the browser to them; and which concepts have nothing to open. A concept
+  with nothing captured or short of a page or item, a concept folder under panel/materials that
+  belongs to no concept, site copies left where the other "browse" setting put them, and
+  Poppler missing while a PDF is still to be captured are each named
+- a note when every persona reviews in the same order (panel_lib.shared_order), as
+  init_study.py warns: order is then confounded with concept, and another "seed" fixes it
 - what each model entry's runner lacks (images, a budget cap, resume, a browser while the study
   allows browsing, an effort setting, which usage figures), how far a run can pass its budget
   cap, what the runner could not switch off (with what browsing opens only where the study's
@@ -99,7 +115,8 @@ init_study.py and capture.py have run, and says what is missing. It prints:
   counts for the time only, and the plan says how many were left out of the tokens and cost: a
   run measures the same whether or not it was asked a follow-up. A harness that reports no cost
   gets "cost not reported" and is judged by time. A key with no finished run gets tokens from
-  the method's figure per concept page and no dollar figure. The "In all" line sums the figures
+  the method's figure per concept page, times what a run opens (each web page, each page of a
+  PDF and each supplied image counts as one), and no dollar figure: a rough forecast. The "In all" line sums the figures
   there are, and names the model entries each sum leaves out (the analyst and writer jobs,
   until one has run)
 - a ceiling: every enforced budget cap once, plus the synthesis pool once. It is a guaranteed
@@ -249,8 +266,7 @@ def clock(epoch) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(epoch))
 
 
-def plural(n: int, noun: str) -> str:
-    return f"{n} {noun}{'' if n == 1 else 's'}"
+agree, plural = pl.agree, pl.plural  # number agreement, the same in every script
 
 
 def duration(seconds: float) -> str:
@@ -941,7 +957,7 @@ class Supervisor:
         self.closed[name] = why
         held = [e["run"] for e, _ in self.queue if e["runner"] == name]
         self.queue = [item for item in self.queue if item[0]["runner"] != name]
-        stay = "stays as it is" if len(held) == 1 else "stay as they are"
+        stay = agree(len(held), "stays as it is", "stay as they are")
         say(f"{name}: {why}. No more launches on this runner {how_long}"
             + (f", and {plural(len(held), 'queued run')} {stay} ({', '.join(held)})" if held else "")
             + ". Other runners carry on.")
@@ -1196,7 +1212,8 @@ class Supervisor:
         """Run until nothing is queued and no process is alive."""
         while self.queue or self.children:
             if self.stop.asked and self.queue:
-                say(f"Stopping: {plural(len(self.queue), 'queued run')} stay as they are.")
+                say(f"Stopping: {plural(len(self.queue), 'queued run')} "
+                    f"{agree(len(self.queue), 'stays as it is', 'stay as they are')}.")
                 self.queue.clear()
             self.fill()
             if self.children:
@@ -1221,7 +1238,7 @@ def select(runs: list[dict], role: str, ids: list[str] | None) -> list[dict]:
         return pool
     unknown = [i for i in ids if i not in {e["run"] for e in pool}]
     if unknown:
-        raise SystemExit(f"No {role} {noun} called {', '.join(unknown)}. There {'is' if len(pool) == 1 else 'are'}: "
+        raise SystemExit(f"No {role} {noun} called {', '.join(unknown)}. There {agree(len(pool), 'is', 'are')}: "
                          f"{', '.join(e['run'] for e in pool)}")
     return [e for e in pool if e["run"] in ids]
 
@@ -1230,6 +1247,44 @@ def text_only_note(cfg: dict, brief_name: str) -> str:
     """What a brief tells its reader about a text-only study, assets/<brief>-text.md: nothing for
     a full-materials study, so the placeholder's line goes."""
     return (pl.ASSETS / f"{brief_name}-text.md").read_text().strip() if cfg["materials"] == "text" else ""
+
+
+def one_concept_note(cfg: dict, brief_name: str) -> str:
+    """What a brief tells its reader about a study with one concept, assets/<brief>-one.md:
+    nothing for a study that compares concepts, so the placeholder's line goes."""
+    return (pl.ASSETS / f"{brief_name}-one.md").read_text().strip() if pl.single_concept(cfg) else ""
+
+
+def kinds_note(cfg: dict) -> str:
+    """What a brief tells its reader about the concepts that were not captured from a site's own
+    files: the ones taken from a live page (assets/brief-kinds-url.md) and the ones supplied as
+    images and documents (assets/brief-kinds-files.md), each named by its neutral label. When
+    the concepts differ in form, so that a score can turn on the format, it says that too
+    (assets/brief-kinds-mixed.md, from pl.form_caution()): a study with one concept, or with
+    concepts all of one form, has nothing to set against anything. Nothing for a study of sites
+    alone, so the placeholder's line goes."""
+    lines = []
+    for kind in ("url", "files"):
+        labels = [label for label, c in pl.label_map(cfg).items() if pl.concept_kind(c) == kind]
+        if labels:
+            named = f"{agree(len(labels), 'Concept')} {planning.listed(labels)} {agree(len(labels), 'was', 'were')}"
+            lines.append(pl.fill_brief(f"brief-kinds-{kind}.md", {"CONCEPTS": named}).strip())
+    caution = pl.form_caution(cfg)
+    if caution:
+        lines.append(pl.fill_brief("brief-kinds-mixed.md", {"CONCEPTS": caution["concepts"],
+                                                            "EXPOSED": caution["exposed"]}).strip())
+    return "\n".join(lines)
+
+
+def reviewed(cfg: dict, labels: list[str]) -> str:
+    """What the panel reviewed, for the sentence a brief opens with: "3 concepts (A, B, C) of
+    draft homepage designs", or for a study with one concept "one draft homepage design (Concept
+    A)". A study of one concept scaffolded without "artefact" has the plural alone to go by."""
+    if not pl.single_concept(cfg):
+        return f"{len(labels)} concepts ({', '.join(labels)}) of {cfg['artefact_plural']}"
+    if cfg["artefact"]:
+        return f"one {cfg['artefact']} (Concept {labels[0]})"
+    return f"one concept ({labels[0]}) of {cfg['artefact_plural']}"
 
 
 def followups_note(cfg: dict, brief_name: str, runs: set[str]) -> str:
@@ -1256,46 +1311,48 @@ def brief(cfg: dict, job: dict, records: list[dict], files: dict) -> str:
     if missing:
         raise SystemExit(f"synthesis.context_files: no such file in {sd}: {', '.join(missing)}")
     values = {
-        "N_PERSONAS": len(cfg["personas"]), "N_CONCEPTS": len(labels), "LABELS": ", ".join(labels),
-        "WHAT_WAS_REVIEWED": cfg["artefact_plural"], "PRODUCT": cfg.get("product") or "the product",
-        "N_MODELS": len(keys), "MODELS": ", ".join(keys), "STUDY_DIR": sd,
-        "N_RUNS": len(records) if done == len(records) else f"{done} complete of {len(records)}",
+        "PERSONAS": plural(len(cfg["personas"]), "persona"), "REVIEWED": reviewed(cfg, labels),
+        "PRODUCT": cfg.get("product") or "the product", "KINDS_NOTE": kinds_note(cfg),
+        "MODELS": f"{plural(len(keys), 'model')} ({', '.join(keys)})", "STUDY_DIR": sd,
+        "RUNS": plural(len(records), "run") + ("" if done == len(records) else f", {done} of them complete"),
         "DECISION_MAKER": syn.get("decision_maker", pl.DEFAULT_DECISION_MAKER),
     }
     if job["role"] == "writer":
         extra = "\n".join(f"- `{f}`: background from the lead." for f in context)
         return pl.fill_brief("synthesis-brief.md", {
             **values, "EXTRA_CONTEXT_FILES": extra, "TEXT_ONLY_NOTE": text_only_note(cfg, "synthesis-brief"),
+            "ONE_CONCEPT_NOTE": one_concept_note(cfg, "synthesis-brief"),
             "FOLLOWUPS": followups_note(cfg, "synthesis-brief", {r["run"] for r in records})})
 
-    def spans(ids):
-        return ids[0] if len(ids) == 1 else f"{ids[0]} to {ids[-1]}"
+    def spans(ids, mark=""):  # "persona P01", "personas P01 to P04"
+        return f"{agree(len(ids), 'persona')} {mark}{ids[0] if len(ids) == 1 else f'{ids[0]} to {ids[-1]}'}{mark}"
 
     def path(r):
         return sd / files[r["run"]] if r["run"] in files else pl.personas_dir(sd) / r["parsed"]["file"]
 
     own = [r for pid in job["personas"] for r in records if r["pid"] == pid and (r["run"] in files or r["parsed"])]
     others = [j for j in pl.synthesis_jobs(cfg) if j["role"] == "analyst" and j["run"] != job["run"]]
-    units = pl.unit_nouns(cfg)[1]
     unfinished = []
     for r in own:
         prog = r["progress"]
-        wrote = (f"{len(prog['written'])} of {len(prog['units'])} {units} written"
+        wrote = (f"{len(prog['written'])} of {plural(len(prog['units']), *pl.unit_nouns(cfg))} written"
                  + ("" if prog["has_final"] else ", final sections missing") if prog["written"] else "nothing written")
         if r["state"] != "done":
             unfinished.append(f"- `{path(r).name}` ({r['run']}): {r['state']}, {wrote}")
     return pl.fill_brief("qual-brief.md", {
         **values, "TEXT_ONLY_NOTE": text_only_note(cfg, "qual-brief"),
-        "PERSONA_RANGE": spans(job["personas"]), "N_FILES": len(own),
+        "ONE_CONCEPT_NOTE": one_concept_note(cfg, "qual-brief"),
+        "OWN_PERSONAS": spans(job["personas"], "**"), "FILES": plural(len(own), "file"),
         "OTHER_ANALYSTS_SENTENCE": " ".join(
-            f"Another analyst owns personas {spans(j['personas'])} and writes `{j['file']}`: leave both to them."
+            f"Another analyst owns {spans(j['personas'])} and writes `{j['file']}`: leave both to them."
             for j in others) or "You are the only analyst.",
         "EXTRA_CONTEXT_FILES": "\n".join(f"- `{sd / f}`: background from the lead." for f in context),
         "PERSONA_FILES": "\n".join(f"- `{path(r)}`" for r in own),
         "INCOMPLETE_RUNS": "\n".join([
-            "", f"{plural(len(unfinished), 'run')} of your personas did not finish. Read what an unfinished run "
-            "wrote as partial evidence: quote it and say the run was incomplete, and never count it as a full "
-            'review. Its scores are in `analysis/quant.md` under "Incomplete runs" and in no other table.',
+            "", f"{plural(len(unfinished), 'run')} of your {agree(len(job['personas']), 'persona')} did not finish. "
+            "Read what an unfinished run wrote as partial evidence: quote it and say the run was incomplete, and "
+            'never count it as a full review. Its scores are in `analysis/quant.md` under "Incomplete runs" and in '
+            "no other table.",
             *unfinished] if unfinished else []),
         "FOLLOWUPS": followups_note(cfg, "qual-brief", {r["run"] for r in own}),
         "OUTPUT_FILE": Path(job["file"]).name})
@@ -1326,7 +1383,7 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
     runners.get(wanted[0]["runner"])
     out = unsettled_followups(sd, runs)
     if out:
-        files = "its persona file" if len(out) == 1 else "their persona files"
+        files = agree(len(out), "its persona file", "their persona files")
         raise SystemExit(
             f"The {'analysts wait' if role == 'analyst' else 'writer waits'} for the follow-up questions: the one put "
             f"to {planning.listed(out)} is not settled, so {files} may still be put back as before the question. "
@@ -1337,7 +1394,7 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
         if waiting and not allow_incomplete:
             raise SystemExit(
                 f"Analysts wait for the panel: {plural(len(waiting), 'panellist run')} of {len(records)} "
-                f"{'has' if len(waiting) == 1 else 'have'} not finished ("
+                f"{agree(len(waiting), 'has', 'have')} not finished ("
                 + ", ".join(f"{r['run']} {r['state']}" for r in waiting) + "). Finish them with launch.py run and "
                 "resume, or pass --allow-incomplete to analyse what there is: the analysts are then told which "
                 "runs are incomplete.")
@@ -1380,9 +1437,15 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
 
 
 def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list[dict], str | None]:
-    """Check every runner the targets need, and what study.json asks of each, before any process
-    starts. Returns the targets that may start, and why nothing may when that is the case. The
-    plan command reports the same two things (planning.build), so what it refuses, this refuses."""
+    """Check that the materials are captured, every runner the targets need, and what study.json
+    asks of each, before any process starts. Returns the targets that may start, and why nothing
+    may when that is the case. The plan command reports the same three things (planning.build),
+    so what it refuses, this refuses. Only a panellist run reads the materials: analysts and the
+    writer start without them."""
+    if any(e["role"] == "panellist" for e in targets):
+        uncaptured = planning.no_materials(cfg, planning.materials(cfg))
+        if uncaptured:
+            return [], f"Nothing was started: {uncaptured}"
     unusable = {}
     for name in dict.fromkeys(e["runner"] for e in targets):
         checked = runners.get(name).check()

@@ -4,7 +4,7 @@
 Flags, per run:
   - missing, duplicated (often from a resumed run) or unscored concept sections
   - concept labels that don't exist (invented or mislabelled concepts)
-  - missing final sections or ranking
+  - missing final sections or ranking (a study with one concept has no ranking, and none is expected)
   - ranking that contradicts the run's own overall scores
   - flat scoring (very low spread across all factor scores)
   - em or en dashes, and leak terms from study.json (background-context leakage). A follow-up
@@ -61,11 +61,11 @@ def check(run: dict, cfg: dict, expected_order: list[str], changes: list[dict] =
     for c in changes:
         others = c.get("running") or []
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(c["at"]))
-        blocking.append(f"changed while {', '.join(others)} {'was' if len(others) == 1 else 'were'} running, "
+        blocking.append(f"changed while {', '.join(others)} {pl.agree(len(others), 'was', 'were')} running, "
                         f"not by its own run (seen {when})")
     if not prog["has_final"]:
         notes.append("final sections missing")
-    if len(run["ranking"]) < len(labels):
+    if len(run["ranking"]) < len(labels) and not pl.single_concept(cfg):  # one concept is not ranked
         notes.append(f"ranking lists {len(run['ranking'])} of {len(labels)} {units}")
     ov = {l: s[-1] for l, s in run["scores"].items()}
     if run["ranking"] and ov:
@@ -118,7 +118,7 @@ def main():
         if blocking or notes:
             lines.append(f"| {r['run']} | {'; '.join(blocking) or '-'} | {'; '.join(notes) or '-'} |")
     expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
-    lines += ["", f"{len(runs)} run files of {expected} expected; {bad} with blocking problems."]
+    lines += ["", f"{pl.plural(len(runs), 'run file')} of {expected} expected; {bad} with blocking problems."]
     lines += pl.unsettled_lines(runs)
     (sd / "analysis").mkdir(exist_ok=True)
     (sd / "analysis" / "checks.md").write_text("\n".join(lines) + "\n")

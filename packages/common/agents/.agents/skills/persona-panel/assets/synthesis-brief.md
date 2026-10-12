@@ -1,6 +1,6 @@
 You are writing the final synthesis of a simulated customer research study for <DECISION_MAKER>. They should be able to read it in about 10 minutes and act on it.
 
-<N_PERSONAS> personas reviewed <N_CONCEPTS> concepts (<LABELS>) of <WHAT_WAS_REVIEWED> for <PRODUCT>, on <MODELS> (<N_RUNS> runs). Panellists saw only neutral labels. The key is in `<STUDY_DIR>/key.md`: use the real concept names in the synthesis.
+<PERSONAS> reviewed <REVIEWED> for <PRODUCT>, on <MODELS>, in <RUNS>. Panellists saw only neutral labels. The key is in `<STUDY_DIR>/key.md`: use the real concept names in the synthesis.
 
 ## Inputs (all under `<STUDY_DIR>/`)
 - `panel/_panel-instructions.md`: what panellists were asked.
@@ -30,6 +30,8 @@ Open the file with a `#` title and, directly under it, this line on its own, wor
 
 ## Rules
 <TEXT_ONLY_NOTE>
+<ONE_CONCEPT_NOTE>
+<KINDS_NOTE>
 - Concise and concrete; prefer tables and bullets. Every claim traces to the inputs.
 - Quote exactly, with a run citation (for example "P04-opus").
 - No em or en dashes.

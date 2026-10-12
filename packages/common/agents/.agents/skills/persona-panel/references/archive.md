@@ -16,14 +16,21 @@ Keep two tiers:
       report/index.html              the visual report (source of any published page)
       findings/                      synthesis per round (round-1.md, round-2.md) and the ICP
       inputs/                        briefs, decisions and constraints given to designers
-      concepts/<id>/                 each concept's source, once, with its gallery index
-      screenshots/<id>--<page>.jpg   one full-page screenshot per page (snapshot.py)
+      concepts/<id>/                 each concept's source, once, with its gallery index: a site's folder,
+                                     or a files concept's images and PDFs. A url concept has none
+      screenshots/<id>--<page>.jpg   one full-page screenshot per page of a site or url concept (snapshot.py)
       panel/round-<n>/               one folder per panel round (archive.py)
-        study.json  study-brief.md  key.md  runs.json  followups.json  panel-instructions.md
+        study.json  study-brief.md  key.md  forms.json  runs.json  followups.json  panel-instructions.md
         personas/  prompts/  analysis/  scripts/ (only if the round used one-off scripts)
 ```
 
-Dropped because they regenerate: `panel/sites`, or `sites/` in a text-only study (from `concepts/` + `key.md`), `panel/materials` (`capture.py`), scratch screenshots, designer verification shots.
+Dropped because they regenerate: the site copies, in `panel/sites` or in `sites/` when the study did not browse (from `concepts/` + `key.md`), `panel/materials` (`capture.py`), scratch screenshots, designer verification shots.
+
+What `--concepts` does for each kind of concept:
+
+- **`site`:** copies the folder and screenshots every page.
+- **`files`:** copies each image and PDF as `item-<NN>-<its own name>`, numbered in the order `study.json` or the folder gives them, so two files of one name from different folders are both kept. They are their own record, so nothing is screenshotted. When a file of that name is already there with other content, from an earlier archive, it is replaced and a line says so.
+- **`url`:** copies nothing, because there is no source. `key.md` records the addresses. The screenshots are taken from the live page at archive time, which may no longer be what the panel saw: archive straight after the runs, and say in the study card when the page was captured. A page that cannot be opened is skipped with a line saying so.
 
 Not archived either:
 
@@ -34,6 +41,7 @@ What travels with a round besides the persona files:
 
 - `analysis/`, whole: `usage.md`, `runs.csv`, `answers.csv` and `lines.csv` with it. An archived round still analyses.
 - `study-brief.md`: what was agreed with the user, hypotheses included.
+- `forms.json`: whether each `files` concept is images, PDFs or both. An archive without `--concepts` has no source file to tell them apart, and `analyze.py` needs it for the format caution (`references/method.md`). `archive.py` writes it from the source files while they can be read, else from the study's own copy.
 - `followups.json`: the follow-up questions asked and how each run answered. The answers themselves are in the persona files. `archive.py` refuses a study with a follow-up that is not settled: its persona file may hold what settling will reject, and an archive has no `logs/` to put it back from. It also refuses a study that a launcher has, and holds the study lock while it copies the round, so no follow-up starts under the copy.
 
 ## Synthetic panel notice

@@ -1,11 +1,11 @@
 You are a qualitative research analyst for a simulated customer research study.
 
-<N_PERSONAS> personas each reviewed <N_CONCEPTS> concepts (<LABELS>) of <WHAT_WAS_REVIEWED> for <PRODUCT>, on <N_MODELS> models (<MODELS>). You own personas **<PERSONA_RANGE>** (<N_FILES> files). <OTHER_ANALYSTS_SENTENCE> The numbers are already done (`analysis/quant.md`), so focus on words and reasons.
+<PERSONAS> reviewed <REVIEWED> for <PRODUCT>, on <MODELS>. You own <OWN_PERSONAS> (<FILES>). <OTHER_ANALYSTS_SENTENCE> The numbers are already done (`analysis/quant.md`), so focus on words and reasons.
 
 ## Read first
 - `<STUDY_DIR>/panel/_panel-instructions.md`: what panellists were asked.
 - `<STUDY_DIR>/analysis/checks.md` and `<STUDY_DIR>/analysis/lead-notes.md`: known data-quality problems and claims the lead checked. Weight flagged runs lower, and treat any "no concept covers X" claim as needing corroboration.
-- `<STUDY_DIR>/analysis/quant.md`: the leaderboard, for orientation only.
+- `<STUDY_DIR>/analysis/quant.md`: the numbers, for orientation only.
 <EXTRA_CONTEXT_FILES>
 - Then read every model file for each of your personas in `<STUDY_DIR>/panel/personas/`:
 <PERSONA_FILES>
@@ -31,6 +31,8 @@ Open the file with a `#` title and, directly under it, this line on its own, wor
 
 ## Rules
 <TEXT_ONLY_NOTE>
+<ONE_CONCEPT_NOTE>
+<KINDS_NOTE>
 - Quote exactly and cite the run, for example "P05-opus".
 - Write only your one output file. Don't modify persona files, and never use git.
 - No em or en dashes.

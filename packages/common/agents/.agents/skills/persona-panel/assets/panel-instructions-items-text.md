@@ -1,0 +1,2 @@
+   - ${items_intro} Each item folder has:
+     - `page-text.txt`: the text of one document, set out as on the page (columns side by side), with a `[Page N]` line before each page.

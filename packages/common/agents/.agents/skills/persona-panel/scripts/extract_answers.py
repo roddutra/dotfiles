@@ -84,7 +84,7 @@ def main():
     wrote = sum(1 for r in runs if r["progress"]["written"])
     print(*pl.unsettled_lines(runs), f"{sum(verdicts.values())} answers ({said}, {verdicts['missing']} missing, "
           f"{verdicts['unparsed']} unparsed) and {sum(entries.values())} line and forward entries "
-          f"({entries['missing']} missing, {entries['unparsed']} unparsed) from {wrote} of {len(runs)} runs", sep="\n")
+          f"({entries['missing']} missing, {entries['unparsed']} unparsed) from {wrote} of {pl.plural(len(runs), 'run')}", sep="\n")
 
 
 if __name__ == "__main__":

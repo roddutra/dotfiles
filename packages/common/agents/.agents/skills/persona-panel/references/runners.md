@@ -15,8 +15,12 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 | `limits.overrides` | Run limits for one model entry, keyed by model key |
 | `runners.<name>.concurrency` | Runs to keep going at once on that runner |
 | `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory; the study brief is refused) |
-| `browse` | Default true: panellists may open pages with `agent-browser`, on runners that can |
+| `browse` | Whether panellists may open pages with `agent-browser`, on runners that can. Default true for a study of sites. With a `url` concept it is off unless set to true, and a study of `files` concepts alone never browses (Concepts, below) |
 | `materials` | Default `"full"`. `"text"` is a text-only pass: page text only, no design factors, no browser (`references/method.md`, Text-only pass) |
+
+| `concepts` | Each is `{"id", "path"}` for a folder with `index.html`, or has a `kind` (Concepts, below) |
+| `artefact`, `artefact_plural` | What is reviewed, in a few words: "draft homepage design", "draft homepage designs". The instructions of a study with one concept use the singular, and `init_study.py` refuses one that sets the plural without it |
+| `capture.max_pdf_pages`, `capture.pdf_pixels` | Default 20 and 1600: the pages of a PDF that are captured, and the long side of each page image in pixels |
 
 Model entry rules:
 
@@ -25,6 +29,27 @@ Model entry rules:
 - `effort` must be one of the runner's levels. `plan` and `run` refuse any other value, because the CLIs themselves only warn or fail at the first model call.
 - A study where no entry has a runner is in native mode (below). Mixing the two is refused.
 - `type` is reserved for study types that are not built yet. Leave it out.
+
+## Concepts
+
+A concept has an `id` (lead only: it is never shown to a panellist) and one of three kinds. The `id` names a folder in the archive, so it is one part of a file name: no slash, no leading dot or hyphen, no `--`, and unique ignoring case.
+
+| `kind` | Keys | Captured under `panel/materials/concept-<label>/` as |
+|---|---|---|
+| `site` (default) | `path`: a folder with `index.html` | One folder for each `<page>.html`: sheets, raw screens and `page-text.txt` |
+| `url` | `pages`: `[{"name": "index", "url": "https://..."}, ...]`, home page first, or `url` alone for one page | The same folders and files, taken from the live page at capture time |
+| `files` | `files`: image and PDF paths in the order to go through them, or `path`: a folder, taken in name order | `item-01`, `item-02`, ...: an image as `image.<type>` (with `part-NN.png` when very tall), a PDF as `page-NN.png` and `page-text.txt` |
+
+- **Page names** of a `url` concept are letters, digits, hyphens and underscores, and the first is `index`. A URL is `http` or `https`, public or on a local host.
+- **`states`** (a script run before capture) work on `site` and `url` pages, not on `files`. Each is `{"name", "page", "js"}`, captured to the folder `<page>@<name>`: the name follows the rule for page names, and `page` defaults to `index`.
+- **Names that become paths are checked when `study.json` is loaded:** page and state names, concept ids, pinned `labels` (letters and digits), persona ids (no hyphen) and slugs. A persona whose name has no letter from a to z and no digit needs a `"slug"`. `capture.py` also refuses to write or delete anything outside `panel/materials`.
+- **Site copies** are in `panel/sites/` only when panellists browse. In every other study (`"browse": false`, a `url` concept without `"browse": true`, a text-only study) they are in `<study>/sites/`, where no panellist can read a page's source.
+- **File types:** png, jpg, jpeg, webp and gif images, and pdf. PDFs need Poppler (`pdftoppm`, `pdftotext`): without it `init_study.py` and `capture.py` name it and stop.
+- **Kinds can mix** in one study. Labels and review orders are shuffled over all of them.
+- **Nothing a panellist reads names a source:** no concept id, path, file name or URL. `key.md` maps them. The one exception is a URL in a study with `"browse": true`.
+- **Browsing a `url` concept** needs `"browse": true`. The instructions then give each page's address and tell panellists to submit nothing, and the plan names the hosts. A `files` concept has nothing to open, and the instructions say so when other concepts can be browsed.
+- **A text-only study** takes the PDFs of a `files` concept and leaves its images out. A concept of images alone is refused.
+- **One concept** makes a study with no ranking and no comparison (`references/method.md`, Single-concept studies). `assets/study.files.example.json` is one, made of files.
 
 ## Capabilities
 
@@ -54,13 +79,14 @@ Neither concurrency default is tested: discovery ran four Claude Code and three 
 - **Session id.** The runner chooses it before the process starts, so a run killed before it prints a line can still be resumed.
 - **Environment.** A run is the same from a terminal and from inside a Claude Code session: the variables such a session sets for its own children are kept out of the run's environment. The variables that decide which login is used and who is billed pass through, and the plan names any that are set. A desktop-hosted Claude Code session sets one of them, so a plan run from inside one reports it.
 - **Sessions.** The CLI has no command that deletes one session, so `purge-sessions` removes the session's transcript itself. It can leave an empty project folder behind.
+- **Browsing allows `agent-browser` and nothing else.** A line that chains another command to it (`mkdir -p ... && agent-browser ...`) is denied whole, and a panellist that is denied tends to give up on the browser and review from the files. So `init_study.py` makes each run's `panel/scratch/<run id>/`, and the instructions tell panellists to run each command on its own. A run that never browsed says so in its researcher notes: nothing else reports it.
 
 Not switched off for its runs:
 
 - The signed-in account's email address is in the model's context.
 - So are the full path of the working directory, the OS version and the date. Folder names above `panel/` can leak internal terms.
 - The model is told whether the working directory is inside a git repository.
-- With browsing on, `agent-browser` can open any `file://` path the user can read, and save screenshots outside the working directory.
+- With browsing on, `agent-browser` can open any `file://` path the user can read and any address on the network, and save screenshots outside the working directory.
 - With browsing on, read-only shell commands inside the working directory (such as `ls`) run without an allow rule.
 
 The plan lists the last two only for a study whose panellists can browse on this runner.
@@ -220,6 +246,10 @@ The synthesis briefs are filled by hand:
 - When follow-up questions were asked, replace `<FOLLOWUPS>` with the text of `assets/qual-brief-followups.md` or `assets/synthesis-brief-followups.md`, and its `<QUESTIONS>` with one line per question from `followup.py <study> list`: the number, the runs asked and the question. An analyst gets only the questions asked of its own personas. When none was asked, delete the `<FOLLOWUPS>` line.
 - Then give one writer `assets/synthesis-brief.md`, filled the same way.
 - For a text-only study, replace `<TEXT_ONLY_NOTE>` with the text of `assets/qual-brief-text.md` or `assets/synthesis-brief-text.md`. Otherwise delete its line.
+- `<REVIEWED>` is what the panel reviewed: "3 concepts (A, B, C) of draft homepage designs", or for one concept "one draft homepage design (Concept A)".
+- A count goes in with its noun, so the sentence agrees: `<PERSONAS>` "1 persona" or "12 personas", `<MODELS>` "2 models (opus, sonnet)", `<RUNS>` "24 runs" or "24 runs, 22 of them complete", `<OWN_PERSONAS>` "persona **P01**" or "personas **P01 to P06**", `<FILES>` "12 files".
+- For a study with one concept, replace `<ONE_CONCEPT_NOTE>` with the text of `assets/qual-brief-one.md` or `assets/synthesis-brief-one.md`. Otherwise delete its line.
+- For concepts of kind `url` or `files`, replace `<KINDS_NOTE>` with the text of `assets/brief-kinds-url.md` and `assets/brief-kinds-files.md`, each with `<CONCEPTS>` as "Concept B was" or "Concepts B and D were". When the concepts differ in form (a PDF beside a captured page or a screenshot), add `assets/brief-kinds-mixed.md` with `<CONCEPTS>` as "A is a live URL and B is PDF files" and `<EXPOSED>` as "Visual design and Mobile are the factors most exposed". Otherwise delete its line.
 - A harness may block a subagent from writing a file that looks like a report. Ask for the document as the reply and save it with `extract_agent_reply.py`, which adds the notice under the title when the reply lacks it.
 - Check that a file a subagent wrote itself has the notice under its title. Nothing else adds it in native mode until `archive.py`.
 

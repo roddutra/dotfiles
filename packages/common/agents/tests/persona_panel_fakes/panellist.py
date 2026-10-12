@@ -96,7 +96,9 @@ def write(path, count):
         path.write_text(f"# Findings\n\n- Written to {path.name} by the job itself.\n")
         return
     text = path.read_text()
-    order = [x.strip() for x in re.search(r"\| Review order \| (.+?) \|", text).group(1).split(",")]
+    listed = re.search(r"\| Review order \| (.+?) \|", text)  # a study with one concept lists no order
+    order = ([x.strip() for x in listed.group(1).split(",")] if listed else
+             re.findall(r"^### Concept (\w+)$", (path.parents[1] / "_panel-instructions.md").read_text(), re.M))
     missing = [label for label in order if not re.search(rf"^### Concept {label}\b", text, re.M)]
     n = factors(path)
     row = "| " + " | ".join(["7"] * n) + " |"
@@ -105,7 +107,7 @@ def write(path, count):
                 f"|{'---|' * n}\n{row}\n\n"
     if count in ("all", "final"):
         ranking = "".join(f"{i}. Concept {label} - reason\n" for i, label in enumerate(order, 1))
-        text += f"## Comparison\n### My ranking (best to worst)\n{ranking}\n" \
+        text += (f"## Comparison\n### My ranking (best to worst)\n{ranking}\n" if listed else "") + \
                 "## Out of character: researcher notes\nNotes.\n"
     path.write_text(text)
 

@@ -37,13 +37,15 @@ import panel_lib as pl  # noqa: E402
 
 def run_view(sd: Path, cfg: dict, r: dict) -> dict:
     """A runs.json entry with how far its persona file has got: "state" (done, started or
-    pending), "scored", "of", "written", "has_final" and "unsettled" (the file was read as it
-    stood before a follow-up that is not settled: panel_lib.read_persona)."""
+    pending), "scored", "of", "written", "unscored" (the sections written without a score row,
+    which count for nothing until they have one), "has_final" and "unsettled" (the file was read
+    as it stood before a follow-up that is not settled: panel_lib.read_persona)."""
     parsed = pl.read_persona(sd, cfg, sd / r["file"], r)
     prog = pl.run_progress(cfg, parsed)
     state = "done" if prog["complete"] else "started" if prog["written"] else "pending"
     return {**r, "state": state, "scored": len(prog["scored"]), "of": len(prog["units"]),
-            "written": prog["written"], "has_final": prog["has_final"],
+            "written": prog["written"], "unscored": [u for u in prog["written"] if u not in prog["scored"]],
+            "has_final": prog["has_final"],
             "unsettled": bool(parsed and parsed["unsettled"])}
 
 
@@ -52,19 +54,38 @@ def run_states(sd: Path, cfg: dict) -> list[dict]:
 
 
 def resume_message(cfg: dict, s: dict) -> str:
+    """What a run that was cut off is told when it is continued in its session. A section written
+    without its score row is named, with the one thing to add to it: told only not to rewrite
+    what it has written, a run never adds the row, and so is never done."""
     unit, units = pl.unit_nouns(cfg)
     if s["state"] == "pending":
         return (f"Your run was interrupted before any {unit} was written. Start again from step 1 of your "
                 "original instructions.")
-    done = ", ".join(s["written"])
-    if s["scored"] == s["of"] and not s["has_final"]:
-        todo = f"All {unit} sections are written. Re-read your persona file, then append the final sections."
+    written = f"Already written: {', '.join(s['written'])}. Do not rewrite or repeat those sections."
+    unscored, left = s["unscored"], s["of"] - len(s["written"])
+    rest = (f"review the remaining {units} in your listed order, append each section as you finish it, then append "
+            "the final sections.")
+    if s["of"] == 1 and unscored:  # one unit, written without its score row: there is nothing else to go on to
+        steps = [f"Your {unit} section is started, and has no score table yet.",
+                 "Re-read your persona file, complete that section where it stops without repeating what is "
+                 "there, then append the final sections."]
+    elif unscored:
+        n = len(unscored)
+        steps = [written,
+                 f"Written, but with no score row: {', '.join(unscored)}. Without that row "
+                 f"{pl.agree(n, 'the section does', 'those sections do')} not count. Re-read your persona file and add "
+                 f"the score table at the end of {pl.agree(n, 'that section', 'each of those sections')}, as the "
+                 f"template sets it out. Change nothing else in {pl.agree(n, 'it', 'them')}.",
+                 "Then " + (rest if left else "append the final sections." if not s["has_final"] else
+                            "nothing else is left: your final sections are written, so do not repeat them.")]
+    elif s["scored"] == s["of"] and not s["has_final"]:
+        steps = [written, pl.agree(s["of"], f"Your {unit} section is written.", f"All {unit} sections are written.")
+                 + " Re-read your persona file, then append the final sections."]
     else:
-        todo = (f"Re-read your persona file, review the remaining {units} in your listed order, append each "
-                "section as you finish it, then append the final sections.")
-    return (f"Your run was cut off before it finished. Pick up where you left off.\n"
-            f"- Already written: {done}. Do not rewrite or repeat those sections.\n"
-            f"- {todo}\n- All the original rules still apply. When done, reply with the summary the instructions ask for.")
+        steps = [written, f"Re-read your persona file, {rest}"]
+    return ("Your run was cut off before it finished. Pick up where you left off.\n"
+            + "".join(f"- {step}\n" for step in steps)
+            + "- All the original rules still apply. When done, reply with the summary the instructions ask for.")
 
 
 def main():
@@ -123,7 +144,7 @@ def main():
         for s in todo:
             print(f"=== {s['run']} ({s['state']}, agent: {s.get('agent') or 'not recorded: relaunch with runs.py prompt'})")
             print(resume_message(cfg, s))
-        print(f"{len(todo)} unfinished runs.")
+        print(f"{pl.plural(len(todo), 'unfinished run')}.")
     else:
         match = [s for s in states if s["run"] == args.run]
         if not match:
