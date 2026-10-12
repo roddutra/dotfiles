@@ -78,6 +78,12 @@ o.bind("F10", "Stop raw dictation (push-to-talk)", "voxtype record stop", { rele
 -- voxtype-progress report the cancel instead of a missing transcript.
 o.bind("SUPER + ALT + X", "Cancel dictation", "~/.local/bin/voxtype-progress mark cancelled; voxtype record cancel")
 
+-- Handy trial alongside Voxtype (see "Handy trial" in docs/voxtype.md).
+-- Handy's CLI triggers are toggle only.
+o.bind("F8", "Handy: toggle dictation with Groq cleanup", "handy --toggle-post-process")
+o.bind("SHIFT + F8", "Handy: toggle raw dictation", "handy --toggle-transcription")
+o.bind("CTRL + F8", "Handy: cancel dictation", "handy --cancel")
+
 -- Panels from the blizl.voxtype-osd Quickshell HUD.
 o.bind("SUPER + E", "VoxType engine picker", "mkdir -p $XDG_RUNTIME_DIR/voxtype && touch $XDG_RUNTIME_DIR/voxtype/engine-picker.flag")
 o.bind("SUPER + M", "VoxType meeting controls", "mkdir -p $XDG_RUNTIME_DIR/voxtype && touch $XDG_RUNTIME_DIR/voxtype/meeting-controls.flag")

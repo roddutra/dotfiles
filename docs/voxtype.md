@@ -88,6 +88,46 @@ on_demand_loading = false
 - Eager processing dispatching chunks once an on-demand model load finishes.
 - Idle unloading for non-Whisper engines.
 
+## Handy trial
+
+Started 12 October 2026 to test whether [Handy](https://github.com/cjpais/Handy) 0.9.8 can lift the recording limit while keeping on-demand model loading. Voxtype stays the default until a 10 to 15 minute dictation has worked in Handy.
+
+| Shortcut | Action |
+|---|---|
+| `F8` | Toggle dictation with Groq cleanup (`handy --toggle-post-process`) |
+| `SHIFT + F8` | Toggle raw dictation (`handy --toggle-transcription`) |
+| `CTRL + F8` | Cancel (`handy --cancel`) |
+
+Setup. Handy's own files are not linked from this repository:
+
+- `handy-bin` from the AUR. It is not in `manifests/omarchy/aur-packages.txt` until the trial passes.
+- Model `parakeet-unified-en-0.6b` (Q8_0 GGUF, 731 MB) in `~/.local/share/com.pais.handy/models/`. It is a streaming model: Handy decodes it in bounded chunks during recording and pastes once at the end. On the RTX 3070 Ti it loads in 0.3 seconds and unloads after each transcription.
+- Settings in `~/.local/share/com.pais.handy/settings_store.json`. Handy rewrites this file and stores the Groq API key in it as plain text, so it must not be committed. Edit it only while Handy is stopped.
+- Handy starts hidden at login through `~/.config/autostart/Handy.desktop`, which it writes itself.
+- The Groq key comes from the 1Password item `Groq`, field `OpenWhispr` in the `API keys` section.
+- Idle, with the model unloaded, Handy and its WebKit processes hold about 280 MB of RAM. Voxtype idles at about 30 MB.
+
+How the Voxtype configuration was carried over:
+
+- Groq cleanup uses Handy's Custom provider pointed at `https://api.groq.com/openai/v1` with `qwen/qwen3.8-27b`. The built-in Groq provider does not send `reasoning_effort: none`; Custom does. Handy sets no temperature.
+- The cleanup prompt is `groq-cleanup-prompt.txt` with the rules from `word-replacements.txt` and the entries from `personal-dictionary.txt` embedded, because Handy has no replacement table. Exact replacements therefore apply only on `F8`. Its self-correction rule is expanded with six examples and a guard for ordinary uses of "sorry", "actually" and "I mean". Across 55 test cases run four times each, that fixed 94% of self-corrections against 85% for the original rule, with no loss of kept content.
+- Handy's fuzzy custom word list holds 28 distinctive terms with `word_correction_threshold` lowered from 0.18 to 0.08. At 0.18 it rewrote "just" to "Joust" 77 times across two weeks of transcripts, "cloud" to "Claude", and "part" to "PRD". "Joust", "Groq", "Nudge" and "Windmill" are left out because they collide with ordinary words or with "Grok".
+
+Known limits found during setup:
+
+- Handy's whole-file path (`handy --transcribe-file`, history retry, and the fallback when a stream returns nothing) ran out of GPU memory on an 11-minute file, needing a 5.1 GB buffer. Only the live streaming path can handle long recordings.
+- CLI triggers are toggle only, so there is no hold-to-talk binding.
+- Recordings are kept for two weeks in `~/.local/share/com.pais.handy/recordings/`.
+
+Reference copies in `packages/omarchy/handy/`, which `scripts/apply-dotfiles` does not stow:
+
+- `cleanup-prompt.txt`: the cleanup prompt as stored in Handy. `${output}` is Handy's transcript placeholder.
+- `settings-overrides.json`: every setting changed from Handy's defaults, without the API key. `post_process_custom_base_url` is the `base_url` of the `custom` entry in `post_process_providers`, and `bindings` holds each binding's `current_binding`.
+
+Update both copies after changing the prompt or settings in Handy. To restore, stop Handy, apply the values to `settings_store.json`, add the prompt to `post_process_prompts` with the id `voxtype_minimal_cleanup`, and set the Groq key under `post_process_api_keys.custom`.
+
+To remove the trial: delete the three `F8` bindings in `bindings.lua`, run `yay -Rns handy-bin`, and delete `~/.local/share/com.pais.handy`, `~/.config/autostart/Handy.desktop`, and `packages/omarchy/handy/`.
+
 ## Progress notification
 
 `voxtype-progress` runs as `voxtype-progress.service`, a user unit bound to `voxtype.service`. It follows `voxtype status --follow` and keeps one notification on screen from recording stop until output:
