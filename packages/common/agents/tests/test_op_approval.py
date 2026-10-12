@@ -147,11 +147,13 @@ class OpApprovalTestCase(unittest.TestCase):
         """A process named `name` working in `project`, as a harness would
         be in the agent's ancestry: sh started through a link of that name
         (macOS names a script's process after its interpreter, and kills a
-        copied system binary). Returns the command prefix that runs a
-        command inside it, and a file with its PID."""
+        copied system binary). The command is not the script's last one,
+        because bash 5 replaces itself with the last command of a -c script
+        and the harness would vanish from the ancestry. Returns the command
+        prefix that runs a command inside it, and a file with its PID."""
         pid_file = self.tmp / f"{name}.pid"
         (self.bin / name).symlink_to("/bin/sh")
-        script = f'echo $$ > "{pid_file}"; cd "{project}"; "$@"'
+        script = f'echo $$ > "{pid_file}"; cd "{project}"; "$@"; exit $?'
         return [str(self.bin / name), "-c", script, name], pid_file
 
     def hold_lock(self):
