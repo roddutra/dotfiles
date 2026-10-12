@@ -163,7 +163,13 @@ class OpApprovalTestCase(unittest.TestCase):
             ["sh", "-c", '. "$0/common.sh"; opa_lock_acquire; echo held; read _', str(LIB)],
             env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
         )
-        self.addCleanup(holder.kill)
+        def release():
+            holder.kill()
+            holder.wait()
+            holder.stdin.close()
+            holder.stdout.close()
+
+        self.addCleanup(release)
         self.assertEqual(holder.stdout.readline().strip(), "held")
         return holder
 
