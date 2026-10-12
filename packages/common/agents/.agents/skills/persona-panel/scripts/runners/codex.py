@@ -90,7 +90,7 @@ import json
 import os
 import re
 
-from . import exited, json_lines, last_line, launch_effort, result, run_cli, usage
+from . import exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
 
 CLI = "codex"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -207,7 +207,7 @@ def _reason(message) -> str:
     return inner if isinstance(inner, str) else str(message or "")
 
 
-def parse_result(stdout, stderr, exit_code) -> dict:
+def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
     lines = json_lines(stdout)
     out = result(session_id=next((x["thread_id"] for x in lines if x.get("type") == "thread.started"
                                   and isinstance(x.get("thread_id"), str)), None))
@@ -254,6 +254,12 @@ def check() -> dict:
         return {"ok": False, "message": next((x for x in probe[2].splitlines() if x.strip()), "")
                 or f"{CLI} refused the launch options"}
     return {"ok": True, "message": f"{version[1]}, {said}"}
+
+
+def model_status(entry: dict) -> dict:
+    """Nothing is known of one model without a call to it, so the answers for the whole CLI
+    stand: every model reads images, and check() covers the login. An unknown model fails at the first API call."""
+    return model_facts(images=capabilities()["images_by_path"])
 
 
 def purge_command(session_id: str, workdir) -> list | None:

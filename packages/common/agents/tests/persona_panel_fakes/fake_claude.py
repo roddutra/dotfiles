@@ -100,11 +100,13 @@ def main():
         finish(1, err="Error: Input must be provided either through stdin or as a prompt argument "
                       "when using --print\n", stdin=prompt)
 
-    def recording(name):
+    def recording(name, reply=None):
         out = (RECORDED / f"{name}.jsonl").read_text()
+        if reply is not None:
+            out = out.replace(json.dumps(REPLY)[1:-1], json.dumps(reply)[1:-1])
         return out.replace(json.loads(out.splitlines()[0])["session_id"], session)
 
-    panellist.play("claude", session, "--resume" in found, prompt, recording, RUNS, REPLY,
+    panellist.play("claude", session, "--resume" in found, prompt, recording, RUNS,
                    f"No conversation found with session ID: {session}\n")
     name, code = RUNS.get(MODE.split(":")[0], RUNS["ok"])
     finish(code, recording(name), stdin=prompt, model_call=True)

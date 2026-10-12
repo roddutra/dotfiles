@@ -25,7 +25,7 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 Model entry rules:
 
 - `key` is letters and digits only and unique within a study, ignoring case. It names persona files, run ids (`<pid>-<key>`), `limits.overrides` and the model column in the analysis. A model name with other characters needs a key.
-- Without `model`, the run uses the harness's own default, which depends on the account. Name the model when the study must be reproducible.
+- Without `model`, the run uses the harness's own default, which depends on the account. Name the model when the study must be reproducible. The `pi` runner refuses an entry without one.
 - `effort` must be one of the runner's levels. `plan` and `run` refuse any other value, because the CLIs themselves only warn or fail at the first model call.
 - A study where no entry has a runner is in native mode (below). Mixing the two is refused.
 - `type` is reserved for study types that are not built yet. Leave it out.
@@ -55,21 +55,23 @@ A concept has an `id` (lead only: it is never shown to a panellist) and one of t
 
 From each runner's `capabilities()`. `launch.py plan` prints the gaps that apply to the study.
 
-| | `claude` | `codex` |
-|---|---|---|
-| Harness | Claude Code's headless CLI | The Codex headless CLI |
-| Provider that receives the materials | Anthropic | OpenAI |
-| Opens images by path | yes | yes |
-| Browser (`agent-browser`) | yes | no |
-| Budget cap | yes, checked after each turn | no |
-| Effort levels | low, medium, high, xhigh, max | low, medium, high, xhigh, max |
-| Resume | yes | yes |
-| Purge sessions | yes | yes |
-| Usage reported | tokens, cost, duration | tokens only |
-| Default concurrency | 6 | 4 |
-| Checked on 12 October 2026 against | claude 2.1.296, Claude Max subscription | codex-cli 0.162.1, ChatGPT plan |
+| | `claude` | `codex` | `pi` |
+|---|---|---|---|
+| Harness | Claude Code's headless CLI | The Codex headless CLI | The Pi coding agent's headless CLI |
+| Provider that receives the materials | Anthropic | OpenAI | The provider each model id names, as configured in Pi |
+| Opens images by path | yes | yes | per model, checked at the plan step |
+| Browser (`agent-browser`) | yes | no | yes |
+| Budget cap | yes, checked after each turn | no | no |
+| Effort levels | low, medium, high, xhigh, max | low, medium, high, xhigh, max | off, minimal, low, medium, high, xhigh, max |
+| Resume | yes | yes | yes |
+| Purge sessions | yes | yes | yes |
+| Usage reported | tokens, cost, duration | tokens only | tokens, cost |
+| Default concurrency | 6 | 4 | 3 |
+| Checked against | claude 2.1.296, Claude Max subscription, 12 October 2026 | codex-cli 0.162.1, ChatGPT plan, 12 October 2026 | pi 1.1.0, ChatGPT subscription login, 13 October 2026 |
 
-Neither concurrency default is tested: discovery ran four Claude Code and three Codex runs at once without an error, and found no documented cap.
+No concurrency default is tested: discovery ran four Claude Code, three Codex and three Pi runs at once without an error, and found no documented cap.
+
+Besides `capabilities()`, a runner answers for one model entry at a time (`model_status()`): whether its harness has the model, whether the model's provider is signed in, whether it reads images and who receives the materials. The plan prints the answer under the entry. `claude` and `codex` cannot tell without a model call, so their runner-wide answers stand.
 
 ### `claude`
 
@@ -110,11 +112,47 @@ Not switched off for its runs:
 - Sub-agent tools and their instructions stay available.
 - Commands run in a login shell that sources the user's shell profile.
 
-### Both
+### `pi`
+
+Pi reaches many providers, an OpenAI-compatible endpoint among them. Only a ChatGPT subscription login was available when the runner was built: nothing has been run on an OpenAI-compatible endpoint, so tool calling, usage figures and error texts there are untested.
+
+- **Models.** `model` is `<provider>/<id>`, the first two columns of `pi --list-models`, and is required. Pi itself matches a name loosely (`luna` ran `gpt-6-luna`), sends an unknown id to the API as it is, and with no model uses the default of the user's own settings. So the runner launches nothing but an exact row of the listing.
+- **Checked for each model entry at the plan step,** without a model call: the model is listed, its provider is signed in, and it reads images. `plan`, `run`, `resume` and a follow-up refuse a model that is not listed, one whose provider's login does not work, and, in a full-materials study, one that reads no images. A text-only model can join a `"materials": "text"` study.
+- **A listed model that Pi would take for another is refused too.** Pi matches a model name ignoring case and drops a leading `<provider>/` from it. So a row is refused when another listed row has the same provider and an id that differs only in case, the same provider and an id that is this id without a leading `<provider>/` (`custom/custom/foo` beside `custom/foo`), or a provider name that differs only in case. The refusal names both rows: rename one in Pi's configuration.
+- **The sign-in check can refresh Pi's login.** Pi tells a working login from a dead one by refreshing an expired one, so `plan`, a follow-up's `--dry-run` and every command that starts a run can make Pi rewrite its own credentials file. The skill never reads that file or the login.
+- **The endpoint and its key are configured in Pi, never in `study.json`.** The skill passes the model id and nothing else.
+- **Adding an OpenAI-compatible endpoint:** add a provider to `~/.pi/agent/models.json` with its `baseUrl`, `"api": "openai-completions"`, an `apiKey` and its `models`. Give a model that reads images `"input": ["text", "image"]`: Pi lists a custom model as text only without it, and the plan then refuses it for a full-materials study. Pi's own `docs/models.md` and `docs/custom-provider.md` have the format. A built-in provider needs only `/login <provider>` inside Pi.
+- **A provider that a Pi extension adds cannot be used:** runs load no extensions.
+- **The guard.** Pi has no sandbox and asks for no approval, so the runner loads a guard extension (`scripts/runners/pi_guard.ts`) into every run. It keeps the file tools inside the working directory, symbolic links followed, and refuses the shell. Pi rewrites a path before it opens it (Unicode spaces, a leading `@`, `~`, a `file://` URL), so the guard takes the same steps, hands Pi the path it checked, and refuses one Pi would rewrite again, as well as any control character in a path. With browsing on it allows one `agent-browser` command at a time: no second command, pipe, redirection, substitution or variable. A refusal goes back to the model as a tool error.
+- **No guard, no run.** The launch names a flag only the guard defines, so Pi refuses to start when the guard is missing or fails to load, and the runner's check fails first.
+- **No budget cap.** The time limit bounds a run, and the plan labels its ceiling an estimate.
+- **Usage** is tokens and a list-price cost, read from Pi's session file, so the finished requests of a stopped run are counted. A custom model with no prices in `models.json` reports a cost of 0, which looks the same as free. There is no duration.
+- **Logs hold the reply only.** `logs/<run id>.<attempt>.out` is the final reply, a few hundred bytes. Pi's event stream would repeat every image a run reads six times, so the runner does not ask for it. What a run did is in Pi's session file until `purge-sessions` (`pi --export <file>` renders one).
+- **Effort.** Pi drops silently to the nearest level a model has. With no `effort`, the default level of the user's Pi settings applies, so set one.
+- **Session id.** The runner chooses it before the process starts. A resume must start in the same directory: moving the study directory breaks it.
+- **Concurrency.** Three at once ran cleanly on a hosted provider. A local model server wants `"runners": {"pi": {"concurrency": 1}}`.
+- **Sessions.** `purge-sessions` removes the session's file. It can leave an empty folder behind.
+- **New models.** Pilot each one and read its file against the materials (`references/method.md`, Models). A listed model can still be refused by the API for the account, and an endpoint's image support is whatever `models.json` says: only the pilot shows either.
+
+Not switched off for its runs:
+
+- The full path of the working directory and of the Pi installation are in the model's context. The second can include the user's home directory name.
+- Pi's own system prompt stays: it calls the model a coding assistant and asks it to be concise.
+- The user's Pi settings still apply: the default thinking level when a run sets no effort, retries, compaction, image blocking and resizing.
+- The guard does not see a link put in place between its check and the tool's use, or a hard link to a file outside. It checks a path as pi 1.1.0 rewrites one before opening it, so check the guard again against a later Pi.
+- A model wrongly listed as reading images gets a line of placeholder text in place of each image, with no error.
+- Each session's transcript, every image read included, stays in Pi's sessions folder until it is purged.
+- With browsing on, `agent-browser` can open any `file://` path the user can read and any address on the network, and save screenshots outside the working directory.
+- With browsing on, the guard's reading of the command text is all that stands between the model and the shell, and it does not see what `agent-browser` then opens, runs in a page or saves.
+- With browsing on, shell commands inherit the launcher's whole environment, and Pi tells them where the session transcript is.
+
+The plan lists the last three only for a study whose panellists can browse on this runner.
+
+### All runners
 
 - A run is `blocked` when its harness turns the request away: a usage limit, a rate limit or a capacity refusal. The reason in `status` is the harness's own message, which says which one it was.
 - A capacity refusal was seen in a real Codex run ("Selected model is at capacity"): the run became `blocked`, and `resume` finished it later.
-- A usage limit could not be triggered on either harness, so how one is recognised is inferred from the binaries and old sessions. If runs end `failed` or `partial` with a limit message as their reason, the limit was not recognised: wait for it to lift, continue with `resume` (partial) or `run` (failed), and report the message so the runner can be fixed.
+- A usage limit could not be triggered on any harness, so how one is recognised is inferred from the binaries and old sessions. If runs end `failed` or `partial` with a limit message as their reason, the limit was not recognised: wait for it to lift, continue with `resume` (partial) or `run` (failed), and report the message so the runner can be fixed.
 - Dollar figures under a subscription login are list-price equivalents. They say how much allowance is used, not what is paid.
 
 ## What is enforced and what stays an instruction
@@ -138,22 +176,22 @@ Each run's own watchdog process enforces its time limit, so a killed launcher do
 
 The harness enforces what it has a switch for:
 
-| | `claude` | `codex` |
-|---|---|---|
-| User and project instruction files | excluded | project files excluded, the user's global file loaded |
-| Memory, hooks, plugins, skills, MCP servers | excluded | user config (MCP servers, hooks), the skills list and plugins excluded |
-| Git status and recent commit messages | excluded | none seen in context |
-| Reading files | working directory only | whole disk |
-| Writing files | working directory only | working directory and `/tmp` |
-| Shell commands | none, or `agent-browser` only when the study browses | any, in a sandbox with no network |
-| Something not allowed | denied at once, nothing waits for approval | fails at once, nothing waits for approval |
+| | `claude` | `codex` | `pi` |
+|---|---|---|---|
+| User and project instruction files | excluded | project files excluded, the user's global file loaded | excluded |
+| Memory, hooks, plugins, skills, MCP servers | excluded | user config (MCP servers, hooks), the skills list and plugins excluded | skills, extensions and MCP servers excluded |
+| Git status and recent commit messages | excluded | none seen in context | none seen in context |
+| Reading files | working directory only | whole disk | working directory only, by the guard |
+| Writing files | working directory only | working directory and `/tmp` | working directory only, by the guard |
+| Shell commands | none, or `agent-browser` only when the study browses | any, in a sandbox with no network | none, or one `agent-browser` command at a time when the study browses, by the guard |
+| Something not allowed | denied at once, nothing waits for approval | fails at once, nothing waits for approval | refused at once, nothing waits for approval |
 
 These stay instructions in the run prompt, so keep `leak_terms` and `check_runs.py`:
 
-- Read nothing outside `panel/` (Codex always, Claude Code when browsing).
+- Read nothing outside `panel/` (Codex always, Claude Code and Pi when browsing).
 - Do not read another persona file. Every persona file is inside `panel/`.
 - Write only your own persona file. The launcher cannot prevent it, and detects it: it hashes every persona file when a process starts or ends, and `check_runs.py` reports a file that changed while its own run was not running.
-- Ignore background in your context: the account email, the working directory path, and Codex's global instruction file.
+- Ignore background in your context: the account email, the working directory path, Codex's global instruction file, and Pi's coding-assistant prompt.
 
 Analyst and writer jobs work in the study directory and never browse. They can read `key.md`, `study.json` and anything else there.
 
@@ -165,15 +203,18 @@ Add one module, `scripts/runners/<name>.py`. The registry lists the package's mo
 |---|---|
 | `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps` |
 | `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
-| `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: neither harness tried so far inherits the working directory, the tools or the budget on resume |
-| `parse_result(stdout, stderr, exit_code)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done |
-| `check()` | `{"ok", "message"}`: installed, signed in, and the options the runner passes still parse, with no model call |
+| `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: no harness tried so far inherits the tools on resume, and most inherit nothing |
+| `parse_result(stdout, stderr, exit_code, session_id=None)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done. The `session_id` argument is the one the command was built with, for a harness whose output does not name its session |
+| `check()` | `{"ok", "message"}`: installed, signed in, and the options the runner passes still parse, with no model call. Asking can make a harness refresh its own login, which the runner must never read or relay |
 | `purge_command(session_id, workdir)` | The argv that deletes one session, or None |
+| `model_status(entry)` | `{"known", "images", "signed_in", "provider", "message"}` for one model entry, with no model call. None means the runner cannot tell, and its `capabilities()` and `check()` stand. `known` or `signed_in` false refuses the launch, and `images` false refuses a full-materials study. Like `check()`, it may make a harness refresh its own login |
 
 Rules for a runner:
 
 - `limits` is what is left of the run's allowance: pass `budget_usd` to a harness that has a cap. The run's watchdog enforces `minutes`.
-- Raise `ValueError` for an effort the harness lacks and for a budget of zero or less.
+- Raise `ValueError` for an effort the harness lacks, for a budget of zero or less, and for a model the runner can see the harness does not have.
+- Confine a harness that has no sandbox yourself, and make the confinement fail closed: a run that cannot be confined must not start.
+- Keep a run's output small. Where the harness's event stream is large, read the facts from its session record instead.
 - State in `budget_cap_note` how far a run can pass an enforced cap, as a clause that starts "the budget cap". Leave it empty when the cap is exact or there is none. The plan prints it as a caveat to the ceiling.
 - `image_attach` says what the harness can do. No runner attaches images yet, and nothing reads it.
 - Map a refusal that will pass (a usage limit, a rate limit, no capacity) to `usage_limit`, and put the harness's own words in `message`: the launcher prints them as the reason.
@@ -186,21 +227,21 @@ Rules for a runner:
 
 Helpers to reuse from `runners/__init__.py`:
 
-- `usage()` and `result()`: return values with every key present
+- `usage()`, `result()` and `model_facts()`: return values with every key present
 - `json_lines()`: the objects in a JSON-lines stream, skipping half-written lines
 - `last_line()`: the CLI's own message at the end of stderr
 - `exited()`: the exit code for a message, or "exit code unknown"
 - `run_cli()`: run a status command for `check()`
 - `launch_effort()`: the effort to pass, refusing a level the harness lacks
 
-Before writing the module, settle by experiment what the two existing docstrings record: the flags that exclude instructions while the login keeps working, tool restriction, the budget cap, output and session id, resume after a kill, a resume of a session that is gone, the shape of a usage limit, where sessions live, and a check without a model call. Mark each fact verified or inferred.
+Before writing the module, settle by experiment what the existing docstrings record: the flags that exclude instructions while the login keeps working, tool restriction, the budget cap, output and session id, resume after a kill, a resume of a session that is gone, the shape of a usage limit, where sessions live, and a check without a model call. Mark each fact verified or inferred.
 
 The new harness also gets its summary in this document: a column in both tables above and a section under [Capabilities](#capabilities), in plain words. Keep its flags, variables and commands in the module's docstring.
 
 Tests run against fake CLIs, never a model. The pattern is in `packages/common/agents/tests/persona_panel_fakes/`:
 
 - `fake_<cli>.py` stands in for the CLI: it answers the version and login commands and prints recorded output for a headless run. Environment variables steer it (`FAKE_<CLI>` picks the recorded run, `FAKE_PANEL` plays whole runs from a plan, `FAKE_CLI_LOG` records each invocation).
-- `<cli>/*.jsonl` is output recorded from the real CLI, trimmed: `ok`, `resume-1`, `resume-2`, `budget`, `error`, `killed`. A shape that could not be recorded is named `*.inferred.jsonl`.
+- `<cli>/*.jsonl` is output recorded from the real CLI, trimmed: `ok`, `resume-1`, `resume-2`, `budget`, `error`, `killed`. A shape that could not be recorded is named `*.inferred.jsonl`. For Pi they are entries of its session file, which the fake writes where the runner reads them.
 - `install(bin_dir)` puts the fakes on `PATH`. Add the new CLI to `CLIS` in `__init__.py`.
 - `RunnerTest` in `tests/test_persona_panel.py` holds the runner contracts: the launch and resume command, and result parsing for each outcome.
 
@@ -276,7 +317,7 @@ What a real run from inside a harness's sandbox showed:
 
 A CLI that exits with an error before printing anything never ran. The launcher then says "could not be started", with the command and the CLI's message. It records no attempt, marks nothing failed, and starts nothing more on that runner in the command. A run whose CLI started, printed output and then failed is `failed`, and `run` retries it once.
 
-The CLI's own output for every attempt is in `logs/<run id>.<attempt>.out` and `.err`.
+The CLI's own output for every attempt is in `logs/<run id>.<attempt>.out` and `.err`. On the `pi` runner that is the final reply alone.
 
 Fix the lead's permissions for that command, or run the launcher from a terminal. The lead can still read `launch.py <study> status`, `runs.json` and the persona files.
 

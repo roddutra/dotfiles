@@ -83,8 +83,9 @@ How it behaves:
   itself. SIGINT, SIGTERM and SIGHUP to the launcher do the same, and a second one skips the
   grace. A launcher started with SIGHUP ignored (under nohup) leaves it ignored and carries on.
 
-The plan. "plan" starts no run, makes no model call and changes no file. It works before
-init_study.py and capture.py have run, and says what is missing. It prints:
+The plan. "plan" starts no run, makes no model call and changes no file of the study. It asks
+each runner whether its CLI is signed in, and a harness may refresh its own login when asked.
+It works before init_study.py and capture.py have run, and says what is missing. It prints:
 - every run with its persona, model key, runner, model, effort, limits in force and prompt file
 - what each run can read under panel/materials (pages, images, bytes), and which provider
   receives it through which model entries. A PDF is counted as a PDF with its pages, and an
@@ -105,7 +106,10 @@ init_study.py and capture.py have run, and says what is missing. It prints:
   cap, what the runner could not switch off (with what browsing opens only where the study's
   runs can browse on it), and any variable set in your environment that can change who is
   billed (names only)
-- whether each runner's CLI is installed and signed in
+- whether each runner's CLI is installed and signed in, and what a runner can tell of each
+  model entry without a model call (model_status): a model its harness does not have, one
+  whose provider is not signed in and, in a full-materials study, one that reads no images
+  each stop the plan and "run"
 - the analyst and writer jobs with their share of the synthesis pool, or which of
   synthesis.analyst and synthesis.writer is missing
 - an estimate of what the runs still to go will use. For a model key with finished runs it is
@@ -1017,7 +1021,7 @@ class Supervisor:
             return
         out, err = (self.log(e, attempt["n"], ext) for ext in ("out", "err"))
         printed, complained = (p.read_text(errors="replace") if p.exists() else "" for p in (out, err))
-        res = runner.parse_result(printed, complained, code)
+        res = runner.parse_result(printed, complained, code, attempt.get("session"))
         number = attempt.get("followup")
         if attempt["kind"] in ("resume", "followup") and res["session_lost"]:
             self.session_lost(e, settling)
@@ -1436,22 +1440,43 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
             say(f"Note: {name} does not exist, and the {role}'s brief names it.")
 
 
+def fitness(cfg: dict, entries: list[dict]) -> tuple[dict, dict, list[str]]:
+    """Whether each of entries can be started on its runner as study.json has it, asked of the
+    runners before any process starts: (unusable, errors, notes). unusable maps a runner whose
+    CLI cannot be used (its check()) to the CLI's words. errors maps the id of each entry on a
+    runner that can be used to what refuses its model entry (planning.unfit, which asks the
+    runner's model_status()): an empty list when nothing does. notes are what an entry asks for
+    that its runner leaves out. Each runner is checked once and each model entry judged once.
+    Every command that starts a process judges its runs here first ("run", "pilot" and "resume"
+    through preflight(), a follow-up through followup.choose()), so what the plan refuses, none
+    of them starts."""
+    unusable = {}
+    for name in dict.fromkeys(e["runner"] for e in entries):
+        checked = runners.get(name).check()
+        if not checked["ok"]:
+            unusable[name] = checked["message"]
+    judged = {}  # one judgement for each model entry: asking a runner about a model can take a CLI call
+    for e in entries:
+        if e["runner"] not in unusable:
+            judged.setdefault((e["role"], e["runner"], e["model"], e["effort"]), planning.unfit(cfg, e))
+    errors = {e["run"]: judged[e["role"], e["runner"], e["model"], e["effort"]][0]
+              for e in entries if e["runner"] not in unusable}
+    return unusable, errors, list(dict.fromkeys(note for _, note in judged.values() if note))
+
+
 def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list[dict], str | None]:
     """Check that the materials are captured, every runner the targets need, and what study.json
-    asks of each, before any process starts. Returns the targets that may start, and why nothing
-    may when that is the case. The plan command reports the same three things (planning.build),
-    so what it refuses, this refuses. Only a panellist run reads the materials: analysts and the
-    writer start without them."""
+    asks of each (fitness()), before any process starts. Returns the targets that may start, and
+    why nothing may when that is the case. The plan command reports the same three things
+    (planning.build), so what it refuses, this refuses. Only a panellist run reads the materials:
+    analysts and the writer start without them."""
     if any(e["role"] == "panellist" for e in targets):
         uncaptured = planning.no_materials(cfg, planning.materials(cfg))
         if uncaptured:
             return [], f"Nothing was started: {uncaptured}"
-    unusable = {}
-    for name in dict.fromkeys(e["runner"] for e in targets):
-        checked = runners.get(name).check()
-        if not checked["ok"]:
-            unusable[name] = checked["message"]
-            say(f"{name}: cannot be used: {checked['message']}")
+    unusable, unfit, notes = fitness(cfg, targets)
+    for name, message in unusable.items():
+        say(f"{name}: cannot be used: {message}")
     if unusable and not allow_missing:
         return [], ("Nothing was started: a panel short of a model is a different study. Fix the CLI and run "
                     "this again, or pass --allow-missing to go ahead with the runners that work.")
@@ -1460,10 +1485,9 @@ def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list
         skipped = [e["run"] for e in targets if e["runner"] in unusable]
         say(f"--allow-missing: {plural(len(skipped), 'run')} on {', '.join(unusable)} left untouched "
             f"({', '.join(skipped)}).")
-    judged = {(e["role"], e["runner"], e["effort"]): planning.unfit(cfg, e) for e in ready}
-    for note in dict.fromkeys(note for _, note in judged.values() if note):
+    for note in notes:
         say(f"Note: {note}.")
-    errors = [f"{e['run']}: {error}" for e in ready for error in judged[e["role"], e["runner"], e["effort"]][0]]
+    errors = [f"{e['run']}: {error}" for e in ready for error in unfit[e["run"]]]
     if errors:
         return [], "Nothing was started: fix these model entries in study.json.\n" + "\n".join(errors)
     return ready, None
@@ -1688,7 +1712,8 @@ def status(args, cfg: dict) -> int:
 
 
 def plan(args, cfg: dict) -> int:
-    """Print the plan. Starts no run, takes no lock and writes nothing."""
+    """Print the plan. Starts no run, takes no lock and writes nothing to the study. A runner's
+    sign-in check may let its harness refresh its own login."""
     sd = cfg["_dir"]
     scaffolded = (sd / "runs.json").exists()
     entries = pl.read_runs(sd) if scaffolded else pl.planned_runs(cfg)

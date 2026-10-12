@@ -1102,8 +1102,15 @@ CODEX_OPTIONS = ["exec", "--json", "--skip-git-repo-check", "--ignore-user-confi
                  "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
                  "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest",
                  "-s", "workspace-write"]
+PI_ISOLATION = ["-nc", "-ns", "-ne", "-np", "--no-themes", "--no-mcp", "--no-approve",
+                "--system-prompt", "", "--append-system-prompt", ""]
+PI_GUARD = ["-e", str(SCRIPTS / "runners/pi_guard.ts"), "--panel-guard"]  # then what the guard allows
+PI_FILES = "read,write,edit,grep,find,ls"
+PI_MODEL = "openai-codex/gpt-6-luna"  # a row of the fake's model listing, as of the real one
+PI_RECORDED = "785dfece-625f-4319-b88f-a6c95bbfc39f"  # the session of the pi/*.jsonl recordings
 SESSION = "937a3347-a2b1-41c3-a9d3-8be11344d2a6"
 RUN = {"run": "P01-opusHigh", "model": "opus", "effort": "high", "role": "panellist", "browse": True}
+RUNS = {"pi": {**RUN, "model": PI_MODEL}}  # the same run on a runner whose models are named differently
 BARE = {"run": "analyst-1", "model": None, "effort": None, "role": "analyst"}
 LIMITS = {"minutes": 15, "budget_usd": 2.0}
 PROMPT = "--not-an-option\nYou are P01. Read panel/_panel-instructions.md.\n"
@@ -1121,7 +1128,7 @@ class RunnerTest(unittest.TestCase):
         fakes.install(self.bin)
         # Only the fakes, throwaway homes and none of a host session's variables reach a runner.
         env = {k: v for k, v in os.environ.items()
-               if not k.startswith(("CLAUDE", "ANTHROPIC", "CODEX", "OPENAI", "AI_AGENT", "FAKE_"))}
+               if not k.startswith(("CLAUDE", "ANTHROPIC", "CODEX", "OPENAI", "PI_", "AI_AGENT", "FAKE_"))}
         env.update(PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}", HOME=str(self.tmp / "home"),
                    CLAUDE_CONFIG_DIR=str(self.tmp / "claude-home"), CODEX_HOME=str(self.tmp / "codex-home"),
                    FAKE_CLI_LOG=str(self.log))
@@ -1137,7 +1144,7 @@ class RunnerTest(unittest.TestCase):
         """Start a runner's command the way a launcher would, and parse what comes back."""
         r = subprocess.run(command["argv"], input=command["stdin"], env=command["env"], cwd=self.workdir,
                            capture_output=True, text=True, timeout=30)
-        return runner.parse_result(r.stdout, r.stderr, r.returncode)
+        return runner.parse_result(r.stdout, r.stderr, r.returncode, command["session_id"])
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -1146,6 +1153,13 @@ class RunnerTest(unittest.TestCase):
         d = self.tmp / "codex-home/sessions/2026/10/12"
         d.mkdir(parents=True, exist_ok=True)
         (d / f"rollout-2026-10-12T20-22-31-{thread_id}.jsonl").write_text(fakes.recorded("codex", "session-file"))
+
+    def pi_session(self, session_id, entries):
+        """Put a session file where Pi keeps the sessions of a working directory. Returns its path."""
+        d = self.tmp / "home/.pi/agent/sessions/--study-panel--"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"2026-10-12T19-49-16-390Z_{session_id}.jsonl").write_text(entries.replace(PI_RECORDED, session_id))
+        return d / f"2026-10-12T19-49-16-390Z_{session_id}.jsonl"
 
     def test_runners_are_found_by_listing_the_package(self):
         more = self.tmp / "more"
@@ -1157,12 +1171,12 @@ class RunnerTest(unittest.TestCase):
         runners.__path__.append(str(more))
         self.addCleanup(runners.__path__.remove, str(more))
         self.addCleanup(lambda: [sys.modules.pop(f"runners.{m}", None) for m in ("echo", "half")])
-        self.assertEqual(runners.names(), ["claude", "codex", "echo", "half"])
+        self.assertEqual(runners.names(), ["claude", "codex", "echo", "half", "pi"])
         self.assertEqual(runners.get("echo").capabilities(), {"effort_levels": []})
         note = runners.check_effort({"runner": "echo", "effort": "high"})
         self.assertEqual((note["effort"], note["error"]), (None, None))
         self.assertIn("ignored", note["note"])
-        refusals = {"half": "launch_command", "nope": "claude, codex, echo, half", "_shared": "Unknown"}
+        refusals = {"half": "launch_command", "nope": "claude, codex, echo, half, pi", "_shared": "Unknown"}
         for name, message in refusals.items():
             with self.subTest(name), self.assertRaises(SystemExit) as refused:
                 runners.get(name)
@@ -1173,6 +1187,9 @@ class RunnerTest(unittest.TestCase):
         left = {"minutes": 4, "budget_usd": 0.75}
         browsing = ["--tools", CLAUDE_FILES + ",Bash", "--allowed-tools", CLAUDE_FILES + ",Bash(agent-browser:*)"]
         files_only = ["--tools", CLAUDE_FILES, "--allowed-tools", CLAUDE_FILES]
+        # Pi's own folder for the sessions of this working directory, whatever its settings say.
+        pi_sessions = str(self.tmp / "home/.pi/agent/sessions"
+                          / f"--{os.path.realpath(self.workdir).strip('/').replace('/', '-')}--")
         cases = {  # (runner, run, limits, resumed): the argv after the executable; "<new>" is a fresh session id
             ("claude", "model, effort, budget, browsing", False): (RUN, LIMITS, [
                 "-p", "--session-id", "<new>", "--model", "opus", "--effort", "high", "--max-budget-usd", "2",
@@ -1189,6 +1206,18 @@ class RunnerTest(unittest.TestCase):
                 *CODEX_OPTIONS, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high",
                 "resume", SESSION, "-"]),
             ("codex", "default model, no effort", False): (BARE, LIMITS, [*CODEX_OPTIONS, "-C", panel, "-"]),
+            ("pi", "model, effort, browsing", False): (RUNS["pi"], LIMITS, [
+                "-p", "--mode", "text", "--session-id", "<new>", "--session-dir", pi_sessions,
+                "--provider", "openai-codex", "--model", PI_MODEL, "--thinking", "high",
+                *PI_ISOLATION, *PI_GUARD, "browse", "--tools", PI_FILES + ",bash"]),
+            ("pi", "resumed by the flag that fails when the session is gone", True): (RUNS["pi"], left, [
+                "-p", "--mode", "text", "--session", SESSION, "--session-dir", pi_sessions,
+                "--provider", "openai-codex", "--model", PI_MODEL, "--thinking", "high",
+                *PI_ISOLATION, *PI_GUARD, "browse", "--tools", PI_FILES + ",bash"]),
+            ("pi", "no effort, no browsing", False): ({**BARE, "model": PI_MODEL}, LIMITS, [
+                "-p", "--mode", "text", "--session-id", "<new>", "--session-dir", pi_sessions,
+                "--provider", "openai-codex", "--model", PI_MODEL,
+                *PI_ISOLATION, *PI_GUARD, "files", "--tools", PI_FILES]),
         }
         for (name, what, resumed), (entry, limits, expected) in cases.items():
             with self.subTest(f"{name}: {what}"):
@@ -1204,34 +1233,59 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(len(ids), 2)  # the CLI refuses an id that already has a transcript
 
     def test_runner_refuses_an_effort_or_budget_it_cannot_launch(self):
-        for name in ("claude", "codex"):
+        for name in ("claude", "codex", "pi"):
             with self.subTest(name):
+                entry = RUNS.get(name, RUN)
                 self.assertEqual(runners.check_effort({"runner": name, "effort": "high"}),
                                  {"effort": "high", "error": None, "note": None})
                 self.assertIn('"ultra"', runners.check_effort({"runner": name, "effort": "ultra"})["error"])
                 with self.assertRaises(ValueError):
-                    runners.get(name).launch_command({**RUN, "effort": "ultra"}, PROMPT, self.workdir, LIMITS)
+                    runners.get(name).launch_command({**entry, "effort": "ultra"}, PROMPT, self.workdir, LIMITS)
                 with self.assertRaises(ValueError):
-                    runners.get(name).resume_command(RUN, "--last", PROMPT, self.workdir, LIMITS)
+                    runners.get(name).resume_command(entry, "--last", PROMPT, self.workdir, LIMITS)
         with self.assertRaises(ValueError):
             runners.get("claude").resume_command(RUN, SESSION, PROMPT, self.workdir, {"minutes": 1, "budget_usd": 0})
+        # Pi matches a model name loosely and falls back to the user's default model, so its
+        # runner launches nothing but an exact row of the listing.
+        for model in (None, "gpt-6-luna", "openai-codex/luna"):
+            with self.subTest(f"pi: model {model}"), self.assertRaises(ValueError):
+                runners.get("pi").launch_command({**RUNS["pi"], "model": model}, PROMPT, self.workdir, LIMITS)
+        # Pi also ignores case and drops a leading "<provider>/" from a model name. A listed row it would
+        # take for another listed row is refused at the plan and at launch, and both rows are named.
+        taken_for = {"custom/custom/foo": "custom/foo", "custom/bar": "custom/Bar"}  # model: the row Pi would pick
+        for model, other in taken_for.items():
+            with self.subTest(f"pi: model {model}"):
+                status = runners.get("pi").model_status({"model": model})
+                self.assertEqual((status["known"], f'lists "{model}"' in status["message"],
+                                  f'the row "{other}"' in status["message"]), (False, True, True), status)
+                with self.assertRaisesRegex(ValueError, f'the row "{other}"'):
+                    runners.get("pi").launch_command({**RUNS["pi"], "model": model}, PROMPT, self.workdir, LIMITS)
+        plain = runners.get("pi").launch_command({**RUNS["pi"], "model": "custom/foo"}, PROMPT, self.workdir, LIMITS)
+        self.assertIn(["--provider", "custom", "--model", "custom/foo"],  # the row "foo" resolves to itself
+                      [plain["argv"][i:i + 4] for i in range(len(plain["argv"]))])
 
     def test_runner_command_runs_and_resumes_through_the_cli(self):
         self.steer(CLAUDECODE="1", CLAUDE_CODE_ENTRYPOINT="claude-desktop", CLAUDE_CODE_SESSION_ID="host",
                    CLAUDE_EFFORT="max", CLAUDE_AGENT_SDK_VERSION="1", AI_AGENT="host",
                    ANTHROPIC_BASE_URL="https://api.example.test", CLAUDE_CODE_USE_BEDROCK="1")
-        for name in ("claude", "codex"):
+        used = {}
+        for name in ("claude", "codex", "pi"):
             with self.subTest(name):
-                runner = runners.get(name)
-                command = runner.launch_command(RUN, PROMPT, self.workdir, LIMITS)
+                runner, entry = runners.get(name), RUNS.get(name, RUN)
+                command = runner.launch_command(entry, PROMPT, self.workdir, LIMITS)
                 first = self.invoke(runner, command)
                 self.assertEqual((first["outcome"], first["message"]), ("ok", ""))
                 self.assertEqual(first["session_id"], command["session_id"] or first["session_id"])
-                again = runner.resume_command(RUN, first["session_id"], "Carry on.", self.workdir, LIMITS)
+                again = runner.resume_command(entry, first["session_id"], "Carry on.", self.workdir, LIMITS)
                 second = self.invoke(runner, again)
                 self.assertEqual((second["outcome"], second["session_id"]), ("ok", first["session_id"]))
-                seen = [c for c in self.calls() if c["cli"] == name]
+                seen = [c for c in self.calls() if c["cli"] == name and c["stdin"] is not None]
                 self.assertEqual([(c["stdin"], c["model_call"]) for c in seen], [(PROMPT, True), ("Carry on.", True)])
+                used[name] = [(r["reply"], r["usage"]["input_tokens"], r["usage"]["scope"]) for r in (first, second)]
+        # Pi prints the reply alone, and its figures are read from the session file the run left:
+        # the launch's two requests, then the same again with the resume's one.
+        self.assertEqual(used["pi"], [("Reviewed 3 concepts. Ranking: B, A, C.", 2967, "session"),
+                                      ("OK", 4503, "session")])
         # A panel started from inside a Claude Code session runs as it would from a terminal: the
         # host's session variables are gone, the ones that choose the login and the provider stay.
         child = next(c for c in self.calls() if c["cli"] == "claude")["env"]
@@ -1248,6 +1302,19 @@ class RunnerTest(unittest.TestCase):
         codex_lost = ("Error: thread/resume: thread/resume failed: no rollout found for thread id "
                       f"{SESSION} (code -32600)")
         self.session_file("01a12fa4-7711-7c80-81b0-602e1088a61b")  # the thread of codex/usage-limit and codex/error
+        now = 1_800_000_000  # Pi says how long a limit lasts, not when it lifts
+        pi_ok, pi_resumed = (fakes.recorded("pi", name).splitlines(keepends=True) for name in ("ok", "resume"))
+        pi_ids = {what: SESSION[:-1] + str(i) for i, what in enumerate(("ok", "limit", "refused", "killed"))}
+        self.pi_session(pi_ids["ok"], "".join(pi_ok))
+        self.pi_session(pi_ids["limit"], "".join(pi_ok + pi_resumed[:1]) + fakes.recorded("pi", "usage-limit.inferred"))
+        self.pi_session(pi_ids["refused"], "".join(pi_ok[:5]) + fakes.recorded("pi", "error"))
+        self.pi_session(pi_ids["killed"], "".join(pi_ok[:-1]) + cut)  # the last request never came back
+        pi_reply, pi_limit = "Reviewed 3 concepts. Ranking: B, A, C.", (
+            "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.")
+        pi_created = (f"Warning: No project session found with id '{SESSION}'; creating a new session with "
+                      "that id.\n")
+        pi_refused = ('Warning: Model "zz-none" not found for provider "openai-codex". Using custom model id.\n'
+                      "Codex error: The 'zz-none' model is not supported when using Codex with a ChatGPT account.\n")
         none = {"input_tokens": None, "output_tokens": None, "cached_tokens": None, "cost_usd": None}
         cases = [  # runner, what, stdout, stderr, exit code, expected fields, expected usage figures
             ("claude", "ok", fakes.recorded("claude", "ok"), "", 0,
@@ -1301,10 +1368,41 @@ class RunnerTest(unittest.TestCase):
              {"outcome": "error", "session_id": None, "session_lost": True, "message": codex_lost}, none),
             ("claude", "no output at all", "", "", None, {"outcome": "error", "session_id": None}, none),
             ("codex", "no output at all", None, None, None, {"outcome": "error", "session_id": None}, none),
+            # Pi prints the reply and nothing else, so each case has the session file its process left,
+            # found by the session id the launcher passes back (the last item).
+            ("pi", "ok", f"{pi_reply}\n", pi_created, 0,
+             {"outcome": "ok", "session_id": pi_ids["ok"], "message": "", "reply": pi_reply, "reset_at": None},
+             {"input_tokens": 2967, "output_tokens": 43, "cached_tokens": 0, "cost_usd": 0.0001594 + 0.0001588,
+              "duration_s": None, "scope": "session"}, pi_ids["ok"]),
+            ("pi", "usage limit met by a resume (inferred text)", "", f"{pi_limit}\n", 1,
+             {"outcome": "usage_limit", "reset_at": now + 42 * 60, "reply": None, "message": pi_limit},
+             {"input_tokens": 2967, "output_tokens": 43}, pi_ids["limit"]),
+            ("pi", "request refused by the API", "", pi_created + pi_refused, 1,
+             {"outcome": "error", "session_id": pi_ids["refused"], "reply": None, "reset_at": None,
+              "message": "Codex error: The 'zz-none' model is not supported when using Codex with a ChatGPT account."},
+             none, pi_ids["refused"]),
+            ("pi", "killed part-way", "", pi_created, 143,
+             {"outcome": "error", "session_id": pi_ids["killed"], "reply": None, "session_lost": False,
+              "message": "pi ended before finishing its turn (exit code 143)"},
+             {"input_tokens": 1464, "output_tokens": 26, "cost_usd": 0.0001594}, pi_ids["killed"]),
+            ("pi", "resume of a session that is gone", "", f"No session found matching '{SESSION}'\n", 1,
+             {"outcome": "error", "session_id": None, "session_lost": True,
+              "message": f"No session found matching '{SESSION}'"}, none, SESSION),
+            ("pi", "stopped before its session, with no login for the provider", "",
+             "No API key found for openrouter.\n\nUse /login to log into a provider via OAuth or API key.\n", 1,
+             {"outcome": "error", "session_id": None, "session_lost": False,
+              "message": "No API key found for openrouter."}, none, SESSION),
+            ("pi", "resumed from another directory, which exits 0 without a turn",
+             "Session found in different project: /study/panel\nAborted.\n",
+             "Fork this session into current directory? [y/N] ", 0,
+             {"outcome": "error", "reply": None, "session_lost": False,
+              "message": "Session found in different project: /study/panel, so pi asked whether to fork it "
+                         "and stopped"}, {}, pi_ids["ok"]),
+            ("pi", "no output at all", None, None, None, {"outcome": "error", "session_id": None}, none),
         ]
-        for name, what, stdout, stderr, code, fields, figures in cases:
-            with self.subTest(f"{name}: {what}"):
-                parsed = runners.get(name).parse_result(stdout, stderr, code)
+        for name, what, stdout, stderr, code, fields, figures, *session in cases:
+            with self.subTest(f"{name}: {what}"), mock.patch("time.time", return_value=now):
+                parsed = runners.get(name).parse_result(stdout, stderr, code, *session)
                 self.assertEqual(sorted(parsed), ["message", "outcome", "reply", "reset_at", "session_id",
                                                   "session_lost", "usage"])
                 self.assertEqual({k: parsed[k] for k in fields}, fields)
@@ -1328,8 +1426,10 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(per_process["input_tokens"], 12)
 
     def test_runner_check_reports_what_the_cli_says(self):
-        cases = {"claude": ("--restricted", "2.1.296"), "codex": ("--ignore-rules", "codex-cli 0.162.1")}
-        for name, (option, version) in cases.items():
+        cases = {"claude": ("--restricted", "2.1.296", "Not logged in"),  # an option, the version, signed out
+                 "codex": ("--ignore-rules", "codex-cli 0.162.1", "Not logged in"),
+                 "pi": ("--no-approve", "1.1.0", "No models available")}
+        for name, (option, version, no_login) in cases.items():
             with self.subTest(name):
                 runner, mode = runners.get(name), f"FAKE_{name.upper()}"
                 ready = runner.check()
@@ -1338,8 +1438,7 @@ class RunnerTest(unittest.TestCase):
                 self.assertNotIn("example.com", ready["message"])  # the account's email is not passed on
                 with mock.patch.dict(os.environ, {mode: "signed_out"}):
                     signed_out = runner.check()
-                self.assertEqual((signed_out["ok"], "Not logged in" in signed_out["message"]), (False, True),
-                                 signed_out)
+                self.assertEqual((signed_out["ok"], no_login in signed_out["message"]), (False, True), signed_out)
                 with mock.patch.dict(os.environ, {mode: f"no_flag:{option}"}):
                     changed = runner.check()
                 self.assertEqual((changed["ok"], option in changed["message"]), (False, True), changed)
@@ -1349,9 +1448,14 @@ class RunnerTest(unittest.TestCase):
                 self.assertEqual((missing["ok"], name in missing["message"]), (False, True), missing)
         with mock.patch.dict(os.environ, {"FAKE_CODEX": "warns"}):  # a sandboxed CLI warns before it answers
             self.assertEqual(runners.get("codex").check()["message"], "codex-cli 0.162.1, Logged in using ChatGPT")
+        # Pi has no sandbox of its own: a guard extension that does not load must stop its runs.
+        with mock.patch.dict(os.environ, {"FAKE_PI": "no_guard"}):
+            unguarded = runners.get("pi").check()
+        self.assertEqual((unguarded["ok"], "Failed to load extension" in unguarded["message"]), (False, True),
+                         unguarded)
 
     def test_runner_purge_commands_name_one_session(self):
-        claude, codex = runners.get("claude"), runners.get("codex")
+        claude, codex, pi = (runners.get(name) for name in ("claude", "codex", "pi"))
         transcript = self.tmp / "claude-home/projects/-study-panel" / f"{SESSION}.jsonl"
         transcript.parent.mkdir(parents=True)
         transcript.write_text("{}\n")
@@ -1359,7 +1463,10 @@ class RunnerTest(unittest.TestCase):
                          ["rm", "-rf", "--", str(transcript), str(transcript.with_suffix(""))])
         self.assertIsNone(claude.purge_command("1bb4f919-145f-470d-a5b8-97f90a6a8095", self.workdir))  # no transcript
         self.assertEqual(codex.purge_command(SESSION, self.workdir), ["codex", "delete", "--force", SESSION])
-        for runner in (claude, codex):
+        kept = self.pi_session(SESSION, fakes.recorded("pi", "ok"))
+        self.assertEqual(pi.purge_command(SESSION, self.workdir), ["rm", "-f", "--", str(kept)])
+        self.assertIsNone(pi.purge_command("1bb4f919-145f-470d-a5b8-97f90a6a8095", self.workdir))  # no session file
+        for runner in (claude, codex, pi):
             self.assertIsNone(runner.purge_command("../../projects", self.workdir))
 
 
@@ -1380,6 +1487,7 @@ class LauncherTest(unittest.TestCase):
 
     CLAUDE = {"key": "opus", "runner": "claude", "model": "opus"}
     CODEX = {"key": "cx", "runner": "codex"}
+    PI = {"key": "local", "runner": "pi", "model": PI_MODEL}
     LIMIT_RESET = 1789377600  # when the recorded claude usage limit lifts
     python = sys.executable   # what runs the launcher, and so its watchdogs
 
@@ -1553,51 +1661,65 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual((ceiling["label"], ceiling["caveats"][0]), ("guaranteed maximum", f"on claude, {note}"))
 
     def test_usage_record_counts_a_resumed_session_once_and_the_next_plan_estimates_from_it(self):
-        self.study({"P01-opus": [["write:1"], ["write:all"]]})
+        twice = [["write:1"], ["write:all"]]
+        self.study({"P01-opus": twice, "P01-local": twice}, models=[self.CLAUDE, self.CODEX, self.PI])
         self.launch("pilot")
-        self.launch("resume")  # P01-opus again, in the session that has already reported its usage once
+        self.launch("resume")  # P01-opus and P01-local again, in sessions that have already reported their usage once
         self.assertEqual(self.states(), {"P01-opus": "done", "P02-opus": "pending", "P01-cx": "done",
-                                         "P02-cx": "pending"})
+                                         "P02-cx": "pending", "P01-local": "done", "P02-local": "pending"})
         record = self.sd.joinpath("analysis/usage.md").read_text()  # as the launcher left it
         figures = json.loads(self.launch("usage", "--json").stdout)
         reported = {r["run"]: (r["attempts"], r["input_tokens"], r["output_tokens"], r["cost_usd"])
                     for r in figures["runs"]}
-        self.assertEqual(reported, {  # the totals of claude/ok and codex/ok, each once
+        pi_cost = 0.0001594 + 0.0001588 + 0.00015610000000000003  # the three requests of pi/ok and pi/resume
+        self.assertEqual(reported, {  # the totals of claude/ok and codex/ok, each once, and of Pi's session file
             "P01-opus": (2, 2956, 597, 0.00046504), "P01-cx": (1, 82346, 297, None),
-            "P02-opus": (0, None, None, None), "P02-cx": (0, None, None, None)})
+            "P01-local": (2, 4503, 48, pi_cost), "P02-opus": (0, None, None, None),
+            "P02-cx": (0, None, None, None), "P02-local": (0, None, None, None)})
         total = figures["total"]
-        self.assertEqual((total["input_tokens"], total["output_tokens"], total["cost_usd"]), (85302, 894, 0.00046504))
+        self.assertEqual((total["input_tokens"], total["output_tokens"]), (89805, 942))
+        self.assertAlmostEqual(total["cost_usd"], 0.00046504 + pi_cost)
         self.assertIn("| P01-opus | panellist | opus | done | 2 |", record)
         for cells in ("| 2,956 | 597 | 2,234 | $0.0005 |", "| 82,346 | 297 | 67,968 | not reported |",
-                      "| 85,302 | 894 | 70,202 | $0.0005 (1 not reported) |"):
+                      "| 4,503 | 48 | 0 | $0.0005 |", "| 89,805 | 942 | 70,202 | $0.0009 (1 not reported) |"):
             self.assertIn(cells, record)
         # One finished run on each key and one to go: the estimate is what the finished one reported.
         estimate = {e["entry"]: e for e in self.plan()["estimate"]["entries"]}
         self.assertEqual({k: (e["basis"], e["measured_runs"], e["to_go"], e["tokens"], e["cost_usd"], e["cost"])
                           for k, e in estimate.items()},
                          {"opus": ("measured", 1, 1, 3553, 0.00046504, "measured"),
-                          "cx": ("measured", 1, 1, 82643, None, "not reported")})
+                          "cx": ("measured", 1, 1, 82643, None, "not reported"),
+                          "local": ("measured", 1, 1, 4551, pi_cost, "measured")})
         self.assertGreater(estimate["cx"]["seconds"], 0)  # with no cost reported, the time is what is left
         self.assertIn("cost not reported", self.launch("plan").stdout)
 
     def test_full_materials_study_with_a_model_that_reads_no_images_is_refused_at_the_plan_step(self):
-        skill = self.tmp / "skill"
-        shutil.copytree(SCRIPTS.parent, skill, ignore=shutil.ignore_patterns("__pycache__"))
-        (skill / "scripts/runners/textonly.py").write_text(
-            "from . import claude\nfrom .claude import *  # noqa: F401,F403\n\n\n"
-            "def capabilities():\n"
-            "    return {**claude.capabilities(), 'images_by_path': False, 'provider': 'A local endpoint'}\n")
-        self.scripts = skill / "scripts"
-        self.study(models=[self.CLAUDE, {"key": "local", "runner": "textonly", "model": "small"}])
+        text_only = {**self.PI, "model": "openai-codex/gpt-5.3-codex-spark"}  # listed as taking no images
+        self.study(models=[self.CLAUDE, text_only])
         planned = self.launch("plan")
         self.assertEqual(planned.returncode, 1, planned.stdout + planned.stderr)
-        self.assertIn("local: textonly cannot open images", planned.stdout)
+        self.assertIn("local: openai-codex/gpt-5.3-codex-spark on pi cannot open images", planned.stdout)
         started = self.launch("run")
         self.assertEqual(started.returncode, 1)
-        self.assertIn("P01-local: textonly cannot open images", started.stdout)
+        self.assertIn("P01-local: openai-codex/gpt-5.3-codex-spark on pi cannot open images", started.stdout)
         self.assertEqual(self.starts(), [])
         self.settings({"materials": "text"})  # the same model is welcome where there is nothing to look at
         self.assertEqual(self.launch("plan").returncode, 0)
+
+    def test_model_its_harness_does_not_list_or_cannot_sign_in_for_is_refused_before_any_run_starts(self):
+        loose = {**self.PI, "model": "openai-codex/luna"}  # the CLI itself would run some model that matches
+        self.study(models=[self.CLAUDE, loose])
+        for command in ("plan", "run"):
+            with self.subTest(command):
+                refused = self.launch(command)
+                self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+                self.assertIn('pi lists no model "openai-codex/luna"', refused.stdout)
+        self.study(name="dead", models=[self.CLAUDE, self.PI])
+        refused = self.launch("run", FAKE_PI="dead_login")
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertIn("P01-local: pi lists openai-codex/gpt-6-luna, its provider openai-codex is not signed in "
+                      "(invalid_state)", refused.stdout)
+        self.assertEqual(self.starts(), [])
 
     def test_text_only_study_gives_panellists_the_words_alone_and_scores_no_design_factor(self):
         self.study(models=[self.CLAUDE], materials="text", browse=True, fit_factors=["relevance", "visual"],
@@ -2542,13 +2664,18 @@ class LauncherTest(unittest.TestCase):
     def test_follow_up_asks_nothing_unless_every_run_named_can_be_asked(self):
         refusals = {"P01-cx": "it is partial",                     # unfinished: a question would pass for its resume
                     "P02-cx": "its session was purged",            # done, with no session left to continue
-                    "analyst-1": "it is an analyst job"}
-        self.study({"P01-cx": [["write:1"]], "P03-cx": [["write:all"], ["followup"]]}, personas=3, models=[self.CODEX],
+                    "analyst-1": "it is an analyst job",
+                    # done and resumable, on a model whose provider's login has stopped working since
+                    "P01-local": "pi lists openai-codex/gpt-6-luna, its provider openai-codex is not signed in"}
+        self.study({"P01-cx": [["write:1"]], "P03-cx": [["write:all"], ["followup"]]}, personas=3,
+                   models=[self.CODEX, self.PI],
                    synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
         self.launch("run")
         self.assertEqual(self.launch("purge-sessions", "--runs", "P02-cx", "--yes").returncode, 0)
         self.assertEqual(self.launch("run", "--role", "analyst").returncode, 0)
-        self.assertEqual(self.states(), {"P01-cx": "partial", "P02-cx": "done", "P03-cx": "done", "analyst-1": "done"})
+        self.assertEqual(self.states(), {"P01-cx": "partial", "P02-cx": "done", "P03-cx": "done", "analyst-1": "done",
+                                         **dict.fromkeys(("P01-local", "P02-local", "P03-local"), "done")})
+        self.env["FAKE_PI"] = "dead_login"
         started, everyone = len(self.starts()), ",".join([*refusals, "P03-cx"])
         r = self.ask("Anything missing?", "--runs", everyone)
         self.assertEqual(r.returncode, 1)

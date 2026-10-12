@@ -99,11 +99,13 @@ def main():
     if not prompt:
         finish(1, err="No prompt provided via stdin.\n", stdin=prompt)
 
-    def recording(name):
+    def recording(name, reply=None):
         out = (RECORDED / f"{name}.jsonl").read_text()
+        if reply is not None:
+            out = out.replace(json.dumps(REPLY)[1:-1], json.dumps(reply)[1:-1])
         return out.replace(json.loads(out.splitlines()[0])["thread_id"], thread)
 
-    panellist.play("codex", thread, bool(resumed), prompt, recording, RUNS, REPLY,
+    panellist.play("codex", thread, bool(resumed), prompt, recording, RUNS,
                    f"Error: thread/resume: thread/resume failed: no rollout found for thread id {thread} "
                    "(code -32600)\n")
     name, code = RUNS.get(MODE.split(":")[0], RUNS["ok"])

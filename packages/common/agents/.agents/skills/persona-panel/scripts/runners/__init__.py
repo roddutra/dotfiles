@@ -14,12 +14,14 @@ Registry and helpers (this file):
     launch_effort(run, levels)      the effort a runner passes, refusing a level it does not have
     merge_usage(recorded, usage)    one session's usage after another result
     total_usage(sessions)           a run's usage, summed over its sessions
-    usage(), result(), json_lines(), last_line(), exited(), run_cli()   building blocks for runner modules
+    usage(), result(), model_facts(), json_lines(), last_line(), exited(), run_cli()
+                                    building blocks for runner modules
 
-Every runner module exposes these six functions.
+Every runner module exposes these seven functions.
 
 capabilities() -> dict
-    images_by_path       bool: a panellist can open an image file by path during the run
+    images_by_path       bool: a panellist can open an image file by path during the run. The
+                         runner-wide answer: model_status() can say otherwise for one model
     image_attach         bool: the harness can attach images at launch. It says what the
                          harness can do: no runner attaches one yet, and nothing reads it
     browser              bool: a panellist can drive the agent-browser CLI and keep its session
@@ -33,7 +35,8 @@ capabilities() -> dict
     purge                bool: a session can be deleted by id
     usage                {"tokens", "cost", "duration"}: which of them the harness reports
     default_concurrency  int: runs to keep going at once when study.json sets no figure
-    provider             str: who receives the materials
+    provider             str: who receives the materials. model_status() can name the provider of
+                         one model, on a harness that reaches several
     billing_env          list[str]: environment variables that, when set, can change who is
                          billed. The plan step reports any that are set
     isolation_gaps       list[str]: what the runner could not switch off for any run or job, in
@@ -57,11 +60,15 @@ resume_command(run, session_id, message, workdir, limits) -> dict
     "session_id" is set when the runner knows the id before the process starts, so a run killed
     before it prints anything can still be resumed. Resume repeats every launch setting, because
     no harness tried so far inherits the working directory, the tools or the budget.
-    Both raise ValueError for an effort the harness does not have, and for a budget of zero or
-    less: validate with check_effort() and stop a spent run before asking for a command.
+    Both raise ValueError for an effort the harness does not have, for a budget of zero or
+    less, and for a model the runner can see its harness does not have: validate with
+    check_effort() and model_status(), and stop a spent run before asking for a command.
 
-parse_result(stdout, stderr, exit_code) -> dict
-    session_id  str or None
+parse_result(stdout, stderr, exit_code, session_id=None) -> dict
+    session_id (the argument) is the "session_id" of the command the process was started with,
+    None when that had none. A harness whose output does not name its session needs it to find
+    what the session recorded; the others ignore it. The dict:
+    session_id  str or None: the session the process ran in, None when it reached none
     reply       the final assistant text, None unless the outcome is "ok"
     usage       see below
     outcome     "ok", "usage_limit" (the harness is turning requests away: a usage limit, a
@@ -80,10 +87,29 @@ parse_result(stdout, stderr, exit_code) -> dict
 
 check() -> {"ok": bool, "message": str}
     Whether the CLI is installed, signed in and still accepts the options the runner passes,
-    without a model call. On failure the message carries the CLI's own words.
+    without a model call. On failure the message carries the CLI's own words. Asking a CLI
+    whether it is signed in can make the harness refresh its own login, here and in
+    model_status(), so neither is free of side effects outside the study. The runner itself
+    must never read, store or relay a login.
 
 purge_command(session_id, workdir) -> list or None
     The argv that deletes one session, or None when it cannot be deleted.
+
+model_status(entry) -> dict
+    What the runner can tell about one model entry (or run: "model", "effort") without a model
+    call, where capabilities() and check() answer only for the whole harness. None means it
+    cannot tell without a model call, and the runner-wide answer stands. Like check(), it may
+    let the harness refresh its own login, and must never read or relay it.
+    known      bool or None: the harness has this model, and the runner can make it launch
+               exactly this one. False refuses the launch
+    images     bool or None: this model can open an image file. None: capabilities()
+               ["images_by_path"] stands. A full-materials study refuses a model that cannot
+    signed_in  bool or None: the model's provider has a working login. False refuses the
+               launch. None: check() answers for the harness
+    provider   str or None: who receives the materials for this model. None: capabilities()
+               ["provider"]
+    message    str: the finding in the harness's own terms, for the plan to print. "" when
+               there is nothing to say
 
 Usage. {"input_tokens", "output_tokens", "cached_tokens", "cost_usd", "duration_s", "scope"},
 None for anything not reported. input_tokens counts all input including the cached part,
@@ -92,7 +118,7 @@ what the token and cost figures cover: "session" when they are running totals fo
 session, earlier resumes and killed processes included, or "process" when they cover this
 process alone. Tokens and cost in one result always share one scope. duration_s is the wall
 time of this process as the harness reports it, whatever the scope; the caller's own clock is
-what enforces a time limit. Both runners so far report "session".
+what enforces a time limit. Every runner so far reports "session".
 
 Totalling a run without double counting: keep one usage per session id and fold each result in
 with merge_usage(), which replaces a session-scoped figure and adds a process-scoped one. A run
@@ -109,7 +135,8 @@ import json
 import pkgutil
 import subprocess
 
-INTERFACE = ("capabilities", "launch_command", "resume_command", "parse_result", "check", "purge_command")
+INTERFACE = ("capabilities", "launch_command", "resume_command", "parse_result", "check", "purge_command",
+             "model_status")
 OUTCOMES = ("ok", "usage_limit", "budget", "error")
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cached_tokens", "cost_usd", "duration_s")
 
@@ -171,6 +198,11 @@ def result(outcome: str = "error", **fields) -> dict:
     """A parse_result() return value with every key present."""
     return {"session_id": None, "reply": None, "usage": usage(), "outcome": outcome,
             "reset_at": None, "message": "", "session_lost": False, **fields}
+
+
+def model_facts(**facts) -> dict:
+    """A model_status() return value with every key present: nothing known unless given."""
+    return {"known": None, "images": None, "signed_in": None, "provider": None, "message": "", **facts}
 
 
 def merge_usage(recorded: dict | None, new: dict) -> dict:

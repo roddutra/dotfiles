@@ -1,5 +1,5 @@
 """What a fake CLI does when it plays a whole panellist run, or an analyst or writer job. Shared
-by fake_claude.py and fake_codex.py.
+by fake_claude.py, fake_codex.py and fake_pi.py.
 
 Switched on by $FAKE_PANEL, a directory the test owns:
 
@@ -121,13 +121,14 @@ def block(until, what):
         time.sleep(0.01)
 
 
-def play(cli, session, resumed, prompt, recording, modes, reply, lost):
+def play(cli, session, resumed, prompt, recording, modes, lost):
     """Play the run or job this process was started for, and exit. Returns without doing
     anything when no plan is in force or the prompt belongs to no run this fake knows.
 
-    recording(name) is the CLI's recorded output under this session id, modes maps an
-    end:<mode> to (recording name, exit code), reply is the final reply in the "ok" recording,
-    and lost is what the real CLI prints on stderr when the session to resume is gone."""
+    recording(name, reply=None) is what the CLI's recorded run `name` prints on stdout under this
+    session id, with reply, when given, in place of its final reply. It is first called for
+    "killed", whose first line is printed at once. modes maps an end:<mode> to (recording name,
+    exit code), and lost is what the real CLI prints on stderr when the session to resume is gone."""
     home = os.environ.get("FAKE_PANEL")
     if not home:
         return
@@ -158,17 +159,14 @@ def play(cli, session, resumed, prompt, recording, modes, reply, lost):
     log(event="start", cli=cli, run=run, attempt=attempt + 1, resumed=resumed, session=session, pid=os.getpid(),
         argv=sys.argv[1:], stdin=prompt, cwd=os.getcwd())
     cut_off = recording("killed").splitlines(keepends=True)
-    sys.stdout.write(cut_off[0])  # the real CLIs print the session id before anything else
+    sys.stdout.write("".join(cut_off[:1]))  # a CLI that prints events names its session before anything else
     sys.stdout.flush()
 
     said = []  # the reply to end with, when a step set one
 
     def end(mode):
         name, code = modes[mode] if mode in modes else ("killed", 1)
-        out = recording(name)
-        if said and mode == "ok":
-            out = out.replace(json.dumps(reply)[1:-1], json.dumps(said[-1])[1:-1])
-        sys.stdout.write(out)
+        sys.stdout.write(recording(name, said[-1] if said and mode == "ok" else None))
         sys.stdout.flush()
         log(event="end", run=run, pid=os.getpid(), code=code)
         sys.exit(code)

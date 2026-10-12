@@ -97,7 +97,7 @@ import os
 import re
 import uuid
 
-from . import exited, json_lines, last_line, launch_effort, result, run_cli, usage
+from . import exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
 
 CLI = "claude"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -228,7 +228,7 @@ def _usage_limit(res: dict, lines: list[dict]) -> tuple[bool, int | None]:
     return hit, reset if isinstance(reset, (int, float)) else None
 
 
-def parse_result(stdout, stderr, exit_code) -> dict:
+def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
     lines = json_lines(stdout)
     out = result(session_id=next((x["session_id"] for x in lines if isinstance(x.get("session_id"), str)), None))
     res = next((x for x in reversed(lines) if x.get("type") == "result"), None)
@@ -279,6 +279,12 @@ def check() -> dict:
         return {"ok": False, "message": last_line(err) or last_line(out) or f"{CLI} refused the launch options"}
     signed_in = ", ".join(str(status[k]) for k in ("authMethod", "subscriptionType", "apiProvider") if status.get(k))
     return {"ok": True, "message": f"{version[1]}, signed in ({signed_in})"}
+
+
+def model_status(entry: dict) -> dict:
+    """Nothing is known of one model without a call to it, so the answers for the whole CLI
+    stand: every model reads images, and check() covers the login. An unknown model fails at the API."""
+    return model_facts(images=capabilities()["images_by_path"])
 
 
 def purge_command(session_id: str, workdir) -> list | None:

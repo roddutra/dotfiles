@@ -159,23 +159,23 @@ lacks is reported by the plan step before launch, never discovered mid-panel.
 
 Flags below were checked for existence on 12 October 2026 against Claude Code
 2.1.296, codex-cli 0.162.1 and Pi 1.1.0. The Claude Code and Codex columns
-were then corrected from real runs; see [Discovery](#discovery). The Pi
-column is still untested.
+were then corrected from real runs, and the Pi column on 13 October 2026; see
+[Discovery](#discovery).
 
 | Need | Claude Code | Codex | Pi |
 | --- | --- | --- | --- |
-| Headless run | `claude -p`, prompt on stdin | `codex exec -`, prompt on stdin | `pi -p` |
-| Model | `--model` | `-m` | `--model <provider>/<id>` |
-| Thinking effort | `--effort`, validated by the runner | `-c model_reasoning_effort=`, validated by the runner | `--thinking` |
+| Headless run | `claude -p`, prompt on stdin | `codex exec -`, prompt on stdin | `pi -p --mode text`, prompt on stdin |
+| Model | `--model` | `-m` | `--provider <provider> --model <id>`, an exact row of the model listing, checked by the runner |
+| Thinking effort | `--effort`, validated by the runner | `-c model_reasoning_effort=`, validated by the runner | `--thinking`, validated by the runner |
 | Working directory | process cwd | `-C` | process cwd |
-| Keep user and project instructions out | `--safe-mode --restricted --strict-mcp-config --disable-slash-commands --settings '{"includeGitInstructions":false}'` | `--ignore-user-config --ignore-rules -c project_doc_max_bytes=0 -c skills.include_instructions=false --disable plugins --disable tool_suggest`; the user-level `AGENTS.md` cannot be excluded | to be found |
-| Restrict tools | `--tools`, `--allowed-tools`, `--permission-mode dontAsk` | `-s workspace-write`, `-c approval_policy=never` | `--tools` |
-| See an image | reads files by path | reads files by path; `-i` exists and is not used | to be found |
-| Machine-readable output | `--output-format stream-json --verbose` | `--json` | `--mode json` |
-| Session id | `--session-id <uuid>`, chosen by the runner | `thread_id` on the first output line | to be found |
-| Resume | `--resume <id>`, with every launch flag repeated | `codex exec <every launch flag> resume <id>` | `--session-id` |
-| Budget cap | `--max-budget-usd`, per process | none | none found |
-| Delete a session | remove its transcript file | `codex delete --force <id>` | to be found |
+| Keep user and project instructions out | `--safe-mode --restricted --strict-mcp-config --disable-slash-commands --settings '{"includeGitInstructions":false}'` | `--ignore-user-config --ignore-rules -c project_doc_max_bytes=0 -c skills.include_instructions=false --disable plugins --disable tool_suggest`; the user-level `AGENTS.md` cannot be excluded | `-nc -ns -ne -np --no-themes --no-mcp --no-approve --system-prompt "" --append-system-prompt ""` |
+| Restrict tools | `--tools`, `--allowed-tools`, `--permission-mode dontAsk` | `-s workspace-write`, `-c approval_policy=never` | `--tools`, and a guard extension loaded with `-e`: Pi has no sandbox and no approvals |
+| See an image | reads files by path | reads files by path; `-i` exists and is not used | reads files by path, on a model its listing says takes images; `@file` exists and is not used |
+| Machine-readable output | `--output-format stream-json --verbose` | `--json` | the session file: `--mode json` exists and is not used |
+| Session id | `--session-id <uuid>`, chosen by the runner | `thread_id` on the first output line | `--session-id <uuid>`, chosen by the runner |
+| Resume | `--resume <id>`, with every launch flag repeated | `codex exec <every launch flag> resume <id>` | `--session <id>`, with every launch flag repeated, from the same directory |
+| Budget cap | `--max-budget-usd`, per process | none | none |
+| Delete a session | remove its transcript file | `codex delete --force <id>` | remove its session file |
 
 ## `study.json` changes
 
@@ -870,6 +870,52 @@ and session ids from the command line.
   method already requires. The September study showed a weaker model
   mislabelling concepts and inventing claims until its notes were tightened.
 
+### Deviations decided during milestone 4
+
+- **Nothing was run on an OpenAI-compatible endpoint.** The Pi installation
+  the runner was built against had one working provider, a ChatGPT
+  subscription login, and no endpoint configured. The runner was verified
+  against that provider. The acceptance criterion "A panel includes a model
+  on an OpenAI-compatible endpoint" is still open: it needs a provider in
+  Pi's `models.json` or a built-in provider signed in.
+- **The runner ships a guard extension,** `scripts/runners/pi_guard.ts`,
+  loaded into every run. Pi has no sandbox and no approvals: its file tools
+  read and write wherever the user can. The guard keeps them inside the
+  working directory with symbolic links followed, refuses the shell, and
+  with browsing on allows one `agent-browser` command at a time.
+- **A run cannot start without the guard.** The launch passes a flag that
+  only the guard defines, so Pi refuses to start when the guard is missing
+  or fails to load, and `check()` fails first.
+- **The runner interface has a seventh function, `model_status(entry)`,**
+  on every runner. It reports, for one model entry and without a model call,
+  whether the harness has the model, whether its provider is signed in,
+  whether it reads images and who receives the materials. `plan` and `run`
+  refuse a model the harness lacks, one whose provider is signed out and, in
+  a full-materials study, one that reads no images. Claude Code and Codex
+  cannot tell without a model call, so their runner-wide answers stand.
+- **A Pi model entry needs `model`,** an exact `<provider>/<id>` from Pi's
+  model listing. [`study.json` changes](#studyjson-changes) says an entry
+  without one uses the harness default: in Pi that is the user's own default
+  model and thinking level, and Pi matches an inexact name loosely or sends
+  it to the API as it is.
+- **Pi runs print text, and their facts come from Pi's session file.** The
+  JSON event stream repeats every image a run reads six times (17.4 MB of
+  output for one 2.9 MB sheet), which would put gigabytes in `logs/`. A
+  real run that read four sheets left 191 bytes of output and a 2.8 MB
+  session file.
+- **`parse_result` takes a fourth argument, the session id** the command was
+  built with, which the launcher passes back. Text output does not name the
+  session, so the Pi runner needs it to find the session file.
+- **Pi usage is session-scoped,** summed from the session file, so the
+  finished requests of a stopped run are counted at once.
+- **The runner passes `--session-dir`,** set to the folder Pi would use by
+  default, so a `sessionDir` setting cannot move sessions away from where
+  the runner reads and purges them.
+- **Default concurrency is 3,** the most that was run at once.
+- **`assets/study.example.json` has no Pi entry.** A placeholder model id
+  would make the example fail its own plan. The entry's shape is in
+  `references/runners.md`.
+
 ## Part 6: Usability studies
 
 `"type": "usability"` tests whether a persona can complete tasks in a running
@@ -1021,11 +1067,13 @@ To settle before the affected part is built. Record results in this document.
 
 Results for Claude Code, Codex and all runners were established on 12 October
 2026 against Claude Code 2.1.296 (Claude Max subscription login) and codex-cli
-0.162.1 (ChatGPT plan login), by running each CLI in fixture directories with
-planted marker terms. **Verified** means seen in a real run. **Inferred**
-means read from help text, the binary's strings or old session files. The
-exact flags and output formats are in the docstrings of
-`scripts/runners/claude.py` and `scripts/runners/codex.py`.
+0.162.1 (ChatGPT plan login), and for Pi on 13 October 2026 against Pi 1.1.0
+(a ChatGPT subscription login, its only working provider), by running each CLI
+in fixture directories with planted marker terms. **Verified** means seen in a
+real run. **Inferred** means read from help text, bundled docs, the binary's
+strings or old session files. The exact flags and output formats are in the
+docstrings of `scripts/runners/claude.py`, `scripts/runners/codex.py` and
+`scripts/runners/pi.py`.
 
 Claude Code:
 
@@ -1104,7 +1152,66 @@ Codex:
 Pi:
 
 - How to exclude global instruction files.
+  - **Result (verified):** `-nc -ns -ne -np --no-themes --no-mcp
+    --no-approve --system-prompt "" --append-system-prompt ""`. With markers
+    planted in the working directory's and its parents' instruction files,
+    project skills, a project extension and the project's `.pi/` folder, and
+    with the user's global rules in place, none reached the model and the
+    login kept working.
+  - `-nc` removes every `AGENTS.md` and `CLAUDE.md`, the global one and
+    those of every parent directory. `--no-approve` is needed because a
+    user setting can trust project files in headless mode. The two empty
+    system prompt flags keep out a global `SYSTEM.md` or `APPEND_SYSTEM.md`,
+    which no other flag does.
+  - The config directory variable is not used: the login lives in that
+    directory.
+  - No switch was found for the working directory path, the path of the Pi
+    installation or Pi's own system prompt. All reach the model.
 - Image input per model, and how the plan step can detect it.
+  - **Result (verified):** a run opens an image by path with the `read`
+    tool. A 2880x1800 sheet was resized by Pi to 2000x1250 and read down to
+    its small print.
+  - `pi --offline -ne --list-models` prints an `images` column for every
+    model, without a model call. The plan step reads the model's exact row.
+    A custom model in `models.json` is listed as text only unless it
+    declares image input.
+  - **Result (inferred):** a text-only model is not an error. Pi swaps each
+    image for a line of placeholder text and carries on, so the listing is
+    what refuses it.
+- Tool restriction. Not a question at the start.
+  - **Result (verified):** Pi has no sandbox, no permission system and no
+    approval prompts. With only the file tools enabled, a run read
+    `/etc/hostname` and wrote outside its working directory. Confinement
+    takes an extension that vetoes tool calls, loaded with `-e`.
+  - With the guard, every read, write, listing and search outside the
+    working directory was refused, through `..`, an absolute path, `~`, a
+    `file://` address and symbolic links, and so were every shell command
+    but a single `agent-browser` command. Nothing waited for approval.
+  - Pi refuses to start when an extension given with `-e` is missing, has a
+    syntax error or throws while loading.
+- Output, session id and resume.
+  - **Result (verified):** text mode prints the final reply alone, and exits
+    with code 1 after a provider error. JSON mode exits 0 for the same
+    error, and repeats each image read six times.
+  - The runner chooses the id with `--session-id <uuid>`. Resume is
+    `--session <id>`, which fails when the session is gone.
+    `--session-id` never fails: it creates an empty session of the same id.
+  - Resume keeps its memory, also after SIGTERM, and inherits the model and
+    thinking level but not the tools. From another directory it asks
+    whether to fork the session and stops.
+- Models and thinking levels.
+  - **Result (verified):** an inexact model name is matched loosely with no
+    warning, an unknown id under a known provider is sent to the API, and an
+    invalid thinking level only warns and runs at the user's default. The
+    runner validates all three.
+- Usage and budget.
+  - **Result (verified):** each request's tokens and a list-price cost are
+    in the session file, also under a subscription login. There is no
+    duration for a process and no budget cap of any kind.
+- What is configured for the acceptance test.
+  - **Result (verified):** nothing on an OpenAI-compatible endpoint. The
+    only working provider was the ChatGPT subscription login. The endpoint
+    path is untested.
 
 All runners:
 
@@ -1114,21 +1221,28 @@ All runners:
     starts "You've hit your", status 429 and exit code 1, with the reset
     time in its `rate_limit_event`. Codex is expected to end with
     `turn.failed` and exit code 1, its message naming a usage limit, with
-    the reset time in the session file.
+    the reset time in the session file. Pi is expected to end with a
+    provider error whose message names the limit, with at most "Try again
+    in ~N min" as the reset time.
 - Where each harness stores a session, and whether it can be deleted by id.
   - **Result (verified):** Claude Code keeps one transcript per session
     under its projects directory, in a folder named after the working
     directory. It has no command that deletes one session, and removing the
     file makes the id unknown to resume. Codex keeps a session file under
     `$CODEX_HOME/sessions/` and database rows, and
-    `codex delete --force <id>` removes both.
+    `codex delete --force <id>` removes both. Pi keeps one file per session
+    under its sessions folder, in a folder named after the working
+    directory. It has no command that deletes one, its docs say to remove
+    the file, and removing it makes the id unknown to resume.
 - A safe default concurrency on a subscription.
-  - **Result (still open):** no cap was found in either CLI. Four concurrent
-    Claude Code runs and three concurrent Codex runs raised no error. The
-    defaults stay at 6 and 4.
+  - **Result (still open):** no cap was found in any CLI. Four concurrent
+    Claude Code runs, three concurrent Codex runs and three concurrent Pi
+    runs raised no error. The defaults stay at 6 and 4, and Pi's is 3.
 - Whether `agent-browser` runs inside each harness's sandbox.
   - **Result (verified):** yes in Claude Code, through an allow rule for
-    `agent-browser` commands. No in Codex, as above.
+    `agent-browser` commands. No in Codex, as above. Yes in Pi, which has no
+    sandbox: the browser session persists between shell calls, and the
+    guard extension is what limits the shell to `agent-browser`.
 
 Still open after milestone 1:
 
@@ -1146,6 +1260,17 @@ Still open after milestone 1:
   run inside a git repository, can be prevented.
 - What `--ignore-rules` does in practice: its effect was read from the help
   text, not observed.
+
+Still open after milestone 4:
+
+- Everything on an OpenAI-compatible endpoint through Pi: tool calling,
+  whether the endpoint reports usage, image input and the text of its
+  errors.
+- What Pi does with a text-only model and an image: read from its source,
+  not seen.
+- Pi concurrency above three runs, and two processes refreshing one login
+  at once.
+- Compaction in a long Pi run, and its usage.
 
 Usability:
 

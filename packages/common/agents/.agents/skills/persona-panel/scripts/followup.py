@@ -22,10 +22,13 @@ What it does, on a study that runs through runners:
   watchdog, within the runner's concurrency. Like launch.py it stays in the foreground until the
   processes have ended, and "launch.py <study-dir> stop" stops it.
 - Only a run that can be asked is asked: a panellist run that is done, with a recorded session
-  that was not purged or lost, on a runner that can resume and whose CLI is ready. Every other
-  run named gets a line saying why, and then nothing is asked at all, unless --skip-unfit, which
-  asks the rest. Analyst and writer jobs cannot be asked. To put a question to a run that could
-  not be reached, ask again: it becomes the next follow-up.
+  that was not purged or lost, on a runner that can resume, whose CLI is ready and which can
+  still launch the run's model entry (launch.fitness: what stops "plan" and "run" stops a
+  follow-up, such as a model no longer listed or a provider no longer signed in). Every other
+  run named gets a line saying why, before anything is recorded or started, and then nothing is
+  asked at all, unless --skip-unfit, which asks the rest. Analyst and writer jobs cannot be
+  asked. To put a question to a run that could not be reached, ask again: it becomes the next
+  follow-up.
 - The question is sent word for word, inside a fixed frame (assets/followup-message.md) that says
   what a follow-up is and what the panellist may do. An empty question file is refused.
 - Each run has limits.followup for each question, 5 minutes and $0.50 unless study.json says
@@ -33,8 +36,9 @@ What it does, on a study that runs through runners:
   the most they can use are printed. That spend is outside the plan's ceiling.
 - --dry-run prints what "ask" prints before it starts, and stops: the follow-up's number, the
   runs it would ask and the ones that cannot be asked, each run's allowance, the most they can
-  use between them and whether each harness enforces that cap. It starts nothing, takes no
-  lock and writes nothing. Show it to the user first when a ceiling was agreed.
+  use between them and whether each harness enforces that cap. It starts no run, takes no
+  lock and writes nothing to the study (a runner's sign-in check may let its harness refresh
+  its own login). Show it to the user first when a ceiling was agreed.
 - Scores never change. The persona file is copied before the question. When the process has
   ended the file must be that copy plus the one appended section, with no other heading in it,
   and its scores, ranking and sections must read as before. Otherwise the follow-up is
@@ -106,9 +110,9 @@ def next_number(cfg: dict) -> int:
     return max(used, default=0) + 1
 
 
-def cannot_ask(cfg: dict, e: dict, ready: dict) -> str | None:
-    """Why a run cannot be asked a follow-up question, in a clause, or None when it can. ready
-    keeps each runner's check(), so a CLI is asked once."""
+def cannot_ask(cfg: dict, e: dict) -> str | None:
+    """Why a run cannot be asked a follow-up question whatever its runner says of its CLI and its
+    model, in a clause, or None. choose() then asks the runner."""
     if e["role"] != "panellist":
         job = "an analyst" if e["role"] == "analyst" else "the writer"
         return f"it is {job} job, and only a panellist run can be asked"
@@ -127,19 +131,17 @@ def cannot_ask(cfg: dict, e: dict, ready: dict) -> str | None:
         return "its session was purged (purge-sessions)"
     if session in (e.get("lost") or {}):
         return launch.LOST
-    runner = runners.get(e["runner"])
-    if not runner.capabilities()["resume"]:
+    if not runners.get(e["runner"]).capabilities()["resume"]:
         return f"{e['runner']} cannot resume a session"
-    if e["runner"] not in ready:
-        ready[e["runner"]] = runner.check()
-    if not ready[e["runner"]]["ok"]:
-        return f"{e['runner']} cannot be used: {ready[e['runner']]['message'].strip().rstrip('.')}"
     return None
 
 
 def choose(cfg: dict, runs: list[dict], named: str | None, skip_unfit: bool) -> list[dict]:
     """The runs to ask: the ones --runs names, or with "all" every panellist run that is done.
-    Says why each run named cannot be asked, and exits unless every one can or skip_unfit."""
+    Says why each run named cannot be asked, and exits unless every one can or skip_unfit. A run
+    that could be asked is then judged as "run" and "resume" judge the runs they start
+    (launch.fitness): its runner's CLI can be used, and its model entry is one the runner can
+    still launch, signed in."""
     if not named or not named.strip():
         raise SystemExit("ask needs --runs <ids>, comma-separated, or --runs all for every finished panellist run.")
     known = {e["run"]: e for e in runs}
@@ -149,9 +151,15 @@ def choose(cfg: dict, runs: list[dict], named: str | None, skip_unfit: bool) -> 
             raise SystemExit("No panellist run of this study is done, so there is no one to ask.")
     else:
         ids = list(dict.fromkeys(x.strip() for x in named.split(",") if x.strip()))
-    fit, unfit, ready = [], [], {}
+    why_not = {run_id: cannot_ask(cfg, known[run_id]) if run_id in known else "this study has no run of that name"
+               for run_id in ids}
+    unusable, errors, _ = launch.fitness(cfg, [known[i] for i in ids if not why_not[i] and known[i]["runner"]])
+    fit, unfit = [], []
     for run_id in ids:
-        why = cannot_ask(cfg, known[run_id], ready) if run_id in known else "this study has no run of that name"
+        runner = known[run_id]["runner"] if run_id in known else None
+        why = why_not[run_id] or (
+            f"{runner} cannot be used: {unusable[runner].strip().rstrip('.')}" if runner in unusable
+            else "; ".join(error.strip().rstrip(".") for error in errors.get(run_id, [])))
         if why:
             unfit.append(f"{run_id}: {'skipped' if skip_unfit else 'cannot be asked'}: {why}.")
         else:
@@ -321,8 +329,8 @@ def main():
     ap.add_argument("--skip-unfit", action="store_true",
                     help="ask: leave out the runs named that cannot be asked, and ask the others")
     ap.add_argument("--dry-run", action="store_true",
-                    help="ask: print the runs it would ask and the most they can use, and stop. Nothing is "
-                         "started and nothing is written")
+                    help="ask: print the runs it would ask and the most they can use, and stop. No run is "
+                         "started and nothing is written to the study")
     ap.add_argument("--grace", type=float, default=10.0, metavar="SECONDS",
                     help="how long a process gets to finish its write after SIGTERM, before SIGKILL (default 10)")
     ap.add_argument("--poll", type=float, default=1.0, metavar="SECONDS",

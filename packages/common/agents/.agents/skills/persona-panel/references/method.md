@@ -15,17 +15,18 @@
 | Brief kept out | `init_study.py` refuses to scaffold while a copy of `study-brief.md` is under `panel/` or in a concept folder, by name or by content. Every script refuses one in `synthesis.context_files` | The brief holds the team's hypotheses, and an analyst who knows them tends to find them |
 | Neutral follow-ups | A follow-up question reveals no other panellist's answer, no result and nothing the team hopes to hear; `followup.py` sends one question, word for word, to every run named | A leading question gets the answer it asks for |
 
-The working directory's full path is in every panellist's context on both runners. Give the study folders neutral names.
+The working directory's full path is in every panellist's context on every runner. Give the study folders neutral names.
 
 ## Models
 
 - Run every persona on at least 2 models. A single model's taste is indistinguishable from the persona's.
-- Use models from two vendors when both runners are available. Until October 2026 every panel ran on one vendor's models, so agreement between models has only been measured within a vendor. `analyze.py` compares every pair of model keys, across vendors too.
+- Use models from two vendors when runners for both are available. Until October 2026 every panel ran on one vendor's models, so agreement between models has only been measured within a vendor. `analyze.py` compares every pair of model keys, across vendors too.
 - Treat level differences between models (one marks 0.4 higher) as calibration, not signal. This matters more across vendors: a new model may mark higher or lower throughout, compress its scores, skip materials or invent claims. Compare concepts within a run, and read rankings and Borda beside mean scores.
 - Pilot every new model entry before the panel (`launch.py pilot`) and read its file against the materials. When a model needs tighter instructions, add `model_notes` to `study.json`, keyed by model key or model name: each note becomes a line in that model's run prompts.
 - In a 56-run study (Sept 2026, Claude opus, sonnet, haiku, fable): opus and fable agreed most within persona (Spearman 0.73) and caught copy contradictions inside mock-ups; sonnet read mostly marketing copy; haiku compressed scores, mislabelled concepts, skipped materials, made "no concept covers X" claims that were false, and leaked internal terms. Excluding haiku didn't change the leaderboard.
 - Default on the `claude` runner: `["opus", "fable"]` for follow-ups; add sonnet (and haiku only with its model notes) for a wide first round where model skew itself is a question.
 - A model entry without `model` uses the harness's default, which depends on the account. Name the model when rounds must compare.
+- A model reached through the `pi` runner, on a local or OpenAI-compatible endpoint above all, is a new model every time: in the pilot, check that it quotes text that appears only in a screenshot, since a model wrongly listed as reading images reviews without them and says nothing. Expect to need `model_notes` (`references/runners.md`, `pi`).
 - Capabilities differ between runners. When one runner can browse and another cannot, set `"browse": false` so every panellist works from the same materials (see the switches lesson under Capture).
 
 ## What agent panellists add (October 2026 trial)
@@ -170,7 +171,7 @@ Native mode has its own running notes in `references/runners.md`.
 - **Qualitative only.** An answer is prompted, comes after the scores and was asked only of the runs you chose. No script tallies it and no score or ranking can change. The analysts quote it with the run and the follow-up number and say it was prompted.
 - **Leading questions.** A follow-up never reveals another panellist's answer, a result, or what the team hopes to hear. A question that names the answer gets it: "Would a pricing table have helped?" is answered yes. Ask "What, if anything, was missing when you looked for the cost?" instead.
 - **One wording for everyone.** One `ask` sends the file's text, word for word, to every run named, so answers to it compare. A reworded question is a new follow-up.
-- **Who can be asked.** A panellist run that is `done`, whose session was not purged or lost. One run named that cannot be asked stops the whole command, with the reason, unless `--skip-unfit`. Ask before `purge-sessions`.
+- **Who can be asked.** A panellist run that is `done`, whose session was not purged or lost, on a runner whose CLI is ready and which can still launch the run's model entry: what stops `plan` and `run` (a model no longer listed, a provider no longer signed in) stops a follow-up, before anything is recorded or started. One run named that cannot be asked stops the whole command, with the reason, unless `--skip-unfit`. Ask before `purge-sessions`.
 - **Cost.** Each run asked has `limits.followup` for each question: 5 minutes and $0.50 by default, apart from its run limits and outside the plan's ceiling. `--runs all` on a 36-run panel is up to $18 a question on a runner with a budget cap, and bounded only by time on one without. `ask` prints the runs and the most they can use, then starts without waiting. When a ceiling was agreed, run it with `--dry-run` first and show the user: it prints the same lines, starts nothing and records nothing.
 - **Ask before the analysts.** An analyst's brief lists each question its personas answered, with the runs, and the writer's brief lists them all. A question asked after a job has finished is not in that job's brief. `run --role analyst` and `run --role writer` are refused while a follow-up is not settled.
 

@@ -1,7 +1,8 @@
 """What launch.py says about a study without starting anything: the plan, and the usage record.
 
 launch.py owns the commands (plan, usage); this module works out the facts and words them. It
-knows no harness: everything about one comes from its runner's capabilities() and check().
+knows no harness: everything about one comes from its runner's capabilities(), check() and
+model_status().
 
     unfit(cfg, entry)             why a run or job cannot be started on its runner as study.json
                                   has it. The same judgement stops "plan" and "run"
@@ -138,22 +139,34 @@ def label(entry: dict) -> str:
     return entry["key"] if entry["role"] == "panellist" else entry["role"]
 
 
-def unfit(cfg: dict, entry: dict) -> tuple[list[str], str | None]:
+def reads_images(caps: dict, status: dict) -> bool:
+    """Whether a model entry's runs can open an image file: what its runner found out about the
+    model, and the runner-wide answer where it could not tell."""
+    return caps["images_by_path"] if status["images"] is None else status["images"]
+
+
+def unfit(cfg: dict, entry: dict, status: dict | None = None) -> tuple[list[str], str | None]:
     """Why a run or job cannot be started on its runner as study.json has it, and a note where
-    something it asks for is left out instead: (errors, note). An error refuses the launch."""
-    caps, effort = runners.get(entry["runner"]).capabilities(), runners.check_effort(entry)
+    something it asks for is left out instead: (errors, note). An error refuses the launch.
+    status is the runner's model_status() for the entry, asked for here when not given."""
+    runner = runners.get(entry["runner"])
+    caps, effort = runner.capabilities(), runners.check_effort(entry)
+    status = status or runner.model_status(entry)
     errors = [effort["error"]] if effort["error"] else []
-    if entry["role"] == "panellist" and cfg["materials"] == "full" and not caps["images_by_path"]:
-        errors.append(f'{entry["runner"]} cannot open images, and this study\'s "materials" is "full", so its '
+    if status["known"] is False or status["signed_in"] is False:
+        errors.append(status["message"] or f'{entry["runner"]} cannot run the model "{entry["model"]}"')
+    elif entry["role"] == "panellist" and cfg["materials"] == "full" and not reads_images(caps, status):
+        who = entry["runner"] if status["images"] is None else f'{entry["model"]} on {entry["runner"]}'
+        errors.append(f'{who} cannot open images, and this study\'s "materials" is "full", so its '
                       'runs would review designs they cannot see. A model that reads no images is for '
                       'text-only studies: set "materials": "text", or take the model entry out')
     return errors, effort["note"]
 
 
-def lacks(cfg: dict, entry: dict, caps: dict) -> list[dict]:
-    """The capabilities a model entry's runner does not have, each with what that means here."""
+def lacks(cfg: dict, entry: dict, caps: dict, status: dict) -> list[dict]:
+    """The capabilities a model entry does not have on its runner, each with what that means here."""
     panellist, out = entry["role"] == "panellist", []
-    if panellist and not caps["images_by_path"]:
+    if panellist and not reads_images(caps, status):
         out.append(("images", "it cannot open an image file" + (
             ", which a text-only study does not need" if cfg["materials"] == "text" else "")))
     if not caps["budget_cap"]:
@@ -690,8 +703,9 @@ def ceiling(runs: list[dict], jobs: list[dict], pool: dict) -> dict:
 
 
 def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolded: bool, launcher: dict | None) -> dict:
-    """The plan as one JSON-ready object. Starts nothing and writes nothing: the only processes
-    are each runner's check(), which makes no model call.
+    """The plan as one JSON-ready object. Starts no run and writes nothing to the study: the
+    only processes are each runner's check() and model_status(), which make no model call. Either
+    may let a harness refresh its own login.
 
     runs are the panellist entries (runs.json's, or the ones study.json plans when scaffolded
     is false), jobs the analyst and writer entries study.json plans with anything a launcher
@@ -745,12 +759,15 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         first = own[0]
         row = {"entry": name, "role": role, "runner": first["runner"], "model": first["model"],
                "effort": first["effort"], "runs": len(own), "provider": None, "limits": None,
-               "budget_enforced": False, "budget_cap_note": None, "lacks": [], "effort_note": None}
+               "budget_enforced": False, "budget_cap_note": None, "lacks": [], "effort_note": None,
+               "status": None}
         if not native:
             caps = runners.get(first["runner"]).capabilities()
-            errors, note = unfit(cfg, first)
-            row.update(provider=caps["provider"], limits=pl.limits_for(cfg, role, first.get("key")),
-                       budget_enforced=caps["budget_cap"], lacks=lacks(cfg, first, caps), effort_note=note,
+            status = runners.get(first["runner"]).model_status(first)  # what only this model can answer
+            errors, note = unfit(cfg, first, status)
+            row.update(provider=status["provider"] or caps["provider"], status=status,
+                       limits=pl.limits_for(cfg, role, first.get("key")),
+                       budget_enforced=caps["budget_cap"], lacks=lacks(cfg, first, caps, status), effort_note=note,
                        budget_cap_note=(caps["budget_cap_note"] or None) if caps["budget_cap"] else None)
             problems += [f"{name}: {err}" for err in errors]
         models.append(row)
@@ -847,7 +864,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
 def render(plan: dict) -> list[str]:
     """The plan as the lines the plan command prints."""
     sd, native, mat = plan["dir"], plan["native"], plan["materials"]
-    out = [f"Plan for {plan['study']} ({sd}). This command starts nothing and changes nothing."]
+    out = [f"Plan for {plan['study']} ({sd}). This command starts no run and changes no file of the study. "
+           "A runner's sign-in check may let its harness refresh its own login."]
     if plan["launcher"]:
         out.append(f'A launcher is running "{plan["launcher"].get("command")}" on this study '
                    f'(pid {plan["launcher"]["pid"]}).')
@@ -893,6 +911,9 @@ def render(plan: dict) -> list[str]:
             out.append(f"  {m['entry']}: {stop(m['budget_cap_note'])}")
         if m["effort_note"]:
             out.append(f"  {m['entry']}: {stop(m['effort_note'])}")
+        status = m["status"] or {}
+        if status.get("message") and False not in (status["known"], status["signed_in"]):  # else it is a problem, below
+            out.append(f"  {m['entry']}: {stop(status['message'])}")
 
     out += ["", f"Runs ({len(plan['runs'])}):"]
     out += table([["Run", "Persona", "Key", "Runner", "Model", "Effort", "Time limit", "Budget", "State", "Prompt"],
