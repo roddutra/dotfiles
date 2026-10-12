@@ -102,7 +102,6 @@ Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied 
 ### Common
 
 - `agents`
-- `ccstatusline`
 - `claude`
 - `codex`
 - `grok`

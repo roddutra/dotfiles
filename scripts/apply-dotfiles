@@ -37,7 +37,6 @@ fi
 
 common_packages=(
   agents
-  ccstatusline
   codex
   claude
   grok
