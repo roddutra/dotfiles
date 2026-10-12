@@ -43,6 +43,10 @@ Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during upd
 
 Generated monitor files, backups, secrets, downloaded plugins, and downloaded themes are intentionally excluded. Plugins and the theme are restored from `manifests/omarchy/`.
 
+`~/.config/omarchy/sandman.json` is also untracked: its sleep setting changes too often to be worth recording.
+
+The Omarchy shell can replace the `shell.json` link with a regular file when it saves. `apply-dotfiles` then reports a conflict. Adopt the live file with `stow --dir packages/omarchy --target ~ --no-folding --adopt omarchy` and review the diff.
+
 ## Alt+Tab switcher
 
 `manifests/omarchy/plugins.txt` restores [omalt-tab](https://github.com/Codesmith28/omalt-tab). The tracked `shell.json` enables its overlay, and the tracked Hyprland bindings load the plugin's own shortcuts when it is installed. `socat` supports its socket client; the binding calls the bundled client directly, so no `make prod` step or helper symlinks are needed.

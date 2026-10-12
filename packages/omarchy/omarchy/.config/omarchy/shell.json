@@ -10,8 +10,9 @@
           "id": "omarchy.indicators"
         },
         {
+          "id": "promaa.clock",
           "format": "ddd d MMM h:mm AP",
-          "id": "omarchy.clock"
+          "weekStartDay": "monday"
         },
         {
           "id": "omarchy.weather"

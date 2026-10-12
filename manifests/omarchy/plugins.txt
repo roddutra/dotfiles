@@ -12,4 +12,5 @@ io.weirdware.blueferry|https://github.com/erikwb/omarchy-blueferry.git
 jankeesvw.notification-center|https://github.com/jankeesvw/omarchy-notification-center.git
 lgse.sandman|https://github.com/lgse/sandman.git
 omadock|https://github.com/thepathless/omadock
+promaa.clock|https://github.com/promaaa/sync-calendar-omarchy.git
 sh.lerd.glance|https://github.com/lerd-env/lerd-omarchy-glance.git
