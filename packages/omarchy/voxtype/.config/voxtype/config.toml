@@ -11,7 +11,10 @@ mode = "push_to_talk"
 [audio]
 device = "default"
 sample_rate = 16000
-max_duration_secs = 900
+# Parakeet fails on a recording longer than about 400 seconds
+# (peteonrails/voxtype#288). See "Recording limit" in docs/voxtype.md before
+# raising this. voxtype-progress counts down the last minute.
+max_duration_secs = 390
 pause_media = true
 duck_media = false
 duck_media_volume_percent = 34
@@ -51,7 +54,8 @@ on_transcription = false
 show_engine_icon = true
 
 [parakeet]
-model = "parakeet-tdt-0.6b-v3-int8"
+# Full precision: the int8 model drops whole sentences on passes over 30 seconds.
+model = "parakeet-tdt-0.6b-v3"
 on_demand_loading = true
 streaming = false
 

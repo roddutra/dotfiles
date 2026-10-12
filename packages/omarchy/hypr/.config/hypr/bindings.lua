@@ -74,6 +74,10 @@ o.bind("SUPER + CTRL + SHIFT + X", "Toggle raw dictation", "voxtype record toggl
 o.bind("F10", "Start raw dictation (push-to-talk)", "voxtype record start")
 o.bind("F10", "Stop raw dictation (push-to-talk)", "voxtype record stop", { release = true })
 
+-- Discard the recording or transcription in progress. The mark lets
+-- voxtype-progress report the cancel instead of a missing transcript.
+o.bind("SUPER + ALT + X", "Cancel dictation", "~/.local/bin/voxtype-progress mark cancelled; voxtype record cancel")
+
 -- Panels from the blizl.voxtype-osd Quickshell HUD.
 o.bind("SUPER + E", "VoxType engine picker", "mkdir -p $XDG_RUNTIME_DIR/voxtype && touch $XDG_RUNTIME_DIR/voxtype/engine-picker.flag")
 o.bind("SUPER + M", "VoxType meeting controls", "mkdir -p $XDG_RUNTIME_DIR/voxtype && touch $XDG_RUNTIME_DIR/voxtype/meeting-controls.flag")
