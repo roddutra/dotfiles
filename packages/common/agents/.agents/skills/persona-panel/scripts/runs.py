@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Track panel runs: which are done, in progress or pending, and what to launch next.
 
-A run is "done" when its persona file has a scored section for every concept and the final
-"Out of character" section; "started" when it has at least one concept section.
+A run is "done" when its persona file is complete for the study type (panel_lib.run_progress:
+a scored section for every concept and the final "Out of character" section); "started" when
+it has at least one section.
 
 Usage:
   runs.py <study-dir> status
@@ -12,8 +13,12 @@ Usage:
   runs.py <study-dir> resume [<run-id>]                                  # resume messages for unfinished runs
 
 Record each subagent id with "mark" as soon as you launch it. runs.json survives context
-compaction, so an interrupted run (usage limit, crash) can be resumed with SendMessage to the
-same agent instead of relaunched, which would duplicate sections or lose its reading.
+compaction, so an interrupted run (usage limit, crash) can be resumed by messaging the same
+subagent instead of relaunched, which would duplicate sections or lose its reading.
+
+"next", "mark" and "resume" are for native mode, where the lead starts each run with its own
+subagent tool. A study whose model entries name a runner is started, tracked and resumed by
+launch.py, and these three commands refuse it.
 """
 
 from __future__ import annotations
@@ -27,34 +32,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panel_lib as pl  # noqa: E402
 
 
+def run_view(sd: Path, cfg: dict, r: dict) -> dict:
+    """A runs.json entry with how far its persona file has got: "state" (done, started or
+    pending), "scored", "of", "written" and "has_final"."""
+    f = sd / r["file"]
+    prog = pl.run_progress(cfg, pl.parse_persona_file(f, cfg) if f.exists() else None)
+    state = "done" if prog["complete"] else "started" if prog["written"] else "pending"
+    return {**r, "state": state, "scored": len(prog["scored"]), "of": len(prog["units"]),
+            "written": prog["written"], "has_final": prog["has_final"]}
+
+
 def run_states(sd: Path, cfg: dict) -> list[dict]:
-    labels = list(pl.label_map(cfg))
-    n = len(cfg["factors"])
-    out = []
-    for r in json.loads((sd / "runs.json").read_text()):
-        f = sd / r["file"]
-        p = pl.parse_persona_file(f, labels, n) if f.exists() else None
-        scored = len(p["scores"]) if p else 0
-        if p and scored == len(labels) and p["has_final"]:
-            state = "done"
-        elif p and p["sections"]:
-            state = "started"
-        else:
-            state = "pending"
-        out.append({**r, "state": state, "scored": scored, "of": len(labels),
-                    "written": sorted(p["sections"]) if p else [], "has_final": bool(p and p["has_final"])})
-    return out
+    return [run_view(sd, cfg, r) for r in pl.read_runs(sd) if r["role"] == "panellist"]
 
 
-def resume_message(s: dict) -> str:
+def resume_message(cfg: dict, s: dict) -> str:
+    unit, units = pl.unit_nouns(cfg)
     if s["state"] == "pending":
-        return ("Your run was interrupted before any concept was written. Start again from step 1 of your "
+        return (f"Your run was interrupted before any {unit} was written. Start again from step 1 of your "
                 "original instructions.")
     done = ", ".join(s["written"])
     if s["scored"] == s["of"] and not s["has_final"]:
-        todo = "All concept sections are written. Re-read your persona file, then append the final sections."
+        todo = f"All {unit} sections are written. Re-read your persona file, then append the final sections."
     else:
-        todo = ("Re-read your persona file, review the remaining concepts in your listed order, append each "
+        todo = (f"Re-read your persona file, review the remaining {units} in your listed order, append each "
                 "section as you finish it, then append the final sections.")
     return (f"Your run was cut off before it finished. Pick up where you left off.\n"
             f"- Already written: {done}. Do not rewrite or repeat those sections.\n"
@@ -67,13 +68,17 @@ def main():
     ap.add_argument("cmd", choices=["status", "next", "prompt", "mark", "resume"])
     ap.add_argument("run", nargs="?")
     ap.add_argument("agent", nargs="?")
-    ap.add_argument("--limit", type=int, default=20, help="concurrent subagent cap (Claude Code allows 20)")
+    ap.add_argument("--limit", type=int, default=20, help="how many subagents your harness runs at once (default 20)")
     ap.add_argument("--running", default="", help="comma-separated run ids already running")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     cfg = pl.load_study(args.study_dir)
     sd = cfg["_dir"]
     states = run_states(sd, cfg)
+    if args.cmd in ("next", "mark", "resume") and any(s["runner"] for s in states):
+        raise SystemExit(f"This study runs through runners, so launch.py starts, tracks and resumes its runs: "
+                         f"launch.py {args.study_dir} {'resume' if args.cmd == 'resume' else 'run'}. "
+                         f"runs.py {args.cmd} is for native mode.")
 
     if args.cmd == "status":
         if args.json:
@@ -86,7 +91,6 @@ def main():
         print(" | ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
     elif args.cmd == "next":
         running = {x.strip() for x in args.running.split(",") if x.strip()}
-        slots = max(0, args.limit - len(running))
         # A pending run with a recorded agent id was launched and hasn't written yet: count it as running.
         running |= {s["run"] for s in states if s["state"] != "done" and s.get("agent")}
         slots = max(0, args.limit - len(running))
@@ -95,24 +99,25 @@ def main():
             print(json.dumps([{**s, "prompt_text": (sd / s["prompt"]).read_text()} for s in todo], indent=2))
             return
         for s in todo:
-            print(f"=== {s['run']} (model: {s['model']}, description: Panel {s['run']})")
+            effort = f", effort: {s['effort']}" if s["effort"] else ""
+            print(f"=== {s['run']} (model: {s['model']}{effort}, description: Panel {s['run']})")
             print((sd / s["prompt"]).read_text())
         print(f"{len(todo)} to launch; {sum(s['state'] == 'pending' for s in states) - len(todo)} left queued.")
     elif args.cmd == "mark":
         if not (args.run and args.agent):
             raise SystemExit("usage: runs.py <study> mark <run-id> <agent-id>")
-        data = json.loads((sd / "runs.json").read_text())
+        data = pl.read_runs(sd)
         hit = [r for r in data if r["run"] == args.run]
         if not hit:
             raise SystemExit(f"No run {args.run}")
         hit[0]["agent"] = args.agent
-        (sd / "runs.json").write_text(json.dumps(data, indent=2) + "\n")
+        pl.write_runs(sd, data)
         print(f"{args.run} -> {args.agent}")
     elif args.cmd == "resume":
         todo = [s for s in states if s["state"] != "done" and (not args.run or s["run"] == args.run)]
         for s in todo:
             print(f"=== {s['run']} ({s['state']}, agent: {s.get('agent') or 'not recorded: relaunch with runs.py prompt'})")
-            print(resume_message(s))
+            print(resume_message(cfg, s))
         print(f"{len(todo)} unfinished runs.")
     else:
         match = [s for s in states if s["run"] == args.run]

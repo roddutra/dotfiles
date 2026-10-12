@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
 """Quantitative analysis of a panel: writes analysis/quant.md and analysis/quant.json.
 
-Reads analysis/scores.csv and analysis/rankings.csv (run extract_scores.py first) and covers:
+Reads analysis/scores.csv, rankings.csv and runs.csv (run extract_scores.py first) and covers:
   leaderboard (mean, median, sd, firsts, Borda, top/bottom counts), factor means and leaders,
   which factors drive Overall, segments, per-model levels and agreement, sensitivity to
   dropping each model, persona x concept matrix, order effect, and persona fit (ICP signal).
+
+A run is one persona on one model key and one replicate. Replicates are counted and compared as
+separate runs, never merged into one. A scores.csv without a replicate column reads as replicate 1.
+
+Each of those tables uses complete runs only, and the output states "N of M runs complete", where M
+is the runs expected after the filters. Incomplete runs that wrote something, or that stopped as
+partial, limited, blocked or failed, get their own table, "Incomplete runs", with their state,
+what they wrote and their Overall scores: those scores appear nowhere else. When no run is
+complete there is nothing to rank, and the output is that count and that table.
+
+Exports from before the "complete" column and runs.csv existed read as all complete: the runs
+with score rows are then the runs expected.
 
 Usage: analyze.py <study-dir> [--exclude-model haiku] [--segment mortgage]
 """
@@ -25,26 +37,54 @@ import panel_lib as pl  # noqa: E402
 from panel_lib import fmt, mean  # noqa: E402
 
 
+# Incomplete runs in these states are listed even when they wrote nothing: they ran and stopped.
+# Pending and running ones that wrote nothing are only counted.
+LISTED_STATES = ("partial", "limited", "blocked", "failed")
+
+
+def run_key(r: dict) -> tuple:
+    return r["persona_id"], r["model"], r["replicate"]
+
+
 def load(sd: Path, keys: list[str], exclude: set[str], segment: set[str] | None):
-    rows = []
-    with open(sd / "analysis" / "scores.csv") as f:
-        for r in csv.DictReader(f):
-            if r["model"] in exclude or (segment and r["segment"] not in segment):
-                continue
-            for k in keys:
-                r[k] = float(r[k])
-            r["position"] = int(r["position"]) if r.get("position") else None
-            rows.append(r)
-    ranks = []
-    rp = sd / "analysis" / "rankings.csv"
-    if rp.exists():
-        with open(rp) as f:
-            for r in csv.DictReader(f):
-                if r["model"] in exclude or (segment and r["segment"] not in segment):
-                    continue
-                r["rank"] = int(r["rank"])
-                ranks.append(r)
-    return rows, ranks
+    """Score rows, ranking rows and run records left by the filters, complete or not."""
+    def read(name):
+        path = sd / "analysis" / name
+        if not path.exists():
+            return None
+        with open(path) as f:
+            kept = [r for r in csv.DictReader(f)
+                    if r["model"] not in exclude and (not segment or r["segment"] in segment)]
+        for r in kept:
+            r["replicate"] = int(r.get("replicate") or 1)
+            r["complete"] = r.get("complete") != "0"
+        return kept
+
+    rows = read("scores.csv")
+    if rows is None:
+        raise SystemExit("No analysis/scores.csv. Run extract_scores.py first.")
+    for r in rows:
+        for k in keys:
+            r[k] = float(r[k])
+        r["position"] = int(r["position"]) if r.get("position") else None
+    ranks = read("rankings.csv") or []
+    for r in ranks:
+        r["rank"] = int(r["rank"])
+    runs = read("runs.csv")
+    if runs is None:  # exported before runs.csv existed: the runs with score rows are all that is known
+        by = defaultdict(list)
+        for r in rows:
+            by[run_key(r)].append(r)
+        runs = [{"run": pl.run_id(*k), "persona_id": k[0], "model": k[1], "replicate": k[2],
+                 "segment": rr[0]["segment"], "complete": rr[0]["complete"],
+                 "state": "done" if rr[0]["complete"] else "partial", "has_final": rr[0]["complete"],
+                 "written": [r["concept"] for r in rr], "scored": [r["concept"] for r in rr]}
+                for k, rr in by.items()]
+    else:
+        for r in runs:
+            r["written"], r["scored"] = r["written"].split(), r["scored"].split()
+            r["has_final"] = r["has_final"] == "1"
+    return rows, ranks, runs
 
 
 def leaderboard(rows, ranks, labels):
@@ -53,7 +93,7 @@ def leaderboard(rows, ranks, labels):
         by[r["concept"]].append(r["overall"])
     runs = defaultdict(list)
     for r in ranks:
-        runs[(r["persona_id"], r["model"])].append(r)
+        runs[run_key(r)].append(r)
     n = len(labels)
     k = 3 if n >= 6 else 1
     first, borda, top, bottom, rsum = (defaultdict(int) for _ in range(5))
@@ -94,17 +134,58 @@ def main():
     labels = list(pl.label_map(cfg))
     fl = {f["key"]: f["label"] for f in cfg["factors"]}
     seg_filter = set(args.segment.split(",")) if args.segment else None
-    rows, ranks = load(sd, keys, set(args.exclude_model), seg_filter)
-    if not rows:
-        raise SystemExit("No score rows. Run extract_scores.py first.")
-    models = [m for m in cfg["models"] if any(r["model"] == m for r in rows)]
+    all_rows, all_ranks, runs = load(sd, keys, set(args.exclude_model), seg_filter)
+    if not runs:
+        raise SystemExit("No runs to analyse. Run extract_scores.py first, and check the filters.")
+    rows = [r for r in all_rows if r["complete"]]  # every headline table reads these and nothing else
+    ranks = [r for r in all_ranks if r["complete"]]
+    models = [m for m in pl.model_keys(cfg) if any(r["model"] == m for r in rows)]
     names = {p["id"]: p["name"] for p in cfg["personas"]}
     roles = {p["id"]: p["role"] for p in cfg["personas"]}
     res = {"filters": {"exclude_models": args.exclude_model, "segment": args.segment}}
     md = [f"# Quantitative analysis: {sd.name}", ""]
     if args.exclude_model or args.segment:
         md += [f"Filters: excluded models {args.exclude_model or 'none'}; segment {args.segment or 'all'}.", ""]
-    n_runs = len({(r["persona_id"], r["model"]) for r in rows})
+    n_runs = len({run_key(r) for r in rows})
+    base = args.out or ("quant" + (f"-{args.segment.replace(',', '+')}" if args.segment else "") +
+                        "".join(f"-no-{m}" for m in args.exclude_model))
+
+    def write(printed):
+        (sd / "analysis" / f"{base}.md").write_text("\n".join(md))
+        (sd / "analysis" / f"{base}.json").write_text(json.dumps(res, indent=2, default=str))
+        print("\n".join(printed))
+        print(f"Wrote analysis/{base}.md and analysis/{base}.json")
+
+    # Incomplete runs: counted, listed in their own table, and kept out of everything else
+    partial = defaultdict(dict)  # incomplete run -> {concept: Overall}
+    for r in all_rows:
+        if not r["complete"]:
+            partial[run_key(r)][r["concept"]] = r["overall"]
+    unfinished = [r for r in runs if not r["complete"]]
+    listed = [{"run": r["run"], "persona": r["persona_id"], "model": r["model"], "replicate": r["replicate"],
+               "segment": r["segment"], "state": r["state"], "written": r["written"], "scored": r["scored"],
+               "has_final": r["has_final"], "overall": partial.get(run_key(r), {})}
+              for r in unfinished if r["written"] or r["state"] in LISTED_STATES]
+    not_started = len(unfinished) - len(listed)
+    res["runs"] = {"complete": len(runs) - len(unfinished), "expected": len(runs), "not_started": not_started,
+                   "incomplete": listed}
+    runs_line = f"- {res['runs']['complete']} of {len(runs)} runs complete." + (
+        ' Every table uses complete runs only, except "Incomplete runs".' if unfinished and rows else "")
+    inc_md = []
+    if unfinished:
+        inc_md = ["## Incomplete runs", "", "These runs are in no other table. The concept columns show the Overall "
+                  "score each run gave before it stopped: partial evidence, not results.", ""]
+        if listed:
+            inc_md += [table(
+                ["Run", "Persona", "State", "Sections written", "Scored", "Final sections", *labels],
+                [[d["run"], names.get(d["persona"], ""), d["state"], f"{len(d['written'])} of {len(labels)}",
+                  f"{len(d['scored'])} of {len(labels)}", "yes" if d["has_final"] else "no",
+                  *[f"{d['overall'][c]:g}" if c in d["overall"] else "-" for c in labels]] for d in listed]), ""]
+        if not_started:
+            inc_md += [f"Runs not started, or running with nothing written yet: {not_started}.", ""]
+    if not rows:
+        md += ["## Key numbers", "", runs_line, "- No run is complete, so there is nothing to rank.", "", *inc_md]
+        return write(md)
 
     # Leaderboard
     lb, ranked_runs, k = leaderboard(rows, ranks, labels)
@@ -129,37 +210,44 @@ def main():
     level = {m: mean([r["overall"] for r in rows if r["model"] == m]) for m in models}
     per_model = {m: {c: mean([r["overall"] for r in rows if r["model"] == m and r["concept"] == c])
                      for c in labels} for m in models}
-    pair_agree = {}
-    for a, b in itertools.combinations(models, 2):
+    overall = defaultdict(dict)  # run -> {concept: Overall}
+    for r in rows:
+        overall[run_key(r)][r["concept"]] = r["overall"]
+    ranked_first = {run_key(r): r["concept"] for r in ranks if r["rank"] == 1}
+
+    def runs_of(pid, m):  # a persona's runs on one model: one per replicate
+        return [k for k in sorted(overall) if k[:2] == (pid, m)]
+
+    def agreement(pid, a, b):  # Spearman for every pairing of the persona's runs on two models
         vals = []
-        for pid in sorted({r["persona_id"] for r in rows}):
-            xa = {r["concept"]: r["overall"] for r in rows if r["persona_id"] == pid and r["model"] == a}
-            xb = {r["concept"]: r["overall"] for r in rows if r["persona_id"] == pid and r["model"] == b}
+        for ka, kb in itertools.product(runs_of(pid, a), runs_of(pid, b)):
+            xa, xb = overall[ka], overall[kb]
             common = [c for c in labels if c in xa and c in xb]
             if len(common) >= 3:
                 v = pl.spearman([xa[c] for c in common], [xb[c] for c in common])
                 if v == v:
                     vals.append(v)
+        return vals
+
+    pair_agree = {}
+    for a, b in itertools.combinations(models, 2):
+        vals = [v for pid in sorted({r["persona_id"] for r in rows}) for v in agreement(pid, a, b)]
         pair_agree[f"{a}-{b}"] = mean(vals) if vals else None
     persona_agree = []
     for pid in sorted({r["persona_id"] for r in rows}):
-        per = {m: {r["concept"]: r["overall"] for r in rows if r["persona_id"] == pid and r["model"] == m}
-               for m in models}
+        per = {m: runs_of(pid, m) for m in models}
         per = {m: v for m, v in per.items() if v}
-        vals = []
-        for a, b in itertools.combinations(per, 2):
-            common = [c for c in labels if c in per[a] and c in per[b]]
-            if len(common) >= 3:
-                v = pl.spearman([per[a][c] for c in common], [per[b][c] for c in common])
-                if v == v:
-                    vals.append(v)
-        tops = {}
-        for m, v in per.items():
-            ranked = [r["concept"] for r in ranks if r["persona_id"] == pid and r["model"] == m and r["rank"] == 1]
-            best = max(v.values())
-            tops[m] = ranked[0] if ranked else "=".join(c for c in labels if v.get(c) == best)
+        vals = [v for a, b in itertools.combinations(per, 2) for v in agreement(pid, a, b)]
+        tops, firsts = {}, set()
+        for m, keys_m in per.items():
+            mine = []
+            for run in keys_m:
+                best = max(overall[run].values())
+                mine.append(ranked_first.get(run) or "=".join(c for c in labels if overall[run].get(c) == best))
+            tops[m] = "/".join(dict.fromkeys(mine))  # replicates that disagree show as A/B
+            firsts.update(mine)
         persona_agree.append({"persona": pid, "spearman": mean(vals) if vals else None, "tops": tops,
-                              "same_top": len(set(tops.values())) == 1})
+                              "same_top": len(firsts) == 1})
     full_order = [d["mean"] for d in sorted(lb, key=lambda d: d["concept"])]
     sens = {}
     for m in models:
@@ -193,7 +281,7 @@ def main():
         run_best = defaultdict(float)
         for r in rows:
             if r["persona_id"] == p:
-                run_best[r["model"]] = max(run_best[r["model"]], r["overall"])
+                run_best[run_key(r)] = max(run_best[run_key(r)], r["overall"])
         fit.append({"persona": p, "name": names.get(p, ""), "role": roles.get(p, ""),
                     "segment": next((r["segment"] for r in rows if r["persona_id"] == p), ""),
                     "fit": mean([mean([r[f] for f in ff]) for r in pr]),
@@ -204,7 +292,7 @@ def main():
     # ---------------------------------------------------------------- markdown
     w = lb[0]
     gap = w["mean"] - lb[1]["mean"] if len(lb) > 1 else 0
-    md += ["## Key numbers", "",
+    md += ["## Key numbers", "", runs_line,
            f"- {n_runs} runs, {len(rows)} concept reviews, {len(pids)} personas, models: {', '.join(models)}.",
            f"- Winner on mean Overall: **{w['concept']}** ({fmt(w['mean'])}), {fmt(gap)} ahead of {lb[1]['concept']}."
            if len(lb) > 1 else f"- Only concept: {w['concept']}.",
@@ -239,7 +327,7 @@ def main():
     if segs:
         md += ["## By segment", "", table(
             ["Segment", "Runs", *labels],
-            [[cfg["segments"].get(s, s), len({(r["persona_id"], r["model"]) for r in rows if r["segment"] == s}),
+            [[cfg["segments"].get(s, s), len({run_key(r) for r in rows if r["segment"] == s}),
               *[fmt(seg_tab[s][c]) for c in labels]] for s in segs]), ""]
 
     md += ["## By model", "", table(
@@ -282,12 +370,8 @@ def main():
                  [[f"{d['persona']} {d['name']}", d["role"], d["segment"], fmt(d["fit"]), fmt(d["best_overall"])]
                   for d in fit]), ""]
 
-    base = args.out or ("quant" + (f"-{args.segment.replace(',', '+')}" if args.segment else "") +
-                        "".join(f"-no-{m}" for m in args.exclude_model))
-    (sd / "analysis" / f"{base}.md").write_text("\n".join(md))
-    (sd / "analysis" / f"{base}.json").write_text(json.dumps(res, indent=2, default=str))
-    print("\n".join(md[: md.index("## Leaderboard")]))
-    print(f"Wrote analysis/{base}.md and analysis/{base}.json")
+    md += inc_md
+    write(md[: md.index("## Leaderboard")])
 
 
 if __name__ == "__main__":

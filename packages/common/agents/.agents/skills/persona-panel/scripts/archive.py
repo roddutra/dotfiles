@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Copy a finished study round into a research archive, leaving out regenerable bulk.
 
-Kept: study.json, key.md, runs.json, prompts/, analysis/, panel/_panel-instructions.md,
-panel/personas/. Dropped: panel/sites (the archive keeps the concepts once, separately),
-panel/materials (regenerate with capture.py) and panel/scratch.
+Kept: study.json, key.md, runs.json, prompts/, analysis/ (usage.md and runs.csv with it),
+panel/_panel-instructions.md, panel/personas/. Dropped: panel/sites (the archive keeps the
+concepts once, separately), panel/materials (regenerate with capture.py), panel/scratch,
+logs/ (raw harness output, which contains everything a panellist read and wrote) and
+.launch.lock.
 
 With --concepts, also copies each concept's source folder to <study-root>/concepts/<id>/ and
 takes one full-page screenshot per page into <study-root>/screenshots/ via snapshot.py.

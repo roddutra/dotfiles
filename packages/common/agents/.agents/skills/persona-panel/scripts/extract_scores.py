@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Extract every run's scores and ranking into analysis/scores.csv and analysis/rankings.csv.
+"""Extract every run's scores, ranking and progress into analysis/scores.csv, rankings.csv and runs.csv.
 
-scores.csv:   persona_id, persona, model, segment, concept, position, <factor keys...>
-rankings.csv: persona_id, model, segment, rank, concept
+scores.csv:   persona_id, persona, model, replicate, complete, segment, concept, position, <factor keys...>
+rankings.csv: persona_id, model, replicate, complete, segment, rank, concept
+runs.csv:     run, persona_id, model, replicate, segment, state, complete, written, scored, has_final
 
-"position" is where the concept sat in that persona's review order (1-based), for order-effect checks.
+"model" is the model key. "position" is where the concept sat in that persona's review order
+(1-based), for order-effect checks. "complete" is 1 when panel_lib.run_progress says the run is
+complete and 0 otherwise: analyze.py keeps the rows of incomplete runs out of its headline tables.
+
+runs.csv has one row per expected run (panel_lib.run_records), whether or not it wrote anything.
+"state" is its lifecycle state (panel_lib.run_state); "written" and "scored" are the concept
+labels with a section and with a score row, separated by spaces; "has_final" is 1 when the final
+sections exist.
 
 Usage: extract_scores.py <study-dir>
 """
@@ -26,27 +34,38 @@ def main():
     sd = cfg["_dir"]
     labels = list(pl.label_map(cfg))
     keys = pl.factor_keys(cfg)
-    runs = pl.load_runs(sd, cfg)
+    runs = pl.run_records(sd, cfg)
     (sd / "analysis").mkdir(exist_ok=True)
     n_rows = incomplete = 0
     with open(sd / "analysis" / "scores.csv", "w", newline="") as f, \
-            open(sd / "analysis" / "rankings.csv", "w", newline="") as g:
+            open(sd / "analysis" / "rankings.csv", "w", newline="") as g, \
+            open(sd / "analysis" / "runs.csv", "w", newline="") as h:
         w = csv.writer(f)
-        w.writerow(["persona_id", "persona", "model", "segment", "concept", "position", *keys])
+        w.writerow(["persona_id", "persona", "model", "replicate", "complete", "segment", "concept", "position",
+                    *keys])
         rw = csv.writer(g)
-        rw.writerow(["persona_id", "model", "segment", "rank", "concept"])
-        for r in runs:
-            order = r["order"] or pl.review_order(cfg, r["pid"], labels)
+        rw.writerow(["persona_id", "model", "replicate", "complete", "segment", "rank", "concept"])
+        sw = csv.writer(h)
+        sw.writerow(["run", "persona_id", "model", "replicate", "segment", "state", "complete", "written",
+                     "scored", "has_final"])
+        for run in runs:
+            prog, r = run["progress"], run["parsed"]
+            complete = int(prog["complete"])
+            incomplete += not complete
+            who = [run["pid"], run["model"], run["replicate"]]
+            sw.writerow([run["run"], *who, run["segment"], run["state"], complete, " ".join(prog["written"]),
+                         " ".join(prog["scored"]), int(prog["has_final"])])
+            if not r:
+                continue
+            order = r["order"] or pl.review_order(cfg, run["pid"], labels)
             for label in labels:
                 if label in r["scores"]:
                     pos = order.index(label) + 1 if label in order else ""
-                    w.writerow([r["pid"], r["slug"], r["model"], r["segment"], label, pos,
+                    w.writerow([run["pid"], r["slug"], *who[1:], complete, run["segment"], label, pos,
                                 *[f"{x:g}" for x in r["scores"][label]]])
                     n_rows += 1
-            if len(r["scores"]) != len(labels):
-                incomplete += 1
             for i, label in enumerate(r["ranking"], start=1):
-                rw.writerow([r["pid"], r["model"], r["segment"], i, label])
+                rw.writerow([*who, complete, run["segment"], i, label])
     print(f"{n_rows} score rows from {len(runs)} runs; {incomplete} runs incomplete "
           f"(run check_runs.py for details)")
 

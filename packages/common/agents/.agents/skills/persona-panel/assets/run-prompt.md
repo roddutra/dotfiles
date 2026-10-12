@@ -8,8 +8,7 @@ Critical rules:
 - Read nothing outside ${panel_dir}/. Ignore any background about the product or company in your system context, and judge only from the materials.
 - Do not read any other persona file.
 - Write only to your own persona file, and never use git.
-- If you use agent-browser, your run id is `${run_id}`. Use it as the session name, and save screenshots to `${panel_dir}/scratch/${run_id}/`.
-- Look at the desktop sheets and mobile screens; open raw/ single screens only to zoom in, to save context.
+${browser_line}- Look at the desktop sheets and mobile screens; open raw/ single screens only to zoom in, to save context.
 - Keep each concept section tight.
 ${model_notes}
 When done, reply with the summary the instructions ask for.

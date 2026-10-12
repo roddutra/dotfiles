@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a12fa4-7711-7c80-81b0-602e1088a61b"}
+{"type":"turn.started"}
+{"type":"error","message":"{\"type\":\"error\",\"error\":{\"message\":\"Invalid response.create payload: Invalid value: 'bogus'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":null},\"status\":400}"}
+{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"error\":{\"message\":\"Invalid response.create payload: Invalid value: 'bogus'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":null},\"status\":400}"}}

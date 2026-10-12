@@ -25,6 +25,13 @@ Keep two tiers:
 
 Dropped because they regenerate: `panel/sites` (from `concepts/` + `key.md`), `panel/materials` (`capture.py`), scratch screenshots, designer verification shots.
 
+Not archived either:
+
+- `logs/`: the raw harness output of every process, which contains everything a panellist read and wrote.
+- `.launch.lock`
+
+`analysis/` is archived whole, so `analysis/usage.md` and `analysis/runs.csv` are kept.
+
 ## Steps
 
 1. `archive.py <study-dir> --dest <repo>/customer-research/<date-topic>/panel/round-<n> --concepts` for each round (use `--concepts` once).

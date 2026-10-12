@@ -5,7 +5,7 @@ You are writing the final synthesis of a simulated customer research study for <
 ## Inputs (all under `<STUDY_DIR>/`)
 - `panel/_panel-instructions.md`: what panellists were asked.
 - `analysis/quant.md` and `analysis/quant.json`: the numbers. Segment and model-exclusion variants may sit beside them.
-- `analysis/checks.md`: data-quality flags.
+- `analysis/checks.md` and `analysis/lead-notes.md`: data-quality flags, and the claims the lead checked.
 - `analysis/qual-*.md`: themes, quotes and per-concept findings.
 <EXTRA_CONTEXT_FILES>
 - You may spot-check persona files in `panel/personas/` to confirm a quote.

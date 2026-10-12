@@ -158,21 +158,24 @@ Nothing outside `runners/` contains a harness name. A capability the harness
 lacks is reported by the plan step before launch, never discovered mid-panel.
 
 Flags below were checked for existence on 12 October 2026 against Claude Code
-2.1.296, codex-cli 0.162.1 and Pi 1.1.0. Their behaviour was not tested; see
-[Discovery](#discovery).
+2.1.296, codex-cli 0.162.1 and Pi 1.1.0. The Claude Code and Codex columns
+were then corrected from real runs; see [Discovery](#discovery). The Pi
+column is still untested.
 
 | Need | Claude Code | Codex | Pi |
 | --- | --- | --- | --- |
-| Headless run | `claude -p` | `codex exec` | `pi -p` |
+| Headless run | `claude -p`, prompt on stdin | `codex exec -`, prompt on stdin | `pi -p` |
 | Model | `--model` | `-m` | `--model <provider>/<id>` |
-| Thinking effort | `--effort` | `-c model_reasoning_effort=` | `--thinking` |
-| Working directory | process cwd, `--add-dir` | `-C` | process cwd |
-| Keep user and project instructions out | `--setting-sources`, `--strict-mcp-config` | `--ignore-user-config`, `--ignore-rules` | to be found |
-| Restrict tools | `--tools`, `--allowed-tools` | `-s` sandbox mode | `--tools` |
-| Attach an image | reads files by path | `-i` | to be found |
-| Machine-readable output | `--output-format json` | `--json`, `-o` | `--mode json` |
-| Resume | `--resume <id>` | `codex exec resume <id>` | `--session-id` |
-| Budget cap | `--max-budget-usd` | none found | none found |
+| Thinking effort | `--effort`, validated by the runner | `-c model_reasoning_effort=`, validated by the runner | `--thinking` |
+| Working directory | process cwd | `-C` | process cwd |
+| Keep user and project instructions out | `--safe-mode --restricted --strict-mcp-config --disable-slash-commands --settings '{"includeGitInstructions":false}'` | `--ignore-user-config --ignore-rules -c project_doc_max_bytes=0 -c skills.include_instructions=false --disable plugins --disable tool_suggest`; the user-level `AGENTS.md` cannot be excluded | to be found |
+| Restrict tools | `--tools`, `--allowed-tools`, `--permission-mode dontAsk` | `-s workspace-write`, `-c approval_policy=never` | `--tools` |
+| See an image | reads files by path | reads files by path; `-i` exists and is not used | to be found |
+| Machine-readable output | `--output-format stream-json --verbose` | `--json` | `--mode json` |
+| Session id | `--session-id <uuid>`, chosen by the runner | `thread_id` on the first output line | to be found |
+| Resume | `--resume <id>`, with every launch flag repeated | `codex exec <every launch flag> resume <id>` | `--session-id` |
+| Budget cap | `--max-budget-usd`, per process | none | none found |
+| Delete a session | remove its transcript file | `codex delete --force <id>` | to be found |
 
 ## `study.json` changes
 
@@ -355,6 +358,43 @@ unfinished runs, and `analyze.py` does not filter them. That changes:
   state and what it wrote. Their scores appear there and nowhere else.
 - Analyst prompts name the incomplete files, so their content is read as
   partial evidence.
+
+### Deviations decided during milestone 1
+
+- **The Claude runner strips the host session's nesting variables** from the
+  child environment (`CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`, `AI_AGENT`,
+  `CLAUDE_AGENT_SDK_*` and `CLAUDE_CODE_*` other than user configuration).
+  [Isolation](#isolation) said the environment passes through unchanged.
+  Inherited, they change the session's effort and label and may leave token
+  refresh to a host process that is not there. Login and billing variables
+  still pass through, and the plan still reports them.
+- **`resume_command` also takes the working directory and the limits.** No
+  harness inherits them on resume, so the runner repeats every launch
+  setting.
+- **A `browse` study key controls browser use** (default true). Codex has no
+  browser capability yet: browser state does not survive between shell calls
+  in its sandbox. Its runs are told to review from the files alone.
+- **Codex's user-level instruction file cannot be excluded** without
+  redirecting its home directory, which would mean handling its login. It is
+  reported as an isolation gap instead.
+- **`--role` also accepts `writer`.** The writer is started with
+  `run --role writer`, after the analysts.
+- **Without a pilot the plan gives a token estimate and no dollar estimate,**
+  because the skill keeps no price tables. The plan step said list-price
+  cost would come from the figures in `references/method.md`.
+- **One launcher command was added: `usage`,** which rewrites and prints
+  `analysis/usage.md`.
+- **The runner interface has a sixth function, `purge_command`,** and
+  `capabilities()` also reports purge, default concurrency, the provider,
+  billing variables and isolation gaps.
+- **Each attempt runs under a watchdog process of its own**
+  (`scripts/run_watchdog.py`), which outlives the launcher. [Limits](#limits)
+  says the launcher enforces `minutes`: the watchdog does, so a killed
+  launcher does not unbound its runs. It also ends whatever the CLI left
+  running, and writes an end record (end time, exit code, why it stopped the
+  process) that the launcher settles the run from.
+- **`parse_result` also reports `session_lost`:** a resume whose session the
+  harness no longer has. The launcher treats that session as a purged one.
 
 ## Part 2: Limits, the plan and usage
 
@@ -669,25 +709,87 @@ confidence, clarity of next step, trust, and overall.
 
 To settle before the affected part is built. Record results in this document.
 
+Results for Claude Code, Codex and all runners were established on 12 October
+2026 against Claude Code 2.1.296 (Claude Max subscription login) and codex-cli
+0.162.1 (ChatGPT plan login), by running each CLI in fixture directories with
+planted marker terms. **Verified** means seen in a real run. **Inferred**
+means read from help text, the binary's strings or old session files. The
+exact flags and output formats are in the docstrings of
+`scripts/runners/claude.py` and `scripts/runners/codex.py`.
+
 Claude Code:
 
 - The flags that exclude user and project instructions while keeping the
   subscription login working.
+  - **Result (verified):** `--safe-mode --restricted --strict-mcp-config
+    --disable-slash-commands --settings '{"includeGitInstructions":false}'`.
+    With markers planted in user, project, parent and local instruction
+    files, a project skill, a hook, an MCP config and a commit message, none
+    reached the model and the login kept working.
+  - `--setting-sources ""` is not enough: the auto-memory of the enclosing
+    git repository still loads. `--bare` breaks the subscription login.
+  - No switch was found for the signed-in account's email address, the
+    working directory path, the OS version or the date. All reach the model.
 - A tool allowlist and permission mode that allow reading and writing under
   `panel/` and running `agent-browser`, with nothing else.
+  - **Result (verified):** `--tools Read,Write,Edit,Glob,Grep,Bash
+    --allowed-tools "Read,Write,Edit,Glob,Grep,Bash(agent-browser:*)"
+    --permission-mode dontAsk`, with `--restricted` confining the file tools
+    to the working directory. Reads and writes outside it and other shell
+    commands were denied at once, and nothing waited for approval. Without
+    browsing, `Bash` is left out.
+  - Two gaps remain with browsing on (verified): `agent-browser` can open
+    any `file://` path and save screenshots outside `panel/`, and read-only
+    shell commands inside the working directory run without an allow rule.
 - Whether `--max-budget-usd` stops a run under a subscription login, or only
   with an API key.
+  - **Result (verified):** it stops the run under a subscription login, at
+    list prices. The check runs after each turn, so a run overshoots by up
+    to one turn (0.0015 against a cap of 0.001). The cap counts one process,
+    not earlier spend in a resumed session, so the launcher passes what is
+    left on each attempt.
 - What usage the JSON output reports, and how the session id is returned.
+  - **Result (verified):** `--output-format stream-json --verbose` prints
+    one line per event with `session_id` on each, ending in a `result` line
+    with `total_cost_usd`, tokens per model in `modelUsage`, and
+    `duration_ms`. Cost and tokens are running totals for the session. The
+    runner chooses the id itself with `--session-id <uuid>`.
+  - A killed process prints no result. Its spend appears in the next result
+    of the same session.
 
 Codex:
 
 - Whether a panellist can open an image by path, or needs `-i` at launch. If
   only `-i`, whether attaching every sheet up front fits the context budget.
+  - **Result (verified):** a run opens an image by path, inside the sandbox.
+    A 2880x1800 sheet was read down to its small print. `-i` also works but
+    is not used, so the context question does not arise.
 - The sandbox mode that allows writes under `panel/` and `agent-browser`
   against `file://` and local hosts.
+  - **Result (verified):** `-s workspace-write` allows writes in the working
+    directory and `/tmp`, with the network off and the whole disk readable.
+  - `agent-browser` does not work in it. It needs the network even for
+    `file://` pages, and each shell call gets its own process namespace, so
+    the browser's state is lost between calls. It worked only with all
+    outbound network on and a browser session started outside the sandbox.
+    Codex therefore has no browser capability in milestone 1.
 - Whether `--ignore-user-config` affects the login or the default model.
+  - **Result (verified):** the login keeps working. The approval policy
+    becomes `never` and the effort falls back to the model's default. The
+    model was the same with and without it, but the user's config named the
+    model the account lists first, so the test cannot tell them apart.
+  - It removes neither the skills list (`-c skills.include_instructions=false`
+    does) nor the user-level `AGENTS.md` (nothing short of another home
+    directory does).
 - How the session id and token usage appear in `--json` output, and whether
   `codex exec resume` continues a run started without `--ephemeral`.
+  - **Result (verified):** the id is `thread_id` on the first line,
+    `thread.started`, before any model call. Usage is in
+    `turn.completed.usage` (input, cached input and output tokens) as a
+    running total for the thread. There is no cost and no duration.
+  - Resume continues the run with its memory, also after SIGTERM. It
+    inherits nothing: every launch option is repeated, before the word
+    `resume`.
 
 Pi:
 
@@ -697,9 +799,43 @@ Pi:
 All runners:
 
 - The error text and exit code for a usage or rate limit.
+  - **Result (inferred, still open):** no limit could be triggered on either
+    harness. Claude Code is expected to end with an error result whose text
+    starts "You've hit your", status 429 and exit code 1, with the reset
+    time in its `rate_limit_event`. Codex is expected to end with
+    `turn.failed` and exit code 1, its message naming a usage limit, with
+    the reset time in the session file.
 - Where each harness stores a session, and whether it can be deleted by id.
+  - **Result (verified):** Claude Code keeps one transcript per session
+    under its projects directory, in a folder named after the working
+    directory. It has no command that deletes one session, and removing the
+    file makes the id unknown to resume. Codex keeps a session file under
+    `$CODEX_HOME/sessions/` and database rows, and
+    `codex delete --force <id>` removes both.
 - A safe default concurrency on a subscription.
+  - **Result (still open):** no cap was found in either CLI. Four concurrent
+    Claude Code runs and three concurrent Codex runs raised no error. The
+    defaults stay at 6 and 4.
 - Whether `agent-browser` runs inside each harness's sandbox.
+  - **Result (verified):** yes in Claude Code, through an allow rule for
+    `agent-browser` commands. No in Codex, as above.
+
+Still open after milestone 1:
+
+- The real output and exit code at a usage or rate limit, on both harnesses.
+- Safe concurrency figures on each subscription.
+- Whether `claude auth status` notices a revoked token.
+- Whether the account email can be kept out of Claude Code's context.
+- Whether a separate Codex home directory holding a link to the login
+  survives a token refresh. This decides whether the user-level `AGENTS.md`
+  can ever be excluded.
+- A Codex network rule narrower than all or nothing, and a way to stop reads
+  outside `panel/`.
+- How to remove Codex's sub-agent tools and their instructions.
+- Whether the trust entry Codex writes to the user's `config.toml`, for a
+  run inside a git repository, can be prevented.
+- What `--ignore-rules` does in practice: its effect was read from the help
+  text, not observed.
 
 Usability:
 

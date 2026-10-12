@@ -16,13 +16,7 @@ ${context_bullets}- Treat them as if ${arrival}, and you are deciding whether th
      - `mobile-first-screens.png`: the first screens on a phone, left to right.
      - `raw/d-NN.png`: full-size single screens, to zoom in on something.
    - A folder named `<page>@<state>` is the same page with an on-page switch set to that state (for example a different audience or industry). Treat it as the same concept.
-   - Optional: open a page in a real browser with the `agent-browser` CLI, only to try an interactive element or follow the navigation like a visitor.
-     - Use your own session: `agent-browser --session <your run id> ...`.
-     - Pages are at `file://${panel_dir}/sites/concept-<label>/<page>.html`.
-     - Screenshot, scroll and click. Never dump the page source.
-     - Save screenshots only to `${panel_dir}/scratch/<your run id>/`, using absolute paths.
-     - Close your session when done.
-3. **Write only to your own persona file.** Change nothing else. Do not use git.
+${browser_rules}3. **Write only to your own persona file.** Change nothing else. Do not use git.
 4. **Stay in character.** Write in your persona's voice, with their vocabulary, priorities, patience, biases and scepticism. Be honest, not polite. Real prospects are busy and skim. If you would have closed the tab after 10 seconds, say so and why, then keep reviewing for the study.
 5. **Refer to a concept only by its label.** Quote its headline if you need to name it. Never invent a title for it.
 6. **No em dashes or en dashes** in anything you write. Use a normal hyphen or a comma.

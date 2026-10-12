@@ -1,0 +1,6 @@
+   - Optional: open a page in a real browser with the `agent-browser` CLI, only to try an interactive element or follow the navigation like a visitor.
+     - Use your own session: `agent-browser --session <your run id> ...`.
+     - Pages are at `file://${panel_dir}/sites/concept-<label>/<page>.html`.
+     - Screenshot, scroll and click. Never dump the page source.
+     - Save screenshots only to `${panel_dir}/scratch/<your run id>/`, using absolute paths.
+     - Close your session when done.

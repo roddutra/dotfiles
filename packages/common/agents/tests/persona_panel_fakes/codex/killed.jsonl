@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a12fa3-d891-7951-8317-db9ab75fac57"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create before.txt, run the 45-second sleep, then create after.txt.\n"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc \"printf 'before' > before.txt\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc \"printf 'before' > before.txt\"","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/bash -lc 'sleep 45'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
