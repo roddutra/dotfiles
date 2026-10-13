@@ -106,7 +106,7 @@ Part 6, usability studies and launcher-owned browser sessions:
 | Item | Detail |
 | --- | --- |
 | Built | `"type": "usability"`, `scripts/accounts.py` (provision, teardown, reset, success checks), `scripts/browser_session.py` (one session for each attempt of every run that browses, in review studies too), the step limit's backstop, `launch.py check` and `release`, the usability analysis, the secret scan, the archive rules for evidence, `references/usability.md` |
-| Commit | `M5HASH` |
+| Commit | `d3b4451` |
 | Tests | `BrowserSessionTest`, the browser session and usability tests of `LauncherTest`. 97 tests pass |
 | Real run | Passed on Claude Code (`haiku`) and Codex. Browser sessions: a browsing review study on Claude Code, Codex and Pi. Usability, against a local test app: a study of two personas on both harnesses with two tasks, accounts, success checks, an analyst, the writer and an archive, a study whose panellist signs in, a run stopped and resumed twice, and a task that ran out of steps. These runs came before the fixes of review rounds 16 to 19, which change no instruction a panellist is given and are covered by the tests alone |
 | Codex review | Rounds 14 onwards. The browser sessions were approved with one note in round 15, and round 16 confirmed the note resolved. Round 16 required changes to the usability part (nine findings, all since fixed). Round 17 found seven of the nine resolved, and round 18 the other two. Round 18 also classed as blocking two archive problems that the fix pass had found and disclosed (an unreadable folder, and an empty folder named with a secret); both were fixed. Rounds 14 to 19 (six rounds). Final verdict: APPROVE |
