@@ -1,15 +1,14 @@
 # Persona panel: other harnesses, limits and wider research
 
-**Status:** Paused on 13 October 2026. All six parts are built, reviewed by
-Codex and committed on the branch `persona-panel-expansion`: milestones 1 to
-5, and follow-up work in one more commit (`5e5dfe3`). 105 contract tests
-pass. The branch was merged to `main` in pull request 3 of this repository.
-Two acceptance criteria are not verified:
-a panel with a model on an OpenAI-compatible endpoint, and a harness other
-than Claude Code completing a study by following `SKILL.md`. Codex reviewed
-this PRD on 12 October 2026 over three rounds and approved it, and the user
-settled the open questions on 13 October 2026. See
-[Implementation status](#implementation-status).
+**Status:** Implemented and merged, as at 13 October 2026. All six parts are
+built, reviewed by Codex and committed on the branch `persona-panel-expansion`:
+milestones 1 to 5, and follow-up work in one more commit (`5e5dfe3`). 105
+contract tests pass. The branch was merged to `main` in pull request 3 of this
+repository. Two acceptance criteria are not verified: a panel with a model on
+an OpenAI-compatible endpoint, and a harness other than Claude Code completing
+a study by following `SKILL.md`. Codex reviewed this PRD on 12 October 2026
+over three rounds and approved it, and the user settled the open questions on
+13 October 2026. See [Implementation status](#implementation-status).
 
 PRD for extending the `persona-panel` skill
 (`packages/common/agents/.agents/skills/persona-panel/`) so that it covers most
@@ -29,7 +28,10 @@ Drafted 12 October 2026.
 
 ## Implementation status
 
-As at 13 October 2026. Work is paused.
+As at 13 October 2026. The work is implemented and merged. What was left
+for later is listed under [Not built](#not-built),
+[Built but not tested](#built-but-not-tested) and
+[Set aside for a later review](#set-aside-for-a-later-review).
 
 All six parts were built on the branch `persona-panel-expansion`, which was
 merged to `main` in pull request 3. Each of milestones 1 to 5 was committed once Codex approved
