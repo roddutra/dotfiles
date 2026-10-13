@@ -24,9 +24,10 @@ What it does, on a study that runs through runners:
   watchdog, within the runner's concurrency. Like launch.py it stays in the foreground until the
   processes have ended, and "launch.py <study-dir> stop" stops it.
 - Only a run that can be asked is asked: a panellist run that is done, with a recorded session
-  that was not purged or lost, on a runner that can resume, whose CLI is ready and which can
-  still launch the run's model entry (launch.fitness: what stops "plan" and "run" stops a
-  follow-up, such as a model no longer listed or a provider no longer signed in). Every other
+  that was saved and not purged or lost, on a runner that can resume, whose CLI is ready, can
+  do a run from this shell and can still launch the run's model entry (launch.fitness: what
+  stops "plan" and "run" stops a follow-up, such as a model no longer listed, a provider no
+  longer signed in or a sandboxed shell tool that the CLI cannot work in). Every other
   run named gets a line saying why, before anything is recorded or started, and then nothing is
   asked at all, unless --skip-unfit, which asks the rest. Analyst and writer jobs cannot be
   asked. To put a question to a run that could not be reached, ask again: it becomes the next
@@ -47,8 +48,10 @@ What it does, on a study that runs through runners:
   ended the file must be that copy plus the one appended section, with no other heading in it,
   and its scores, ranking and sections must read as before. Otherwise the follow-up is
   "rejected": the file is put back from the copy and what the panellist left is kept in
-  logs/<run id>.<attempt>.rejected.md. A panellist that replied without writing has its section
-  written from the reply, marked as such. The run stays done throughout.
+  logs/<run id>.<attempt>.rejected.md. A file that can no longer be read as the run's own (a
+  symbolic link at its name, say) is rejected too, and nothing is read or written through the
+  link. A panellist that replied without writing has its section written from the reply, marked
+  as such. The run stays done throughout.
 - Until a launcher has settled a follow-up, nothing reads the persona file for scores or
   progress: status, the extract scripts and check_runs.py read the copy made before the
   question, and say so in a line for each such run. So do not analyse while a question is out.
@@ -138,6 +141,8 @@ def cannot_ask(cfg: dict, e: dict) -> str | None:
         return "its session was purged (purge-sessions)"
     if session in (e.get("lost") or {}):
         return launch.LOST
+    if session in (e.get("unsaved") or {}):  # its harness kept none: there is nothing to resume
+        return launch.NOT_SAVED
     if not runners.get(e["runner"]).capabilities()["resume"]:
         return f"{e['runner']} cannot resume a session"
     return None
@@ -290,8 +295,9 @@ def settle(cfg: dict):
     """Before the follow-ups are listed: settle what a launcher that was killed left unsettled,
     as the next launcher command would (Supervisor.reconcile). Only when a record has no outcome
     and no launcher has the study: with one alive, the record is its own to settle. Processes
-    still at work are left to the next launcher. What it says goes to stderr, apart from the
-    list. An archive has no logs/ and is left as it is."""
+    still at work are left to the next launcher, and nothing is settled from a shell that has
+    no way to see one of them (launch.Lock.acquire()). What it says goes to stderr, apart from
+    the list. An archive has no logs/ and is left as it is."""
     sd = cfg["_dir"]
     unsettled = any(r.get("outcome") is None for f in pl.read_followups(sd) if f.get("mode") != "native"
                     for r in f.get("runs") or [])

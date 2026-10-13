@@ -23,6 +23,15 @@ where the other setting left them removes them, so --force after changing "brows
 
 forms.json, beside key.md, records the form of each "files" concept (panel_lib.py, "Forms").
 
+Every scaffold, of a native-mode study too, ends by making <study>/.launch.lock, empty, where
+there is none (launch.Lock.make()). It is the file a launcher holds its lock on, and no command
+removes it, so a shell that cannot write the study, as inside a read-only sandbox, has it to
+lock before the study has had a launcher (archive.py). Where there is none and none can be made,
+the scaffold says so in a sentence that names the file and the system's reason, and exits with
+1 (make_lock()). Everything else is written by then, and --force scaffolds again once the file
+can be made. A symbolic link, a FIFO, a folder or another user's file at that name is no lock
+and is refused the same way, never followed, replaced or deleted: the lead looks at it first.
+
 A study with one concept has nothing to rank or compare. Its instructions say there is one design
 to review, its final sections have no ranking and no score summary, and its persona files and
 key.md have no review order. It needs "artefact", the singular of "artefact_plural", when
@@ -103,7 +112,10 @@ folder should be is removed, never followed.
 --force is refused while a launcher has the study, or while a run, job or follow-up question of
 it still has a process at work: it would replace runs.json and the persona files under them.
 Stop them first, with "launch.py <study-dir> stop". It holds the launcher's lock while it
-works, so no launcher starts in the middle of it.
+works, so no launcher starts in the middle of it, and leaves the lock file where it is, empty,
+as a launcher that ends does. It is refused as well from a shell that cannot see a run that is
+still at work, as inside a harness's sandbox (launch.py out_of_sight()): the lock its watchdog
+holds says that the run is alive where this shell cannot look.
 
 Usage: init_study.py <study-dir> [--force]
 """
@@ -345,6 +357,18 @@ def persona_doc(p, key, order, tasks=None):
     return "\n".join(rows)
 
 
+def write_persona(sd, path, text):
+    """Write a persona file before its run. Through no symbolic link (panel_lib.write_persona): a
+    panellist of the scaffold that --force replaces may have left one at the file's name, and
+    what it points at is not the scaffold's to write. Exits when the file cannot be put there."""
+    try:
+        pl.write_persona(sd, path, text)
+    except OSError as err:
+        raise SystemExit(f"Cannot write the persona file {path.relative_to(sd)} ({pl.unread(err)}). Nothing is "
+                         "written through a symbolic link: make every folder above the file a plain folder that "
+                         "can be written, with no folder at the file's own name, then scaffold again.")
+
+
 def concept_list(labels):
     """Concept A, Concept B and Concept C."""
     named = [f"Concept {l}" for l in labels]
@@ -411,7 +435,9 @@ def take_study(sd):
     """Before --force replaces a scaffold: refuse while a launcher has the study, or while any
     process of its runs is alive (launch.at_work: one a killed launcher left under its
     watchdog), and take the launcher's lock. Returns the lock, to release once the new scaffold
-    is written, or None when there is no runs.json to replace."""
+    is written, or None when there is no runs.json to replace. The lock is not given, and the
+    command exits, while a run is alive where this shell cannot look, which the lock of its
+    watchdog says (launch.Lock.acquire())."""
     if not (sd / "runs.json").exists():
         return None
 
@@ -438,6 +464,27 @@ def take_study(sd):
     return lock
 
 
+def make_lock(sd):
+    """End a scaffold by making the study's lock file where there is none (launch.Lock.make()):
+    it is there from the first scaffold on, for a shell that can only read the study. A lock
+    file that is there already is left as it is. Where none can be made, exit saying why in a
+    sentence, as launch.Lock.acquire() does: the system's reason, or that what is at its name
+    is no lock a launcher made, which the lead is to look at and delete. The scaffold is
+    written by then, so the sentence says that the study has no lock file until one can be
+    made, and that --force scaffolds again."""
+    try:
+        launch.Lock.make(sd)
+    except OSError as err:
+        path = sd / launch.LOCK
+        unsafe = isinstance(err, pl.Unsafe)
+        raise SystemExit(
+            (f"{err}, so it is no lock a launcher made." if unsafe else pl.not_written(path, err))
+            + " The study is scaffolded, but it has no lock file, and until one can be made a shell that cannot "
+            "write the study has nothing to lock to keep a launcher out while it archives. "
+            + ("Look at what is there, delete it, then" if unsafe else "Put that right, then")
+            + f" scaffold again: init_study.py {sd} --force")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
@@ -449,6 +496,7 @@ def main():
     lock = take_study(cfg["_dir"]) if args.force else None
     try:
         scaffold(cfg, args.force)
+        make_lock(cfg["_dir"])
     finally:
         if lock:
             lock.release()
@@ -625,7 +673,7 @@ def scaffold(cfg, force):
         for e, rep in ((e, rep) for e in entries for rep in range(1, reps + 1)):
             entry = pl.run_entry(sd, p, e, rep)
             pf, pp, rid = sd / entry["file"], sd / entry["prompt"], entry["run"]
-            pf.write_text(persona_doc(p, e["key"], order))
+            write_persona(sd, pf, persona_doc(p, e["key"], order))
             # Notes for a model key win over notes for the model it runs on.
             found = model_notes[e["key"]] if e["key"] in model_notes else model_notes.get(e["model"], [])
             if cfg["browse"] and not browser[e["key"]]:
@@ -832,7 +880,7 @@ def scaffold_usability(cfg, force):
         for e, rep in ((e, rep) for e in entries for rep in range(1, reps + 1)):
             entry = pl.run_entry(sd, p, e, rep)
             pf, pp, rid = sd / entry["file"], sd / entry["prompt"], entry["run"]
-            pf.write_text(persona_doc(p, e["key"], [], tasks))
+            write_persona(sd, pf, persona_doc(p, e["key"], [], tasks))
             if pl.evidence_dir(sd, rid).is_symlink():  # never followed: it goes, and the folder is made anew
                 pl.evidence_dir(sd, rid).unlink()
             shutil.rmtree(pl.evidence_dir(sd, rid), True)  # what a run that --force resets left

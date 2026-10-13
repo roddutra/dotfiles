@@ -103,6 +103,36 @@ event carries the plan's limit windows, which is where a usage limit's reset tim
 Sessions are deleted with the CLI's own `codex delete --force <thread id>`, which removes the
 session file and its database rows.
 
+Inside another Codex sandbox (verified on 13 October 2026, under `codex sandbox` and under a
+`codex exec` session as the lead, on Linux):
+
+- With the Codex home read-only, `codex exec` exits at once with code 1, nothing on stdout and
+  `Error: failed to initialize in-process app-server client: Read-only file system (os error
+  30)` on stderr. The caller reads that as a CLI that could not be started. `codex login status`
+  still answers, after a warning line, so check() passes.
+- With the Codex home writable, the run starts, calls the model and ends its turn with exit code
+  0, and every shell command it tried is an `item.completed` of type `command_execution` with
+  status `failed`, exit code 1 and the output `error building bubblewrap command: app-server
+  socket directory must be a user-owned directory with mode 0700`. The CLI cannot build its own
+  sandbox there: the outer sandbox hides the socket directory of Codex's app-server daemon
+  (`/tmp/codex-daemon-<uid>`, mode 000 inside), the CLI must hide the same directory for its own
+  sandbox, and refuses one it does not own with mode 0700. No writable directory changes that,
+  and the outer sandbox refuses that directory as a writable root. A run then reads nothing and
+  writes nothing, at 55,000 to 80,000 input tokens an attempt: that is "cannot_run"
+  (SANDBOX_FAILED).
+- `codex sandbox -c sandbox_mode="workspace-write" -- true` builds the same sandbox with no
+  model, in about 50 ms: exit code 0 outside any sandbox, and inside one exit code 1 with the
+  same line on stderr. shell_check() runs it. It reads the user's config.toml, which a run does
+  not (`codex sandbox` has no `--ignore-user-config`), so only that line refuses: another
+  failure of the probe says nothing about a run.
+- Under `danger-full-access` the probe passes. No run was made there.
+- Nothing was run with the home writable and its `sessions` folder not, or with a file where
+  that folder belongs. shell_check() refuses both, inferred from what the folder is for: a
+  session is its file there. The folder of a day beneath it is the CLI's to make, and is not
+  tested.
+
+Nothing was seen of a run that could not reach its provider: no pattern for it is here.
+
 Not settled: the real output at a usage limit; how to remove the sub-agent blocks; whether the
 trust entry can be prevented; and a network rule narrower than all or nothing. The experimental
 `network_proxy` feature with a permission profile allowed the socket and one host and nothing
@@ -118,7 +148,7 @@ import os
 import re
 
 from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, \
-    usage
+    unwritable, usage
 
 CLI = "codex"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -142,6 +172,13 @@ FAILURES = [
     ("rollout token budget exhausted", "budget", False),  # verified, but needs a feature this runner never enables
 ]
 SESSION_LOST = "no rollout found for thread id"  # verified: in the stderr line of a resume whose session is gone
+# How the CLI says that it cannot build its own sandbox: in the output of every shell command of a
+# run, and on stderr of PROBE. Verified inside another Codex sandbox on Linux. What the macOS
+# sandbox says in the same place has not been seen, and is not guessed.
+SANDBOX_FAILED = "error building bubblewrap command"
+# Builds the sandbox a run gets, with no model, and runs nothing in it.
+PROBE = [CLI, "sandbox", "-c", 'sandbox_mode="workspace-write"', "--", "true"]
+PROBE_SECONDS = 10
 UUID = re.compile(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
@@ -212,12 +249,20 @@ def _usage(reported) -> dict:
                  cached_tokens=reported.get("cached_input_tokens"))
 
 
+def _home() -> str:
+    return os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+
+
+def _sessions() -> str:
+    """Where the CLI keeps its session files, each in a folder for its day."""
+    return os.path.join(_home(), "sessions")
+
+
 def _token_count(session_id) -> dict:
     """The session's last token_count event, from its session file. {} when there is none."""
     if not UUID.fullmatch(session_id or ""):
         return {}
-    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-    pattern = os.path.join(glob.escape(home), "sessions", "*", "*", "*", f"rollout-*-{session_id}.jsonl")
+    pattern = os.path.join(glob.escape(_sessions()), "*", "*", "*", f"rollout-*-{session_id}.jsonl")
     last = {}
     for path in glob.glob(pattern):
         try:
@@ -247,10 +292,23 @@ def _reason(message) -> str:
     return inner if isinstance(inner, str) else str(message or "")
 
 
+def _sandbox_failed(lines: list[dict]) -> str:
+    """What the CLI said when it could not build its sandbox, when every shell command the run
+    tried ended that way. "" when it tried none, or one of them ran."""
+    said = [str(_dig(x, "item", "aggregated_output") or "") for x in lines
+            if x.get("type") == "item.completed" and _dig(x, "item", "type") == "command_execution"]
+    return said[0].strip() if said and all(SANDBOX_FAILED in output for output in said) else ""
+
+
 def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
+    """"session_saved" stays None: no run has been seen to finish without its session file (with
+    the Codex home read-only the CLI does not start at all), so its absence is not read as one."""
     lines = json_lines(stdout)
     out = result(session_id=next((x["thread_id"] for x in lines if x.get("type") == "thread.started"
                                   and isinstance(x.get("thread_id"), str)), None))
+    refused = _sandbox_failed(lines)
+    if refused:
+        out["cannot_run"] = f"it could not build its sandbox ({refused})"
     end = next((x for x in reversed(lines) if x.get("type") in ("turn.completed", "turn.failed")), None)
     reported = next((x.get("usage") for x in reversed(lines) if x.get("type") == "turn.completed"), None)
     resets = False
@@ -295,6 +353,26 @@ def check() -> dict:
         return {"ok": False, "message": next((x for x in probe[2].splitlines() if x.strip()), "")
                 or f"{CLI} refused the launch options"}
     return {"ok": True, "message": f"{version[1]}, {said}"}
+
+
+def shell_check() -> dict:
+    """Whether the Codex home, where the CLI keeps its state, and the sessions folder beneath it
+    can be written, and whether the CLI can build the sandbox a run gets (PROBE). A home that
+    cannot be written and a sandbox that cannot be built both fail inside another Codex sandbox
+    (module docstring). The sessions folder is tested apart because it can be the one that
+    cannot be written (INFERRED: a session is its file, which a resume, the usage of a run that
+    was cut short and a purge all read). Nothing here makes a model call."""
+    cannot = []
+    for folder in (_home(), _sessions()):
+        why = unwritable(folder)
+        if why:  # one clause: a home that cannot be written is why its sessions folder cannot be either
+            cannot.append(f"cannot write to {folder}, where it keeps its sessions ({why})")
+            break
+    _, _, err = run_cli(PROBE, timeout=PROBE_SECONDS) or (1, "", "")
+    said = next((line.strip() for line in err.splitlines() if SANDBOX_FAILED in line), "")
+    if said:
+        cannot.append(f"cannot build its own sandbox ({said})")
+    return {"ok": not cannot, "message": ", and ".join(cannot)}
 
 
 def model_status(entry: dict) -> dict:

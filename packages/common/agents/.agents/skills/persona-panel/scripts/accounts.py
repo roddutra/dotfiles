@@ -40,6 +40,11 @@ one command now running, <study>/accounts/command.running, lead only:
     began                epoch seconds when the record was written, before the process existed
     pid, identity        the command's process and its start identity (run_watchdog.identity(),
                          the notion the watchdogs and launch.py go by), null until it exists
+    namespace            the process namespace the command was started in, where the system
+                         names one (run_watchdog.namespace()): the pid means the command only
+                         to a shell in it
+    lock                 "command.lock" when the command holds the lock of that file (below),
+                         absent where the file system has no locks
 
 The process is started held back: it becomes the command only once its pid is on record, and
 ends without running anything when whoever started it has gone (GATE). So a record without a
@@ -51,6 +56,46 @@ as unfinished: a provision is cleared up by "teardown" before the run is provisi
 teardown is run again (below), and a reset or a check runs again when it is next due. Commands
 are run one after another by the one launcher a study has, so no two ever overlap.
 
+The lock of a command. A process id means its process only within a process namespace, and a
+shell inside a harness's sandbox is in another than one outside it: an id recorded on one side
+names no process on the other, or someone else's, and a start identity can be the same on
+both. So a command is not known by its ids alone. It holds an exclusive flock on
+<study>/accounts/command.lock, a file made anew for it and never written, from before its
+process exists: command() takes the lock and gives the descriptor to the process, which keeps
+it open through its exec. The command has it, and so has whatever the command starts that
+does not close it, and the system lets go of the lock when the last of them has ended, however
+each ended. So a lock that is held is something of the command alive, and a lock that is free
+is no proof that all of it has ended. Every shell that can open the file sees that lock,
+whatever processes it sees (run_watchdog.py, "The lock of an attempt", is the same for a run).
+The launcher closes its own copy as soon as the process is started, so the lock says nothing
+of a launcher, and the file goes with the record when the command has been waited for.
+recover() asks it first (locked()), then looks at the namespace on record (apart()):
+
+    recorded in another namespace than this shell's
+        No id is looked up or signalled, and recover() never clears the record by itself: it
+        exits, the record stays, and the launcher is to be run from the shell that started
+        the command, which can look. What the lock shows only words the message:
+        lock held       it, or something it started, is alive where this shell cannot look
+        lock free       it has probably ended, and nothing here can be sure of it: a process
+                        that closed the descriptor it was given (below) holds no lock and may
+                        be running all the same, where this shell cannot look for it
+        no lock to ask  nothing says whether it has ended: a record without "lock", a lock
+                        file that is gone, a flock that cannot tell
+        With the lock free, or none to ask, the message adds the way out when that shell has
+        ended, as a sandbox that ended has, taking the command with it: delete the record
+        (and the lock file) and run the launcher again. No record is then a command that is
+        over, and what it left unfinished is cleared up as after any command that was cut
+        short, because that is on the account's record and in runs.json, never on this one:
+        a provisioning that did not finish gets "teardown" before the next (provision()), a
+        teardown with "cleanup" is done again, a reset or a check is due as it was. This is
+        the one place where a study waits for the lead after a sandbox has ended.
+    recorded in this namespace, or in none that is known
+        the ids are gone by as below, whatever the lock says: a process that closed the
+        descriptor it was given, as one started through sudo or by a Python subprocess has,
+        holds no lock and may be running all the same. A lock that is still held when the
+        command's group is empty is one thing more that holds the study up: a process that
+        left the group, which no list of the group names
+
 A command can leave a process of its own behind: one that ignored SIGTERM while the command
 itself ended on it, or that was still at work when the command was killed from outside. A group
 is signalled only while the process on record is there to prove whose it is, so such a process
@@ -59,7 +104,16 @@ on record has a process in it that has not ended, recover() exits: it names each
 look at it (ps -o pid,pgid,command), the record stays as it was, and nothing of the study is
 run, torn down or provisioned. Stop what is the command's and run the launcher again: once the
 group is empty the record goes and the launcher carries on as above. When what is left is not
-the command's at all, another's group that was given the id since, delete the record.
+the command's at all, another's group that was given the id since, delete the record. It exits
+too while the command's lock is held with the group empty: a process the command started has
+left the group and kept the lock. It cannot be named, so the message names the lock file, and
+the launcher carries on once the lock is free.
+
+The same holds where nothing can say who is in the group: a system with no /proc and no ps has
+no list of processes, and "cannot tell" is never taken for "empty". recover() then exits in the
+same way, with the record kept, and the lead looks for what the command left and deletes the
+record. recover() exits with Held, which "launch.py stop" alone catches: it has runs to stop
+first, starts no command of the study while the record holds, and then exits with the reason.
 
 An account has three parts:
 
@@ -158,6 +212,8 @@ then judges the run without what the run did. "launch.py check --force" runs it 
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
 import shlex
@@ -173,12 +229,14 @@ import run_watchdog as watchdog
 
 FOLDER = "accounts"   # the records, relative to the study directory
 IN_FLIGHT = "command.running"  # in that folder: the record of the one command now running (module docstring)
+HOLD = "command.lock"          # in that folder: the file that command holds a lock on for as long as any of it lives
 TIMEOUT = 120         # seconds a provision, teardown or reset command gets
 GIVE_UP = 5.0         # seconds a process group gets to disappear after SIGKILL
 REFUSED = b"\0refused\0"  # what GATE writes before the system's message when the command could not be executed
 # What every command is started through: a process that waits to be told it is on record, then
 # becomes the command, with nothing on its standard input. Told nothing, because whoever started
-# it was killed first, it ends without running the command.
+# it was killed first, it ends without running the command. It is given the command's lock, on a
+# descriptor it keeps open through the exec, and so the command has it: command().
 GATE = """import os, sys
 try:
     if os.read(0, 1):
@@ -205,6 +263,12 @@ NOTES = {  # what a panellist's account.json says of how it starts
 class Failed(Exception):
     """A command of the study failed, or what it printed cannot be used: the reason, as a sentence
     without its full stop."""
+
+
+class Held(SystemExit):
+    """What recover() exits with: a command that an earlier launcher left on record cannot be
+    proved gone, so no command of the study may be started. The reason, with what the lead is
+    to do. A launcher command that has other work to do first catches it (launch.py "stop")."""
 
 
 def record_path(study_dir: Path, run: str) -> Path:
@@ -295,6 +359,10 @@ def flight_path(study_dir: Path) -> Path:
     return Path(study_dir) / FOLDER / IN_FLIGHT
 
 
+def hold_path(study_dir: Path) -> Path:
+    return Path(study_dir) / FOLDER / HOLD
+
+
 def command(cfg: dict, text: str, run: str, name: str, what: str, **noted) -> tuple[int, str, str]:
     """Run one of the study's commands for a run, as the module docstring says every one is run:
     (its exit code, what it wrote to standard output, what it wrote to standard error), which
@@ -302,7 +370,14 @@ def command(cfg: dict, text: str, run: str, name: str, what: str, **noted) -> tu
     or "check-<task id>", what names it in a message, and noted is what else its record says.
     The command is on record in command.running from before its process exists until it has
     ended and been waited for. Raises Failed when it cannot be run or does not end within
-    TIMEOUT seconds."""
+    TIMEOUT seconds.
+
+    It holds a lock for as long as it or anything it started lives (module docstring, "The
+    lock of a command"). The lock file is made anew and locked here, before the process
+    exists, and the process is given the descriptor that holds the lock, which it keeps
+    through its exec: a command is the lead's own, and is meant to have it, as no panellist's
+    CLI has the lock of its attempt. This process closes its own copy once the process is
+    started, so that the lock says nothing of a launcher."""
     sd = cfg["_dir"]
     try:
         argv = [*pl.command_argv(cfg, text), run]
@@ -311,13 +386,25 @@ def command(cfg: dict, text: str, run: str, name: str, what: str, **noted) -> tu
     shown = shlex.join([*(pl.command_words(text) or []), run])
     note = {"command": name.partition("-")[0], "run": run, **noted, "began": round(time.time(), 3), "pid": None,
             "identity": None}
-    proc = None
+    within = watchdog.namespace()  # where the system names one: the id on record means the command only there
+    if within:
+        note["namespace"] = within
+    proc = hold = None
     try:
         try:
             (sd / FOLDER).mkdir(mode=0o700, exist_ok=True)
+            hold = watchdog.fresh(hold_path(sd), os.O_RDONLY, 0o600)
+            try:  # nothing else has a file made just now: the lock is the command's from before it exists
+                fcntl.flock(hold, fcntl.LOCK_EX)
+                note["lock"] = HOLD
+            except OSError:
+                pass  # a file system without locks: recover() goes by the ids on record
             write_private(flight_path(sd), json.dumps(note) + "\n")  # the intent, before the process exists
             proc = subprocess.Popen([sys.executable, "-I", "-c", GATE, *argv], cwd=sd, stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                                    pass_fds=(hold,))
+            os.close(hold)  # the command's alone from here on: held until the last process that has it ends
+            hold = None
             note.update(pid=proc.pid, identity=watchdog.identity(proc.pid))
             write_private(flight_path(sd), json.dumps(note) + "\n")  # on record: only now is it told to go on
         except OSError as err:  # not run: a process that was started ends below without becoming the command
@@ -335,7 +422,10 @@ def command(cfg: dict, text: str, run: str, name: str, what: str, **noted) -> tu
             proc.wait()
         raise
     finally:
+        if hold is not None:
+            os.close(hold)
         flight_path(sd).unlink(missing_ok=True)
+        hold_path(sd).unlink(missing_ok=True)  # after the record: one that says "lock" always has the file
     if proc.returncode == 126 and err.startswith(REFUSED):
         raise Failed(f"{what} could not be run ({shown}): {err[len(REFUSED):].decode(errors='replace')}")
     out, err = out.decode(errors="replace"), err.decode(errors="replace")
@@ -344,11 +434,46 @@ def command(cfg: dict, text: str, run: str, name: str, what: str, **noted) -> tu
     return proc.returncode, out, err
 
 
-def end_group(pid: int, started: str | None, grace: float) -> tuple[bool, list[int]]:
+def apart(note: dict) -> bool:
+    """Whether a command on record was started in another process namespace than this shell's:
+    the record names one, this shell has one (run_watchdog.py namespace()), and the two differ.
+    Its process id then names no process here, or someone else's, whatever start identity that
+    one has, so it is never looked up or signalled from this shell. False when either is not
+    known, as launch.py decides it of an attempt (elsewhere()). It says nothing of whether the
+    command is alive, which its lock does (locked())."""
+    there, here = note.get("namespace"), watchdog.namespace()
+    return bool(there and here and there != here)
+
+
+def locked(study_dir: Path, note: dict) -> bool | None:
+    """Whether the command a record is of, or anything it started that kept the descriptor, is
+    still alive, in whatever process namespace: something holds the command's lock (module
+    docstring, "The lock of a command"). None when that cannot be asked: the record says no
+    lock was taken, as one from before commands held a lock, the file is not there to open, or
+    flock cannot tell. Asked as launch.py asks the lock of a launcher (taken()): with a shared
+    lock that is not waited for and is let go at once, through a descriptor that only reads."""
+    if note.get("lock") != HOLD:
+        return None
+    try:
+        fd = watchdog.opened(hold_path(study_dir))
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError as err:
+        return True if err.errno in (errno.EWOULDBLOCK, errno.EACCES) else None
+    finally:
+        os.close(fd)
+    return False
+
+
+def end_group(pid: int, started: str | None, grace: float) -> tuple[bool, list[int] | None]:
     """End the process group of a command that an earlier launcher left running: SIGTERM, the
     grace, then SIGKILL, and wait for it to have gone. Returns (whether the command was still
     running, the processes still in its group that nothing proves gone). The second is empty
-    only when the group is: recover() starts no command while it is not.
+    only when the group is: recover() starts no command while it is not. It is None when no
+    list of processes could be had, from /proc or from ps: nothing then says that the group is
+    empty, and "cannot tell" is never given as "none left".
 
     The care is the one launch.py takes of a CLI (kill_group()): the group is the command's
     for certain only while its leader, the process on record, still holds the recorded id under
@@ -363,17 +488,20 @@ def end_group(pid: int, started: str | None, grace: float) -> tuple[bool, list[i
         found = watchdog.process(pid)
         return found[0] if found and started and found[1] == started else None
 
-    def others() -> list[int]:
+    def others() -> list[int] | None:
         try:
             return watchdog.others(pid)
         except (OSError, subprocess.SubprocessError):
-            return []  # no list of processes to be had: nothing to name
+            return None  # no list of processes to be had: who is in the group is not known
 
-    def left() -> list[int]:  # what is in the group still that may be at work: a process that has ended is not
+    def left() -> list[int] | None:  # what is in the group still that may be at work: a process that has ended is not
         found = watchdog.process(pid)
         if found and started and found[1] != started:
             return []
-        return sorted(x for x in [*([pid] if found else []), *others()]
+        rest = others()
+        if rest is None:
+            return None
+        return sorted(x for x in [*([pid] if found else []), *rest]
                       if not (watchdog.process(x) or "Z")[0].startswith("Z"))
 
     state = leader()
@@ -398,10 +526,25 @@ def recover(cfg: dict, grace: float) -> list[str]:
     """See to a command that an earlier launcher left on record (module docstring), before
     anything else is done with the study: end it when it is still running, wait for it, and
     take its record off. Returns what the lead should be told, each a sentence. Exits when the
-    record cannot be read, when it names a process that nothing can tell from the command, or
-    when the command's process group still holds a process that nothing proves gone
-    (end_group()): the record is then left as it was, and no command is started beside one
-    that may still be running. Whoever calls this starts nothing of the study before it."""
+    record cannot be read, when it names a process of another process namespace than this
+    shell's, when it names a process that nothing can tell from the command, when
+    the command's process group still holds a process that nothing proves gone (end_group()),
+    when no list of processes can be had to say that it holds none, or when the command's lock
+    is held with nothing in that group to name: the record is then left as it was, and no
+    command is started beside one that may still be running. It exits with Held. Whoever calls
+    this starts nothing of the study before it.
+
+    The lock of the command is asked first (locked()), and the namespace on record decides
+    what its ids may be used for (apart()). Of a command recorded in another process namespace
+    than this shell's no id is looked up or signalled, and the record is never cleared here,
+    whatever the lock shows: it exits, and says to run the launcher from the shell that started
+    the command. With the lock free, or none to ask, it says as well what to do when that shell
+    has ended: delete the record, after which the command is cleared up after as any that was
+    cut short is (provision(), teardown(): what is owed is on the account's record, not on
+    this one). Of any other the ids are gone by, as they were before commands held a lock:
+    its group is signalled only while its process holds the recorded id under the recorded
+    start identity. A lock that is free proves nothing in either case, because a process that
+    closed the descriptor it was given holds no lock and may be running all the same."""
     sd, path = cfg["_dir"], flight_path(cfg["_dir"])
     look = (f"Look for a command of this study that is still running (ps -o pid,pgid,command), stop it, then delete "
             f"{path}.")
@@ -414,8 +557,8 @@ def recover(cfg: dict, grace: float) -> list[str]:
         return []
     except (OSError, ValueError) as err:
         why = pl.unread(err) if isinstance(err, OSError) else "it holds no JSON object"
-        raise SystemExit(f"{path} is the record of a command of this study that an earlier launcher started, and it "
-                         f"cannot be read ({why}), so nothing was done. {look}")
+        raise Held(f"{path} is the record of a command of this study that an earlier launcher started, and it "
+                   f"cannot be read ({why}), so nothing was done. {look}")
     name, run, pid = str(note.get("command")), str(note.get("run")), note.get("pid")
     what = (f"the success check of task {note.get('task')}" if name == "check" else f"accounts.{name}") + f" for {run}"
     again = {"provision": f"Whatever account it made is not known, so accounts.teardown runs for {run} before it is "
@@ -424,26 +567,64 @@ def recover(cfg: dict, grace: float) -> list[str]:
              "reset": "It runs again before the next run that needs it.",
              "check": "No verdict is on record from it, so it runs again."}.get(name, "")
     said = [f"An earlier launcher was killed as it started {what}: the command never ran."]
+    stays = ("The record is kept and no command of the study was started: nothing was run, torn down or "
+             "provisioned.")
     if isinstance(pid, int) and not isinstance(pid, bool):
-        if not note.get("identity") and watchdog.process(pid):
-            raise SystemExit(f"An earlier launcher was killed while {what} ran, and nothing on record tells its "
-                             f"process (pid {pid}) from another that was given the same id since, so nothing was "
-                             f"done. {look}")
-        running, left = end_group(pid, note.get("identity"), grace)
-        how = ("It has ended since" if not running else f"It was still running (pid {pid}) and was stopped"
-               if pid not in left else f"It was still running (pid {pid}) and did not end when it was killed")
-        if left:  # the record stays: the next launcher command looks again, and goes on once the group is empty
-            pids = ", ".join(map(str, left))
-            raise SystemExit(
-                f"An earlier launcher was killed while {what} ran. {how}, but process group {pid} still holds pid "
-                f"{pids}, which may be left of that command and still at work. The launcher signals a group only "
-                f"while the command itself is there to prove whose it is, so "
-                f"{pl.agree(len(left), 'that process is', 'those processes are')} yours to look at. The record is "
-                f"kept and no command of the study was started beside {pl.agree(len(left), 'it', 'them')}: nothing "
-                f"was run, torn down or provisioned. Check with ps -o pid,pgid,command -p {pids.replace(' ', '')} "
-                f"and stop what is the command's, then run this again: once the group is empty it carries on. If "
-                f"nothing there is the command's, delete {path} instead.")
-        said = [f"An earlier launcher was killed while {what} ran. {how}." + (f" {again}" if again else "")]
+        lock = locked(sd, note)
+        if apart(note):  # its ids are another namespace's: nothing here proves it gone, so the record stays
+            there = (f"Its process (pid {pid}) is on record in another process namespace than this shell's, as on "
+                     "the other side of a sandbox, so nothing was looked up or signalled under that id.")
+            if lock:
+                raise Held(
+                    f"An earlier launcher was killed while {what} ran, and that command, or something it started, "
+                    f"is still running where this shell cannot look: it holds the command's lock ({hold_path(sd)}). "
+                    f"{there} {stays} Run the launcher from the shell that started that command. {pl.SANDBOX_HINT}")
+            shows = (f"Nothing holds the command's lock ({hold_path(sd)}), so it has probably ended, but this shell "
+                     "cannot look where it ran to be sure: a process that closed the lock file it was given holds no "
+                     "lock and may be running all the same." if lock is False else
+                     "No lock of the command's can be asked, so nothing says whether it has ended, and this shell "
+                     "cannot look where it ran.")
+            raise Held(
+                f"An earlier launcher was killed while {what} ran. {shows} {there} {stays} Run the launcher from "
+                f"the shell that started that command, which can look. {pl.SANDBOX_HINT} If that shell was in a "
+                f"sandbox that has ended, the command ended with it: delete {path} (and {hold_path(sd)}, when it "
+                "is there) and run this again. The command is then taken as unfinished, as after any command that "
+                "was cut short." + (f" {again}" if again else ""))
+        else:
+            if not note.get("identity") and watchdog.process(pid):
+                raise Held(f"An earlier launcher was killed while {what} ran, and nothing on record tells its "
+                           f"process (pid {pid}) from another that was given the same id since, so nothing was "
+                           f"done. {look}")
+            running, left = end_group(pid, note.get("identity"), grace)
+            if left is None:  # the record stays, as for a process that nothing proves gone: cannot tell is not gone
+                raise Held(
+                    f"An earlier launcher was killed while {what} ran, and no list of processes can be had on this "
+                    f"system (neither /proc nor ps), so nothing says whether its process (pid {pid}) or anything it "
+                    f"started is still at work in process group {pid}. {stays} Look for what is left of that command "
+                    f"yourself and stop it, then delete {path} and run this again.")
+            how = ("It has ended since" if not running else f"It was still running (pid {pid}) and was stopped"
+                   if pid not in left else f"It was still running (pid {pid}) and did not end when it was killed")
+            if left:  # the record stays: the next launcher command looks again, and goes on once the group is empty
+                pids = ", ".join(map(str, left))
+                raise Held(
+                    f"An earlier launcher was killed while {what} ran. {how}, but process group {pid} still holds "
+                    f"pid {pids}, which may be left of that command and still at work. The launcher signals a group "
+                    f"only while the command itself is there to prove whose it is, so "
+                    f"{pl.agree(len(left), 'that process is', 'those processes are')} yours to look at. The record "
+                    f"is kept and no command of the study was started beside {pl.agree(len(left), 'it', 'them')}: "
+                    f"nothing was run, torn down or provisioned. Check with ps -o pid,pgid,command -p "
+                    f"{pids.replace(' ', '')} and stop what is the command's, then run this again: once the group "
+                    f"is empty it carries on. If nothing there is the command's, delete {path} instead.")
+            if lock and locked(sd, note):  # its group is empty, and something has its lock all the same
+                raise Held(
+                    f"An earlier launcher was killed while {what} ran. {how}, and process group {pid} is empty, but "
+                    f"the command's lock ({hold_path(sd)}) is still held: a process it started is still running, in "
+                    "another process group than its own, or where this shell cannot look. The launcher cannot name "
+                    f"it, and signals nothing that it cannot prove to be the command's. {stays} Find what the "
+                    f"command left (where lsof is installed, lsof {hold_path(sd)} lists what has the file open) and "
+                    "stop it, then run this again: once the lock is free it carries on. If what holds it is meant "
+                    f"to stay, delete {path} instead.")
+            said = [f"An earlier launcher was killed while {what} ran. {how}." + (f" {again}" if again else "")]
     path.unlink(missing_ok=True)
     return said
 

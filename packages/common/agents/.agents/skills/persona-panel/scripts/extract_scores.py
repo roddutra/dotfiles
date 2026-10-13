@@ -70,7 +70,9 @@ panellist wrote (sees, expects, action, happened) stay in the step log, which is
 
 runs.csv: "limited_by" is what stopped a limited run (time, budget or steps, from runs.json),
 "step_entries" how many entries its step log has (0 with no log), and "step_notes" what is wrong
-with the log's form (panel_lib.step_notes), separated by "; ".
+with the log's form (panel_lib.step_notes), separated by "; ". A ";" inside a note has a
+backslash before it, so that analyze.py takes the notes apart where they end and nowhere else
+(panel_lib.join_notes, split_notes).
 
 What these files repeat of a step log is little, and none of it unchecked: a page, a screenshot's
 name and a task id the study does not have each go through panel_lib.shown(), which describes
@@ -78,6 +80,14 @@ a value that holds a known secret, is long or has other characters than a name h
 not repeat it. So a secret in a step log, which check_runs.py fails the run for, is not copied
 into a CSV on the way. A step log that cannot be read as the run's (a symbolic link, at its
 name or at its folder's) is read as no log, and check_runs.py says why.
+
+So with a persona file, in every study: one that cannot be read as the run's own (a symbolic
+link, a FIFO or a folder at its name, a link at a folder above it, a file that may not be read:
+panel_lib.persona_bytes) is read as no file. Its run has a row in runs.csv, as a run that wrote
+nothing, and none in scores.csv or rankings.csv, and check_runs.py says why.
+
+Where the system refuses one of these files (a sandboxed shell tool, a study directory that is
+not yours to write), one sentence names the file and the reason, and the exit code is 1.
 
 Usage: extract_scores.py <study-dir>
 """
@@ -166,15 +176,14 @@ def main():
     labels, unit = pl.study_units(cfg), pl.unit_nouns(cfg)[0]
     keys = pl.factor_keys(cfg)
     runs = pl.run_records(sd, cfg)
-    (sd / "analysis").mkdir(exist_ok=True)
     n_rows = incomplete = 0
     usability = cfg["type"] == "usability"
     entries = {e["run"]: e for e in pl.read_runs(sd)} if usability and (sd / "runs.json").exists() else {}
     known = accounts.known(cfg) if usability else None  # what pl.shown() looks for in a panellist's own text
     task_table, step_table = [], []  # the rows of tasks.csv and steps.csv
-    with open(sd / "analysis" / "scores.csv", "w", newline="") as f, \
-            open(sd / "analysis" / "rankings.csv", "w", newline="") as g, \
-            open(sd / "analysis" / "runs.csv", "w", newline="") as h:
+    with pl.output(sd / "analysis" / "scores.csv", newline="") as f, \
+            pl.output(sd / "analysis" / "rankings.csv", newline="") as g, \
+            pl.output(sd / "analysis" / "runs.csv", newline="") as h:
         w = csv.writer(f)
         w.writerow(["persona_id", "persona", "model", "replicate", "complete", "segment", unit, "position",
                     *keys])
@@ -201,7 +210,7 @@ def main():
                 task_table += [[*whose, *row] for row in tasks]
                 step_table += [[*whose, *row] for row in steps]
                 more = [(entry.get("limited_by") or "") if run["state"] == "limited" else "", len(logged),
-                        "; ".join(pl.step_notes(cfg, logged, odd, issued, known))]
+                        pl.join_notes(pl.step_notes(cfg, logged, odd, issued, known))]
             sw.writerow([run["run"], *who, run["segment"], run["state"], complete, " ".join(prog["written"]),
                          " ".join(prog["scored"]), int(prog["has_final"]), *more])
             if not r:
@@ -223,7 +232,7 @@ def main():
                                "stopped", "steps", "attempts", "last_step", "last_screenshot", "last_page"],
                  task_table),
                 ("steps.csv", ["task", "attempt", "step", "done", "on", "to", "screenshot", "sensitive"], step_table)):
-            with open(sd / "analysis" / name, "w", newline="") as f:
+            with pl.output(sd / "analysis" / name, newline="") as f:
                 csv.writer(f).writerows([[*whose, *head], *table])
     print(*pl.unsettled_lines(runs), f"{pl.plural(n_rows, 'score row')} from {pl.plural(len(runs), 'run')}; "
           f"{pl.plural(incomplete, 'run')} incomplete "

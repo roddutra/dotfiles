@@ -25,6 +25,7 @@ FACTORS = 11
 
 sys.path[:0] = [str(SCRIPTS), str(Path(__file__).resolve().parent)]
 import persona_panel_fakes as fakes  # noqa: E402
+import run_watchdog  # noqa: E402
 import runners  # noqa: E402
 
 
@@ -165,10 +166,39 @@ class PersonaPanelTest(unittest.TestCase):
             line = next(l for l in f.read_text().splitlines() if l.startswith("| Review order"))
             orders.setdefault(f.name.split("-")[0], set()).add(line)
         self.assertTrue(all(len(v) == 1 for v in orders.values()), orders)
+        # The study's lock file is there from the scaffold on, and a new scaffold leaves it where it is: it is
+        # what a shell that cannot write the study locks to keep a launcher away while it reads (archive.py).
+        lock_file = self.sd / ".launch.lock"
+        self.assertTrue(lock_file.is_file())
         first_key = self.key
         run("init_study.py", self.sd, "--force")
-        self.assertEqual(first_key, self.sd.joinpath("key.md").read_text())
+        self.assertEqual((first_key, True), (self.sd.joinpath("key.md").read_text(), lock_file.is_file()))
         self.assertIn("Read nothing outside", self.sd.joinpath(self.runs[0]["prompt"]).read_text())
+        # Where there is no lock file and none can be made, the scaffold says so and fails, with the study
+        # scaffolded. What is at the name is left there, and --force scaffolds again once the lead has removed it.
+        outside = Path(self.tmp.name) / "elsewhere"
+        outside.write_text("not the study's")
+        cases = {"a folder": (Path.mkdir, Path.rmdir, "The system refused to write {at} (Is a directory).",
+                              "Put that right, then"),
+                 "a symbolic link": (lambda at: at.symlink_to(outside), Path.unlink,
+                                     "{at} is a symbolic link, so it is no lock a launcher made.",
+                                     "Look at what is there, delete it, then")}
+        for i, (name, (put, remove, why, first)) in enumerate(cases.items()):
+            with self.subTest(name):
+                sd = self.study(f"no-lock-{i}").resolve()
+                at = sd / ".launch.lock"
+                put(at)
+                r = run("init_study.py", sd, check=False)
+                self.assertEqual((r.returncode, "Traceback" in r.stderr), (1, False), r.stderr)
+                self.assertIn(
+                    f"{why.format(at=at)} The study is scaffolded, but it has no lock file, and until one can be "
+                    "made a shell that cannot write the study has nothing to lock to keep a launcher out while it "
+                    f"archives. {first} scaffold again: init_study.py {sd} --force\n", r.stderr)
+                self.assertEqual((sd.joinpath("runs.json").exists(), at.is_file() and not at.is_symlink(),
+                                  outside.read_text()), (True, False, "not the study's"))
+                remove(at)
+                run("init_study.py", sd, "--force")
+                self.assertTrue(at.is_file())
 
     def test_scaffold_and_plan_warn_when_every_persona_reviews_in_the_same_order(self):
         warning, seen = "every persona reviews in the same order", set()
@@ -681,6 +711,10 @@ class PersonaPanelTest(unittest.TestCase):
         (self.sd / "panel/materials/concept-A/index").mkdir(parents=True)
         (self.sd / "panel/materials/concept-A/index/page-text.txt").write_text("x")
         (self.sd / "study-brief.md").write_text("# Study brief\n\nWhat was agreed.\n")
+        # Folders with nothing in them that is kept: one holds only a name that is left out, one holds nothing.
+        (self.sd / "panel/personas/drafts/__pycache__").mkdir(parents=True)
+        (self.sd / "panel/personas/drafts/__pycache__/notes.pyc").write_bytes(b"x")
+        (self.sd / "prompts/unused").mkdir()
         dest = Path(self.tmp.name) / "archive/customer-research/2026-09-25-t/panel/round-1"
         run("archive.py", self.sd, "--dest", dest)
         self.assertIn("What was agreed.", (dest / "study-brief.md").read_text())
@@ -690,6 +724,99 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertTrue((dest / "key.md").exists())
         self.assertFalse((dest / "materials").exists())
         self.assertFalse((dest / "sites").exists())
+
+        def held():
+            return {f.relative_to(dest).as_posix(): f.read_bytes() for f in dest.rglob("*") if f.is_file()}
+
+        def empty():  # a folder is in the archive only to hold a file, so none of it is empty
+            return [d.relative_to(dest).as_posix() for d in dest.rglob("*") if d.is_dir() and not any(d.iterdir())]
+
+        self.assertEqual(empty(), [])
+        # Archiving again replaces what has the same name and keeps the rest: what the lead put beside the round,
+        # and a file the study no longer has. A folder with nothing in it goes, one an older archive left too.
+        first = held()
+        (dest / "scripts").mkdir()
+        (dest / "scripts/rescore.py").write_text("# one-off\n")
+        (dest / "prompts/unused/deeper").mkdir(parents=True)
+        stuck = []  # an empty folder that cannot be removed is named and left, and the round is archived all the same
+        if os.geteuid():  # root removes it whatever the modes say
+            (dest / "shut/leaf").mkdir(parents=True)
+            (dest / "shut").chmod(0o555)
+            stuck = ["shut/leaf"]
+        gone = self.sd / self.runs[0]["prompt"]
+        gone.unlink()
+        (self.sd / "study-brief.md").write_text("# Study brief\n\nAgreed since.\n")
+        try:
+            r = run("archive.py", self.sd, "--dest", dest, check=False)
+        finally:  # before tearDown(), so that the test's directory can be removed
+            if stuck:
+                (dest / "shut").chmod(0o755)
+        self.assertEqual((r.returncode, "Traceback" in r.stderr, f"Archived {self.sd.name} to " in r.stdout),
+                         (0, False, True), r.stderr)
+        self.assertEqual(r.stderr.splitlines(), [
+            f"An empty folder was left in the archive, because it could not be removed (Permission denied): "
+            f"{dest.resolve() / name}" for name in stuck])
+        again = held()
+        self.assertIn(b"Agreed since.", again.pop("study-brief.md"))
+        self.assertEqual(again.pop("scripts/rescore.py", None), b"# one-off\n")
+        self.assertEqual(again, {name: content for name, content in first.items() if name != "study-brief.md"})
+        self.assertIn(gone.relative_to(self.sd).as_posix(), again)
+        self.assertEqual(empty(), stuck)
+
+    def test_archive_reads_nothing_through_a_link_or_a_special_file_and_one_that_fails_leaves_no_part_of_itself(self):
+        self.fill_all()
+        base = Path(self.tmp.name)
+        personas, dest, outside = self.sd / "panel/personas", base / "archive/topic/panel/round-1", base / "outside.md"
+        outside.write_text("Not the study's.\n")
+        odd = "what I saw; $(id) & more.md"  # a panellist's own text, which no message repeats
+
+        def linked():  # what it points at is not the study's, and copying through it would bring that in
+            personas.joinpath("link.md").symlink_to(outside)
+            return personas / "link.md"
+
+        def piped():  # opening one waits for whoever writes to it
+            os.mkfifo(personas / "pipe.md")
+            return personas / "pipe.md"
+
+        def shut():  # a review study scans nothing, so the copy is the first to open it, with files already copied
+            personas.joinpath(odd).write_text("A note.\n")
+            personas.joinpath(odd).chmod(0)
+            return personas / odd
+
+        def archive():
+            return subprocess.run([sys.executable, str(SCRIPTS / "archive.py"), str(self.sd), "--dest", str(dest)],
+                                  capture_output=True, text=True, timeout=60)
+
+        def held():  # every file under the archive's root, what a failed archive left beside the round included
+            return {f.relative_to(base).as_posix(): f.read_bytes() for f in base.joinpath("archive").rglob("*")
+                    if f.is_file()}
+
+        cases = {"a symbolic link": (linked, "panel/personas/link.md: it is a symbolic link"),
+                 "a FIFO": (piped, "panel/personas/pipe.md: it is neither a regular file nor a folder"),
+                 "a file that may not be read": (shut, f"panel/personas/(a name that is not shown, {len(odd)} "
+                                                       "characters): Permission denied")}
+        for name, (plant, said) in cases.items():
+            if plant is shut and not os.geteuid():
+                continue  # nothing is unreadable to root
+            with self.subTest(name):
+                planted = plant()
+                r = archive()
+                planted.unlink()
+                self.assertIn(said, r.stderr)
+                self.assertEqual((r.returncode, "Traceback" in r.stderr, "$(id)" in r.stdout + r.stderr,
+                                  base.joinpath("archive").exists()), (1, False, False, False), r.stderr)
+        if os.geteuid():  # and an earlier archive at the destination stays whole, as it was
+            run("archive.py", self.sd, "--dest", dest)
+            earlier = held()
+            (self.sd / "study-brief.md").write_text("# Study brief\n\nAgreed since.\n")  # copied before the personas
+            # What an archive that was killed left beside the round goes with the next one, which fails too.
+            stale = dest.with_name(f".{dest.name}.archive-left")
+            stale.joinpath(dest.name).mkdir(parents=True)
+            stale.joinpath(dest.name, "study-brief.md").write_text("Half of a round.\n")
+            planted = shut()
+            self.assertEqual((archive().returncode, held()), (1, earlier))
+            self.assertEqual([f.name for f in dest.parent.iterdir()], [dest.name])
+            planted.unlink()
 
     def test_archive_keeps_every_file_of_a_concept_when_files_from_different_folders_share_a_name(self):
         base = Path(self.tmp.name)
@@ -943,8 +1070,12 @@ class PersonaPanelTest(unittest.TestCase):
         dest = Path(self.tmp.name) / "archive/round-1"
 
         def archived():
-            run("archive.py", self.sd, "--dest", dest)
-            return {f.relative_to(dest).as_posix(): f.read_text() for f in sorted(dest.rglob("*")) if f.is_file()}
+            said = run("archive.py", self.sd, "--dest", dest).stdout
+            held = {f.relative_to(dest).as_posix(): f.read_text() for f in sorted(dest.rglob("*")) if f.is_file()}
+            # The closing line counts the files that carry the notice, the second time as the first.
+            self.assertIn(f"{sum(name.endswith('.md') for name in held)} markdown files of this round carry the "
+                          "synthetic panel notice.", said)
+            return held
 
         first = archived()
         self.assertEqual([name for name, text in first.items() if name.endswith(".md") and text.count(notice) != 1], [])
@@ -1386,21 +1517,35 @@ class RunnerTest(unittest.TestCase):
         pi_refused = ('Warning: Model "zz-none" not found for provider "openai-codex". Using custom model id.\n'
                       "Codex error: The 'zz-none' model is not supported when using Codex with a ChatGPT account.\n")
         none = {"input_tokens": None, "output_tokens": None, "cached_tokens": None, "cost_usd": None}
+        # What the real CLIs printed in a sandboxed shell on 13 October 2026: Claude Code with no network, and
+        # Codex inside another Codex sandbox, where it cannot build its own.
+        unreachable = "API Error: Can't reach the API server \u2014 check your internet or DNS (EAI_AGAIN)"
+        no_sandbox = ("error building bubblewrap command: app-server socket directory must be a user-owned "
+                      "directory with mode 0700")
+        kept = self.tmp / "claude-home/projects/-study-panel/1bb4f919-145f-470d-a5b8-97f90a6a8095.jsonl"
+        kept.parent.mkdir(parents=True)
+        kept.write_text("{}\n")  # the transcript of claude/ok: the other recorded sessions left none
         cases = [  # runner, what, stdout, stderr, exit code, expected fields, expected usage figures
             ("claude", "ok", fakes.recorded("claude", "ok"), "", 0,
              {"outcome": "ok", "session_id": "1bb4f919-145f-470d-a5b8-97f90a6a8095", "message": "",
-              "reply": "Reviewed 3 concepts. Ranking: B, A, C.", "reset_at": None},
+              "reply": "Reviewed 3 concepts. Ranking: B, A, C.", "reset_at": None, "session_saved": True,
+              "cannot_run": ""},
              {"input_tokens": 2956, "output_tokens": 597, "cached_tokens": 2234, "cost_usd": 0.00046504,
               "duration_s": 3.441, "scope": "session"}),
             ("claude", "usage limit", fakes.recorded("claude", "usage-limit.inferred"), "", 1,
              {"outcome": "usage_limit", "reset_at": 1789377600, "reply": None,
               "message": "You've hit your session limit · resets 3:30am (Australia/Brisbane)"}, none),
-            ("claude", "budget reached", fakes.recorded("claude", "budget"), "", 1,
-             {"outcome": "budget", "reply": None, "message": "Reached maximum budget ($0.001)"},
+            ("claude", "budget reached, in a session that left no transcript", fakes.recorded("claude", "budget"),
+             "", 1,
+             {"outcome": "budget", "reply": None, "message": "Reached maximum budget ($0.001)",
+              "session_saved": False},
              {"input_tokens": 7179, "output_tokens": 151, "cached_tokens": 0, "cost_usd": 0.0015111}),
             ("claude", "error that calls itself a success", fakes.recorded("claude", "error"), "", 1,
-             {"outcome": "error", "reply": None, "reset_at": None, "message": "Not logged in · Please run /login"},
-             none),
+             {"outcome": "error", "reply": None, "reset_at": None, "message": "Not logged in · Please run /login",
+              "cannot_run": ""}, none),
+            ("claude", "provider out of reach after its own ten retries", fakes.recorded("claude", "unreachable"), "",
+             1, {"outcome": "error", "reply": None, "message": unreachable,
+                 "cannot_run": f"it could not reach its provider ({unreachable})"}, none),
             ("claude", "killed part-way", fakes.recorded("claude", "killed") + cut, "", 143,
              {"outcome": "error", "session_id": "c3a8c385-cb68-47a7-bd67-468f6474c8a3", "reply": None,
               "message": "claude ended without a result (exit code 143)", "session_lost": False},
@@ -1408,11 +1553,16 @@ class RunnerTest(unittest.TestCase):
             ("claude", "resume of a session that is gone", "", f"No conversation found with session ID: {SESSION}\n",
              1, {"outcome": "error", "session_id": None, "session_lost": True,
                  "message": f"No conversation found with session ID: {SESSION}"}, none),
-            ("codex", "ok", fakes.recorded("codex", "ok"), "", 0,
+            ("codex", "ok", fakes.recorded("codex", "ok"), "", 0,  # one shell command, which ran
              {"outcome": "ok", "session_id": "01a12fa7-d29f-7d11-8724-e3d666a19ca3", "message": "",
-              "reply": "codename=NONE; skills=0; agents=yes", "reset_at": None},
+              "reply": "codename=NONE; skills=0; agents=yes", "reset_at": None, "cannot_run": ""},
              {"input_tokens": 82346, "output_tokens": 297, "cached_tokens": 67968, "cost_usd": None,
               "duration_s": None, "scope": "session"}),
+            ("codex", "a turn that ended well with every shell command refused a sandbox",
+             fakes.recorded("codex", "nested"), "", 0,
+             {"outcome": "ok", "session_id": "01a13362-adad-79d1-bdaa-e44992d41d04", "session_saved": None,
+              "cannot_run": f"it could not build its sandbox ({no_sandbox})"},
+             {"input_tokens": 80423, "output_tokens": 238}),
             ("codex", "ok with a warning item", fakes.recorded("codex", "resume-2"), "", 0,
              {"outcome": "ok", "reply": "OK"}, {"input_tokens": 168428}),
             ("codex", "usage limit, reset time from the session file",
@@ -1441,9 +1591,12 @@ class RunnerTest(unittest.TestCase):
             # Pi prints the reply and nothing else, so each case has the session file its process left,
             # found by the session id the launcher passes back (the last item).
             ("pi", "ok", f"{pi_reply}\n", pi_created, 0,
-             {"outcome": "ok", "session_id": pi_ids["ok"], "message": "", "reply": pi_reply, "reset_at": None},
+             {"outcome": "ok", "session_id": pi_ids["ok"], "message": "", "reply": pi_reply, "reset_at": None,
+              "session_saved": True},
              {"input_tokens": 2967, "output_tokens": 43, "cached_tokens": 0, "cost_usd": 0.0001594 + 0.0001588,
               "duration_s": None, "scope": "session"}, pi_ids["ok"]),
+            ("pi", "a reply from a process that left no session file (inferred)", f"{pi_reply}\n", pi_created, 0,
+             {"outcome": "ok", "session_id": None, "reply": pi_reply, "session_saved": False}, none, SESSION),
             ("pi", "usage limit met by a resume (inferred text)", "", f"{pi_limit}\n", 1,
              {"outcome": "usage_limit", "reset_at": now + 42 * 60, "reply": None, "message": pi_limit},
              {"input_tokens": 2967, "output_tokens": 43}, pi_ids["limit"]),
@@ -1473,8 +1626,8 @@ class RunnerTest(unittest.TestCase):
         for name, what, stdout, stderr, code, fields, figures, *session in cases:
             with self.subTest(f"{name}: {what}"), mock.patch("time.time", return_value=now):
                 parsed = runners.get(name).parse_result(stdout, stderr, code, *session)
-                self.assertEqual(sorted(parsed), ["message", "outcome", "reply", "reset_at", "session_id",
-                                                  "session_lost", "usage"])
+                self.assertEqual(sorted(parsed), ["cannot_run", "message", "outcome", "reply", "reset_at",
+                                                  "session_id", "session_lost", "session_saved", "usage"])
                 self.assertEqual({k: parsed[k] for k in fields}, fields)
                 self.assertEqual({k: parsed["usage"][k] for k in figures}, figures)
 
@@ -1523,6 +1676,43 @@ class RunnerTest(unittest.TestCase):
             unguarded = runners.get("pi").check()
         self.assertEqual((unguarded["ok"], "Failed to load extension" in unguarded["message"]), (False, True),
                          unguarded)
+
+    def test_runner_says_what_its_cli_cannot_do_from_a_sandboxed_shell_without_calling_a_model(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can write to a read-only directory")
+        # Where each harness keeps its sessions: none is there yet, so each would be made under self.tmp. Codex
+        # keeps them in a folder of its home, and either can be the one that cannot be written. With each is a
+        # file to put where a folder belongs: at the folder's own name, or for Pi at a folder on the way to it.
+        homes = {"claude": [(self.tmp / "claude-home/projects", self.tmp / "claude-home/projects")],
+                 "codex": [(self.tmp / "codex-home", self.tmp / "codex-home"),
+                           (self.tmp / "codex-home/sessions", self.tmp / "codex-home/sessions")],
+                 "pi": [(self.tmp / "home/.pi/agent/sessions", self.tmp / "home/.pi")]}
+        for name, folders in homes.items():
+            runner = runners.get(name)
+            for sessions, blocked in folders:
+                with self.subTest(name, sessions=sessions.name):
+                    self.assertEqual(runner.shell_check(), {"ok": True, "message": ""})
+                    blocked.parent.mkdir(parents=True, exist_ok=True)
+                    blocked.write_text("")  # no folder can be made there, though the one above it can be written
+                    refused = runner.shell_check()
+                    blocked.unlink()
+                    self.assertEqual((refused["ok"], refused["message"]), (
+                        False, f"cannot write to {sessions}, where it keeps its sessions (Not a directory)"))
+                    sessions.mkdir(parents=True)
+                    sessions.chmod(0o555)  # what a sandbox that keeps the home directory read-only leaves of it
+                    self.addCleanup(sessions.chmod, 0o755)
+                    refused = runner.shell_check()
+                    self.assertEqual((refused["ok"], refused["message"]), (
+                        False, f"cannot write to {sessions}, where it keeps its sessions (Permission denied)"))
+                    self.assertEqual(list(sessions.iterdir()), [])  # the test of it left nothing there
+                    sessions.chmod(0o755)
+        # Inside another Codex sandbox the CLI cannot build its own: its words, from a command that calls no model.
+        with mock.patch.dict(os.environ, {"FAKE_CODEX": "nested"}):
+            nested = runners.get("codex").shell_check()
+        self.assertEqual((nested["ok"], nested["message"]), (
+            False, "cannot build its own sandbox (error building bubblewrap command: app-server socket directory "
+                   "must be a user-owned directory with mode 0700)"))
+        self.assertFalse([c for c in self.calls() if c["model_call"]])
 
     def test_runner_purge_commands_name_one_session(self):
         claude, codex, pi = (runners.get(name) for name in ("claude", "codex", "pi"))
@@ -1618,6 +1808,13 @@ class BrowserSessionTest(unittest.TestCase):
                     self.assertTrue(stat.S_ISFIFO(os.lstat(record).st_mode))
                 elif code == 2:  # refused: the record is as it was, and so is what a link to it points at
                     self.assertEqual((kept if kind == "link" else record).read_text(), written)
+
+
+# What every refusal that a sandboxed shell tool can cause ends with: both ways out, in one sentence.
+SANDBOX_HINT = ("If your shell tool is sandboxed, ask your harness to run this command outside its sandbox, or run "
+                "launch.py from a terminal.")
+NO_SANDBOX = ("error building bubblewrap command: app-server socket directory must be a user-owned directory with "
+              "mode 0700")  # what codex-cli 0.162.1 says inside another Codex sandbox
 
 
 class LauncherTest(unittest.TestCase):
@@ -1783,6 +1980,20 @@ class LauncherTest(unittest.TestCase):
     def left_of(self, record):
         """What is still there of a browser session: its socket directory, its policy file."""
         return [name for name in ("socket_dir", "policy") if os.path.exists(record[name])]
+
+    def holding(self, how):
+        """A process that holds the study's lock as flock gives it, LOCK_EX or LOCK_SH, and writes
+        nothing: the lock file goes on naming whoever it named. let_go() ends it."""
+        held = subprocess.Popen(
+            [sys.executable, "-c", "import fcntl, os, sys\nfd = os.open(sys.argv[1], os.O_RDONLY)\n"
+             "fcntl.flock(fd, getattr(fcntl, sys.argv[2]))\nprint('held', flush=True)\nsys.stdin.read()\n",
+             str(self.sd / ".launch.lock"), how], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        self.background.append(held)
+        self.assertEqual(held.stdout.readline(), "held\n")
+        return held
+
+    def let_go(self, held):
+        held.communicate()
 
     def test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap(self):
         synthesis = {"analyst": {"runner": "claude", "model": "sonnet"}, "writer": {"runner": "claude"}}
@@ -2173,6 +2384,35 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(first["stdin"], self.sd.joinpath("prompts/P01-opus.md").read_text())
         self.assertEqual(first["cwd"], str(self.sd / "panel"))
 
+    def test_persona_file_that_cannot_be_read_as_the_runs_own_is_no_persona_file_and_nothing_waits_for_it(self):
+        self.study(personas=1)
+        self.assertEqual((self.launch("run").returncode, self.states()), (0, {"P01-opus": "done", "P01-cx": "done"}))
+        named = self.entries()["P01-opus"]["file"]
+        file, outside = self.sd / named, self.tmp / "outside.md"
+        file.rename(outside)  # complete, and no longer the study's: read through a link, it would pass for the run's
+        cases = {"a symbolic link to a complete persona file outside the study":
+                 (lambda: file.symlink_to(outside), "it is a symbolic link"),
+                 "a FIFO": (lambda: os.mkfifo(file), "it is not a regular file")}  # an open of one to read it waits
+
+        def reader(script):  # a reader that waits for the file is stopped, and fails the test
+            return subprocess.run([sys.executable, str(self.scripts / script), str(self.sd)], capture_output=True,
+                                  text=True, timeout=60)
+
+        for name, (plant, why) in cases.items():
+            with self.subTest(name):
+                plant()
+                states = {r["run"]: r["state"] for r in self.status()["runs"]}
+                checked, extracted = reader("check_runs.py"), reader("extract_scores.py")
+                file.unlink()
+                # The run is not done to the launcher, the checks block it with the reason, and no score is taken.
+                self.assertEqual(states, {"P01-opus": "pending", "P01-cx": "done"})
+                self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+                self.assertIn(f"| P01-opus | its persona file {named} cannot be read as the run's own ({why}) | - |\n\n"
+                              "1 run file of 2 expected; 1 with blocking problems.", checked.stdout)
+                self.assertIn("3 score rows from 2 runs; 1 run incomplete", extracted.stdout)
+                with open(self.sd / "analysis/scores.csv") as f:
+                    self.assertEqual({r["model"] for r in csv.DictReader(f)}, {"cx"})
+
     def test_run_and_resume_start_only_the_states_they_own(self):
         self.study({
             "P01-opus": [["write:all"]],
@@ -2342,7 +2582,7 @@ class LauncherTest(unittest.TestCase):
         first.kill()
         first.wait()
         watchdog, _, starting = [int(line.split()[0]) for line in
-                                 self.sd.joinpath("logs/P01-opus.1.pid").read_text().splitlines()]
+                                 self.sd.joinpath("logs/P01-opus.1.pid").read_text().splitlines() if line[0].isdigit()]
         os.kill(watchdog, signal.SIGKILL)
         self.wait_for(lambda: self.gone(watchdog), "the watchdog to go")
         [opening] = [e["pid"] for e in self.events("open hung")]
@@ -2409,7 +2649,8 @@ class LauncherTest(unittest.TestCase):
     def test_killed_launcher_loses_no_work_and_starts_no_duplicate(self):
         limit = 1.0
         self.study({
-            "P01-opus": [["write:1", "wait:die", "exit:1"]],   # prints as it starts, ends quietly and unwatched
+            # Prints as it starts, ends quietly and unwatched. Resumed later, to be killed with its watchdog.
+            "P01-opus": [["write:1", "wait:die", "exit:1"], ["wait:never"]],
             "P02-opus": [["wait:finish", "write:all"]],        # still alive when the next launcher starts
             "P01-cx": [["hang"]], "P02-cx": [["hang"]],        # never end by themselves: only their limit stops them
         }, limits={"overrides": {"cx": {"minutes": limit / 60}}})
@@ -2431,6 +2672,57 @@ class LauncherTest(unittest.TestCase):
         self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
         self.wait_for(lambda: self.processes() == {"P01-opus": "alive", "P02-opus": "alive", "P01-cx": "gone",
                                                    "P02-cx": "gone"}, "the time limit to end two runs unwatched")
+        # A shell in another process namespace, as inside a harness's sandbox, sees no process of the study.
+        # What it does see is the lock each watchdog holds for as long as it lives: the two runs still alive
+        # are at work where it cannot look, and the two that ended are over. Here that shell is this one, with
+        # the record of each live run naming a process that is not there. No launcher holds the study's lock to
+        # tell by, and still nothing is said of a live run's process, and none is settled, stopped, started
+        # again or scaffolded over.
+        hidden = ("P01-opus", "P02-opus")
+        as_recorded = {path: path.read_text() for path in map(self.sd.joinpath, (f"logs/{x}.1.pid" for x in hidden))}
+        for path, text in as_recorded.items():  # its watchdog, then its CLI, each under the id of a process long gone
+            path.write_text(re.sub(r"(?m)^\d+ ", f"{first.pid} ", text))
+        alive, before = [e["pid"] for e in self.starts() if e["run"] in hidden], self.tree()
+        self.assertEqual({r["run"]: (r["state"], r["process"], r["browser"]) for r in self.status()["runs"]},
+                         {**dict.fromkeys(as_left, ("running", "gone", None)),
+                          **dict.fromkeys(hidden, ("running", "unseen", None))})
+        said = self.launch("status").stdout
+        self.assertIn("Launcher: not running\nThis shell cannot see the launcher's processes, as inside a sandbox: "
+                      "run states are as last recorded.\nMarked running, but the process is gone: P01-cx, P02-cx. ",
+                      said)
+        for line in said.splitlines():
+            if line.startswith(hidden):
+                self.assertNotRegex(line, "process|browser session")
+        refused = {"init_study --force": lambda: run("init_study.py", self.sd, "--force", check=False),
+                   **{name: lambda name=name: self.launch(name) for name in ("stop", "resume", "run")}}
+
+        def unseen(command):
+            return (f"This shell cannot see the processes of {', '.join(hidden)}, as inside a sandbox: their watchdogs "
+                    "hold their locks, so those runs are still at work where this shell cannot look. "
+                    f'"{command}" changed nothing and signalled nothing. {SANDBOX_HINT} Runs that were started '
+                    "inside a sandbox end when it does, and any shell settles them then.\n")
+
+        for command, attempt in refused.items():
+            r = attempt()
+            self.assertEqual((r.returncode, r.stderr), (1, unseen(command)), r.stdout)
+            self.assertEqual((self.tree() == before, len(self.starts()), [self.gone(pid) for pid in alive]),
+                             (True, 4, [False, False]), f"{command}: {r.stdout}")
+        # A sandbox may show the study read-only as well. No command is given the study's lock there, and
+        # archive.py goes on without it, for a round that was archived read-only. It asks the locks of the
+        # watchdogs first, which a shell that only reads can ask, and goes no further than the others did.
+        if os.geteuid():  # root writes to a directory whatever its mode says
+            modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (self.sd, self.sd / ".launch.lock")}
+            try:
+                for path, mode in modes.items():
+                    path.chmod(mode & ~0o222)
+                r = run("archive.py", self.sd, "--dest", self.tmp / "archived", check=False)
+            finally:
+                for path, mode in modes.items():
+                    path.chmod(mode)
+            self.assertEqual((r.returncode, r.stderr, self.tmp.joinpath("archived").exists(), self.tree() == before),
+                             (1, unseen("archive"), False, True), r.stdout)
+        for path, text in as_recorded.items():  # as the shell that started them reads it: from here on, as it was
+            path.write_text(text)
         went_quiet_for = time.time() - as_left["P01-opus"]["attempts"][0]["started"]
         self.release("die")
         self.wait_for(lambda: self.processes()["P01-opus"] == "gone", "P01-opus to exit")
@@ -2452,6 +2744,42 @@ class LauncherTest(unittest.TestCase):
         for run_id in ("P01-cx", "P02-cx"):
             self.assertGreaterEqual(after[run_id]["seconds_used"], limit)
             self.assertIn("time limit reached", after[run_id]["reason"])
+
+        # A launcher that was started inside a sandbox and killed there takes its watchdogs and CLIs with it. What
+        # is left is no end record, a pid file that names processes of a namespace that has gone, and a lock that
+        # nothing holds: so the watchdog has ended, to any shell, and the next command settles the run. It looks
+        # for nothing under ids that are not this shell's, and says that it could not.
+        third, _ = self.launch_in_background("resume", "--poll", 30)
+        self.wait_for(lambda: "never" in [e["gate"] for e in self.events("waiting")], "P01-opus to be resumed")
+        third.kill()
+        third.wait()
+        pid_file = self.sd / "logs/P01-opus.2.pid"
+        as_recorded = pid_file.read_text()
+        for pid in [int(line.split()[0]) for line in as_recorded.splitlines()[:2]]:  # its watchdog, then its CLI
+            os.kill(pid, signal.SIGKILL)
+            self.wait_for(lambda: self.gone(pid), "a process of P01-opus to have gone")
+        # Where the system names no process namespace a watchdog records none, and the run is settled without the note.
+        apart = re.sub(r"(?m)^namespace .*$", "namespace pid:[0]", as_recorded)
+        pid_file.write_text(apart)
+        # The daemon of its browser session is on record under an id of that namespace too. Here that id, and
+        # its start identity, are those of a process of this shell, which is not signalled for the daemon. The
+        # session is still stopped: it answers at its socket, where the system names the process that listens.
+        bystander = subprocess.Popen([sys.executable, "-c", "import sys\nsys.stdin.read()"], stdin=subprocess.PIPE)
+        self.addCleanup(bystander.communicate)  # which ends it
+        session = self.sd / "logs/P01-opus.2.browser"
+        if apart != as_recorded:
+            session.write_text(json.dumps({**json.loads(session.read_text()),
+                                           "daemon": [bystander.pid, run_watchdog.identity(bystander.pid)]}))
+        self.assertEqual(self.processes(), {"P01-opus": "gone"})
+        stop = self.launch("stop")
+        self.assertEqual((stop.returncode, stop.stderr), (0, ""), stop.stdout)
+        note = "its CLI could not be checked from this shell because it ran in another process namespace"
+        settled = self.entries()["P01-opus"]
+        self.assertEqual((settled["state"], f"not on record, and {note})" in settled["reason"],
+                          f"P01-opus: its watchdog was killed, and {note}. " in stop.stdout),
+                         ("partial", apart != as_recorded, apart != as_recorded), stop.stdout)
+        self.assertEqual((bystander.poll(), settled["attempts"][-1]["browser_left"]),
+                         (None, {"found": True, "left": [], "kept": []}), stop.stdout)
 
     def test_killed_watchdog_has_its_live_cli_killed_and_what_a_cli_that_has_gone_left_is_only_reported(self):
         self.study({"P01-opus": [["write:1", "wait:never"]],          # its CLI is alive when the next launcher looks
@@ -2562,21 +2890,103 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(self.states(), {"P01-opus": "done", "P02-opus": "pending"})
         self.assertEqual(unreported(), {"P01-opus": [], "P02-opus": [1]})  # the session has reported its total
 
+    def test_held_lock_is_a_launcher_running_and_status_says_nothing_of_processes_it_cannot_see(self):
+        self.study({"P01-opus": [["write:1", "wait:never"]], "P02-opus": [["write:1", "wait:never"]]},
+                   models=[self.CLAUDE])
+        first, _ = self.launch_in_background("run", "--poll", 30)
+        self.wait_for(lambda: self.waiting() == {"P01-opus", "P02-opus"}, "both runs to be under way")
+        first.kill()
+        first.wait()
+        cli = {e["run"]: e["pid"] for e in self.starts()}
+        # What a shell in another process namespace sees of a run, as a sandboxed shell does: no process.
+        for line in self.sd.joinpath("logs/P02-opus.1.pid").read_text().splitlines()[:2]:  # its watchdog, then its CLI
+            os.kill(int(line.split()[0]), signal.SIGKILL)
+        seen = {"P01-opus": "alive", "P02-opus": "gone"}
+        self.wait_for(lambda: self.processes() == seen, "the processes of P02-opus to have gone")
+        self.assertIsNone(self.status()["launcher"])
+        # And of the launcher: the lock is held, and the file names a process that is not there to be seen.
+        elsewhere = self.holding("LOCK_EX")
+        status = self.status()
+        self.assertEqual({k: (status["launcher"] or {}).get(k) for k in ("pid", "command", "seen")},
+                         {"pid": first.pid, "command": "run", "seen": False})
+        self.assertEqual({r["run"]: (r["state"], r["process"], r["browser"]) for r in status["runs"]},
+                         dict.fromkeys(seen, ("running", "unseen", None)))
+        said = self.launch("status").stdout
+        self.assertIn(f'Launcher: running "run" (pid {first.pid})\nThis shell cannot see the launcher\'s processes, '
+                      "as inside a sandbox: run states are as last recorded.\n", said)
+        for claim in ("process gone", "process alive", "browser session", "settles them"):
+            self.assertNotIn(claim, said)
+        self.assertIn(f'A launcher is running "run" on this study (pid {first.pid}).', self.launch("plan").stdout)
+        # No command takes the lock for stale because its holder cannot be seen, and none signals the process
+        # id on record, which may be another process's here.
+        second = self.launch("run")
+        self.assertEqual((second.returncode, len(self.starts())), (1, 2), second.stdout + second.stderr)
+        self.assertIn(f"Another launcher has this study (pid {first.pid}", second.stderr)
+        self.assertNotIn("Cleared a stale lock", second.stdout)
+        unsignalled = "This shell cannot see the launcher's processes, as inside a sandbox, so nothing was signalled"
+        stop = self.launch("stop")
+        self.assertEqual(stop.returncode, 1, stop.stdout)
+        self.assertIn(unsignalled, stop.stderr)
+        self.assertEqual((self.gone(cli["P01-opus"]), set(self.states().values())), (False, {"running"}))
+        # Nor is a process of this shell the launcher because it holds the id on record. A launcher records the
+        # process namespace it runs in, where the system names one, and an id recorded in another names no
+        # process here. With the id and start identity of a process this shell does see, the one holding the
+        # lock, the launcher is seen under this shell's namespace, and under another is not seen or signalled.
+        try:
+            here = os.readlink("/proc/self/ns/pid")
+        except OSError:
+            here = None  # none is named where there is no /proc, as on macOS: a launcher records none there
+        if here:
+            lock_file = self.sd / ".launch.lock"
+            as_recorded = lock_file.read_text()
+            named = {**json.loads(as_recorded), "pid": elsewhere.pid, "identity": run_watchdog.identity(elsewhere.pid)}
+            self.assertEqual(named.get("namespace"), here)
+            for within, seen_here in ((here, True), ("pid:[0]", False)):
+                lock_file.write_text(json.dumps({**named, "namespace": within}))
+                self.assertEqual({k: self.status()["launcher"].get(k) for k in ("pid", "seen")},
+                                 {"pid": elsewhere.pid, "seen": seen_here}, within)
+            stop = self.launch("stop")
+            self.assertEqual((stop.returncode, unsignalled in stop.stderr, elsewhere.poll()), (1, True, None),
+                             stop.stdout + stop.stderr)
+            lock_file.write_text(as_recorded)
+        self.let_go(elsewhere)
+        self.assertEqual((self.status()["launcher"], self.processes()), (None, seen))  # with no lock held, as before
+
+        # A command that asks whether a launcher has the study holds a shared lock for an instant. A launcher
+        # that finds one in its way waits for it, and is not turned away as by another launcher.
+        asking = self.holding("LOCK_SH")
+        stopping = subprocess.Popen(self.command("stop"), env=self.env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+        self.background.append(stopping)
+        time.sleep(0.5)
+        self.assertIsNone(stopping.poll(), "turned away by a lock that no launcher holds")
+        self.let_go(asking)
+        said = stopping.communicate(timeout=30)[0]
+        self.assertEqual((stopping.returncode, "Stopped." in said), (0, True), said)
+        self.assertEqual((self.gone(cli["P01-opus"]), self.states()),
+                         (True, {"P01-opus": "partial", "P02-opus": "partial"}))
+
     def test_hang_up_stops_the_runs_unless_the_launcher_was_started_ignoring_it(self):
         self.study({"P01-opus": [["wait:finish", "write:all"]]}, personas=1, models=[self.CLAUDE])
         heeding, _ = self.launch_in_background("run")
         self.wait_for(lambda: self.waiting() == {"P01-opus"}, "the run to be under way")
         heeding.send_signal(signal.SIGHUP)
         self.assertEqual(heeding.wait(timeout=30), 1)  # a clean stop, not a launcher killed by the signal
-        self.assertEqual((self.states(), self.sd.joinpath(".launch.lock").exists()), ({"P01-opus": "pending"}, False))
+        # It leaves the study's lock file where it is, for the next launcher and for a shell that only reads to
+        # lock. The file names no launcher: none is running, and none was killed and left a stale lock.
+        lock_file, shown = self.sd / ".launch.lock", self.launch("status").stdout
+        self.assertEqual((self.states(), lock_file.is_file(), self.status()["launcher"],
+                          "Launcher: not running\n" in shown),
+                         ({"P01-opus": "pending"}, True, None, True), shown)
 
-        under_nohup, _ = self.launch_in_background("run", ignoring_hang_up=True)
+        under_nohup, output = self.launch_in_background("run", ignoring_hang_up=True)
         self.wait_for(lambda: len(self.events("waiting")) == 2, "the run to be under way again")
         under_nohup.send_signal(signal.SIGHUP)
         time.sleep(0.5)  # 25 polls: a launcher that heeded the signal has stopped its run by now
         self.release("finish")
         self.assertEqual(under_nohup.wait(timeout=30), 0)
-        self.assertEqual(self.states(), {"P01-opus": "done"})
+        self.assertEqual((self.states(), "Cleared a stale lock" in output.read_text(), lock_file.is_file()),
+                         ({"P01-opus": "done"}, False, True))
 
     def test_run_refuses_to_start_a_panel_it_cannot_run_whole(self):
         self.study(personas=1)
@@ -2590,17 +3000,32 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "pending"})
         self.assertNotIn("state", self.entries()["P01-cx"])  # left untouched
 
+        # A CLI that is signed in and cannot do a run from this shell, as Codex inside another Codex sandbox,
+        # is refused by name before anything starts, with the CLI's words and both ways out. The other
+        # runner is judged on its own.
+        self.study(personas=1, name="nested")
+        cannot = (f"codex-cli 0.162.1, Logged in using ChatGPT, but from this shell it cannot build its own sandbox "
+                  f"({NO_SANDBOX}). {SANDBOX_HINT}")
+        planned = self.launch("plan", FAKE_CODEX="nested")
+        self.assertEqual(planned.returncode, 1, planned.stdout + planned.stderr)
+        self.assertIn(f"  codex: CANNOT BE USED: {cannot} Up to 4 runs at once.", planned.stdout)
+        refused = self.launch("run", FAKE_CODEX="nested")
+        self.assertEqual((refused.returncode, self.starts(1)), (1, []), refused.stdout + refused.stderr)
+        self.assertIn(f"codex: cannot be used: {cannot}", refused.stdout)
+        self.assertEqual(self.launch("run", "--allow-missing", FAKE_CODEX="nested").returncode, 1)
+        self.assertEqual([e["run"] for e in self.starts(1)], ["P01-opus"])  # claude can run here, and did
+
         self.study(personas=1, name="bad-effort", models=[self.CLAUDE, {**self.CODEX, "effort": "ultra"}])
         refused = self.launch("run")
         self.assertEqual(refused.returncode, 1)
         self.assertIn('P01-cx: codex has no effort "ultra"', refused.stdout)
-        self.assertEqual(self.starts(1), [])
+        self.assertEqual(self.starts(2), [])
 
         # A concept with nothing captured would be reviewed from nothing: it is named, with the command.
         self.study(personas=1, name="uncaptured")
         shutil.rmtree(self.sd / "panel/materials/concept-B")
         refused = self.launch("run")
-        self.assertEqual((refused.returncode, self.starts(1)), (1, []))
+        self.assertEqual((refused.returncode, self.starts(2)), (1, []))
         self.assertIn(f"Nothing was started: nothing is captured for concept-B, so a run would review it from "
                       f"nothing. Run capture.py {self.sd}", refused.stdout)
 
@@ -2609,7 +3034,7 @@ class LauncherTest(unittest.TestCase):
             ({"FAKE_CODEX": "sandboxed"}, "cx",  # passes the check, then every run dies before printing a line
              "P01-cx: could not be started. Its CLI exited with code 1 before printing anything: codex exec --json "
              "--skip-git-repo-check ... (Error: failed to initialize in-process app-server client: Read-only file "
-             "system (os error 30)). Nothing was marked as failed. Run launch.py from a terminal"),
+             f"system (os error 30)). Nothing was marked as failed. {SANDBOX_HINT}"),
             ({"FAKE_CLAUDE": "lockout"}, "opus",  # passes the check, then cannot be executed
              "P01-opus: could not be started. The system refused this command: claude -p"),
         ]
@@ -2629,21 +3054,84 @@ class LauncherTest(unittest.TestCase):
                 self.assertEqual(r.stdout.count("could not be started"), 2)  # the run, then its runner
                 self.assertEqual(sorted(e["run"] for e in self.starts()), [f"P01-{other}", f"P02-{other}"])
 
+    def test_run_that_shows_its_cli_cannot_work_from_this_shell_is_not_retried_and_closes_its_runner(self):
+        unreachable = "API Error: Can't reach the API server \u2014 check your internet or DNS (EAI_AGAIN)"
+        cases = [  # how the first run on a runner ends, that runner's key, and what the launcher gives as the reason
+            ("end:nested", "cx", f"it could not build its sandbox ({NO_SANDBOX})"),  # the turn ended well, exit code 0
+            ("end:unreachable", "opus", f"it could not reach its provider ({unreachable}) (exit code 1)"),
+        ]
+        for step, shut, reason in cases:
+            with self.subTest(step):
+                other, runner = ("opus", "codex") if shut == "cx" else ("cx", "claude")
+                self.study({f"P01-{shut}": [[step]]}, name=f"shut-{shut}",
+                           runners={"claude": {"concurrency": 1}, "codex": {"concurrency": 1}})
+                self.log.unlink(missing_ok=True)
+                r = self.launch("run")  # the check of the shell passed: the run itself is what shows it
+                self.assertIn(f"P01-{shut}: failed: the process ended with nothing written: {reason}; not retried\n"
+                              f"{runner}: its CLI cannot do a run from this shell. No more launches on this runner "
+                              f"in this command, and 1 queued run stays as it is (P02-{shut}). Other runners carry "
+                              f"on. {SANDBOX_HINT}\n", r.stdout)
+                # One process showed it: no retry and no second run on that runner, and the other carried on.
+                started = {e["run"]: e["session"] for e in self.starts()}
+                self.assertEqual(sorted(started), sorted([f"P01-{shut}", f"P01-{other}", f"P02-{other}"]))
+                self.assertEqual(self.states(), {f"P01-{shut}": "failed", f"P02-{shut}": "pending",
+                                                 f"P01-{other}": "done", f"P02-{other}": "done"}, r.stdout)
+                # The attempt stays on record with its session, which the harness holds and purge-sessions can delete.
+                entry = self.entries()[f"P01-{shut}"]
+                self.assertEqual((len(entry["attempts"]), entry["session"]), (1, started[f"P01-{shut}"]))
+                self.assertIn(reason, entry["reason"])
+
+    def test_run_whose_session_its_harness_did_not_keep_is_said_once_and_cannot_be_resumed_or_asked(self):
+        self.study({"P02-opus": [["write:1"]]}, models=[self.CLAUDE])
+        said = "session not saved: this run cannot be resumed or asked a follow-up"
+        r = self.launch("run", FAKE_CLAUDE="unsaved")  # runs as usual, and keeps no transcript
+        self.assertEqual(self.states(), {"P01-opus": "done", "P02-opus": "partial"}, r.stdout + r.stderr)
+        self.assertEqual([r.stdout.count(f"{run_id}: {said}") for run_id in ("P01-opus", "P02-opus")], [1, 1])
+        shown = self.launch("status").stdout.splitlines()
+        self.assertEqual([said in line for line in shown[:2]], [True, True], shown)
+        started = len(self.starts())
+        asked = self.ask("Would you pay for it?", "--runs", "P01-opus")
+        self.assertIn("P01-opus: cannot be asked: its session was not saved.", asked.stdout)
+        resumed = self.launch("resume")
+        self.assertIn("P02-opus: partial with sections written, but its session was not saved, so it cannot be "
+                      "continued", resumed.stdout)
+        self.assertEqual((len(self.starts()), self.sd.joinpath("followups.json").exists()), (started, False))
+
     def test_study_directory_that_cannot_be_written_is_refused_in_a_sentence(self):
         if os.geteuid() == 0:
             self.skipTest("root can write to a read-only directory")
         self.study()
-        for folder in (self.sd, self.sd / "analysis"):  # what a sandboxed shell tool sees
+        self.assertEqual(self.launch("run").returncode, 0)
+        run("extract_scores.py", self.sd)
+        sd = self.sd.resolve()
+        for folder in (sd, sd / "analysis"):  # what a sandboxed shell tool sees
             folder.chmod(0o555)
             self.addCleanup(folder.chmod, 0o755)
-        r = self.launch("run")
-        self.assertEqual((r.returncode, "The system refused to write" in r.stderr, "Traceback" in r.stderr),
-                         (1, True, False), r.stderr)
-        self.assertIn(".launch.lock", r.stderr)
-        self.assertEqual(self.starts(), [])
+        sd.joinpath("analysis/scores.csv").chmod(0o444)
+        started = len(self.starts())
+        r = self.launch("run", "--runs", "P01-opus")
+        self.assertEqual((r.returncode, "Traceback" in r.stderr), (1, False), r.stderr)
+        self.assertIn(f"The system refused to write {sd}/.launch.lock (Permission denied). The launcher records every "
+                      f'run in the study directory, so "run" did nothing. {SANDBOX_HINT}', r.stderr)
+        self.assertEqual(len(self.starts()), started)
+        planned = self.launch("plan")  # says so before anyone tries
+        self.assertEqual(planned.returncode, 1, planned.stdout + planned.stderr)
+        self.assertIn(f"This shell cannot write to the study directory {sd} (Permission denied)", planned.stdout)
+        self.assertIn(f"so no run can be started from it. {SANDBOX_HINT}", planned.stdout)
         used = self.launch("usage")  # still reports, and says the file was not written
         self.assertEqual((used.returncode, "## By run" in used.stdout, "could not be written" in used.stderr),
                          (0, True, True), used.stderr)
+        # The checks are printed all the same, with one sentence for the file, and the table decides the exit code.
+        checked = run("check_runs.py", self.sd, check=False)
+        self.assertEqual((checked.returncode, checked.stderr),
+                         (0, f"The system refused to write {sd}/analysis/checks.md (Permission denied).\n"))
+        self.assertIn("4 run files of 4 expected; 0 with blocking problems.", checked.stdout)
+        for script, file in (("extract_scores.py", "scores.csv"), ("extract_answers.py", "answers.csv"),
+                             ("analyze.py", "quant.md")):
+            with self.subTest(script):
+                refused = run(script, self.sd, check=False)
+                self.assertEqual((refused.returncode, refused.stderr),
+                                 (1, f"The system refused to write {sd}/analysis/{file} (Permission denied).\n"))
 
     def test_analysts_then_the_writer_run_on_their_own_models_within_a_share_of_the_pool(self):
         from panel_lib import NOTICE
@@ -2770,6 +3258,8 @@ if what == "provision" and (study / "provision-waits").exists():  # the first to
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         worker = os.fork()
         if not worker:
+            if (study / "worker-leaves").exists():  # for a session of its own: no list of the group names it
+                os.setsid()
             time.sleep(30)
             os._exit(0)
         (study / "worker.pid").write_text(str(worker))
@@ -2794,7 +3284,8 @@ if what == "provision":
         password as it does. The first provision to find a file provision-waits takes the file
         away, notes its pid in provision.pid and waits to be stopped, which it notes as
         "stopped <run id>". While the study has a file worker-stays it first starts a process in
-        its own process group that ignores SIGTERM, and notes that one's pid in worker.pid. A
+        its own process group that ignores SIGTERM, and notes that one's pid in worker.pid. With
+        a file worker-leaves as well, that process leaves the group for a session of its own. A
         study that gives a "map" has its accounts from that, and no commands. None for a study
         without accounts."""
         self.sd = self.tmp / "usability"
@@ -2871,7 +3362,9 @@ if what == "provision":
     def test_usability_run_has_a_test_account_of_its_own_that_is_torn_down_once_at_every_final_state(self):
         self.usability({"P01-opus": [["write:all"]],              # done
                         "P01-cx": [["write:1", "end:budget"]],    # limited
-                        "P02-opus": [["end:error"]]},             # failed, retried once, failed again
+                        # Failed two steps into T1, retried once, and failed again one step in, with a message
+                        # of its harness that says the password of its account.
+                        "P02-opus": [["act:2", "end:error"], ["act:1", "fail:The page said pw-P02-opus and closed."]]},
                        personas=2, accounts={}, tasks=self.tasks(checked=True))
         before = self.tree()
         self.assertEqual(self.launch("plan").returncode, 0)
@@ -2898,6 +3391,22 @@ if what == "provision":
                 self.assertEqual(state["state"], {"cookies": [{"name": "sid", "value": f"cookie-{started['run']}"}]})
                 self.assertTrue(state["argv"][1].startswith(str(self.sd / "logs")), state["argv"])
         self.assertEqual(list(self.sd.glob("logs/*.state")), [])
+
+        def held(folder):  # (the lines of the step log in a folder, None without one, and its screenshots)
+            log = folder / "steps.jsonl"
+            return len(log.read_text().splitlines()) if log.exists() else None, sorted(f.name for f in folder.glob("*.png"))
+
+        # The retry is a new session, which logs T1 as attempt 1 again. It begins with evidence that is only its
+        # own: what the first session logged was set aside for the lead, so no step of the two mixes and no
+        # screenshot is written over.
+        self.assertEqual((held(self.sd / "panel/evidence/P02-opus"), held(self.sd / "logs/P02-opus.1.evidence")),
+                         ((2, ["T1-1.png"]), (4, ["T1-1.png", "T1-2.png"])), r.stdout + r.stderr)
+        # What its harness said as it failed held the password. The launcher neither prints nor keeps that
+        # message: it says where the lead can read it.
+        self.assertIn("the harness's message is withheld because it holds a secret of a test account: it is in "
+                      "logs/P02-opus.2.err or logs/P02-opus.2.out", self.entries()["P02-opus"]["reason"])
+        self.assertEqual(("pw-P02-opus" in self.sd.joinpath("logs/P02-opus.2.err").read_text(),
+                          "pw-" in r.stdout + r.stderr + self.sd.joinpath("runs.json").read_text()), (True, False))
         # Torn down: the secrets are gone from the lead's record, and the identifiers stay.
         record = json.loads(self.sd.joinpath("accounts/P01-opus.json").read_text())
         self.assertEqual((record["identifiers"], record["secrets"], record["state"], bool(record["torn_down"])),
@@ -3024,6 +3533,10 @@ if what == "provision":
         r = self.launch("resume", "--runs", "P01-cx", "--extend")
         self.assertEqual((self.states()["P01-cx"], '"attempt": 2' in self.starts()[-1]["stdin"]), ("done", True),
                          r.stdout + r.stderr)
+        # A log whose form earns two notes, one of them with a ";" of its own: steps that go backwards twice.
+        log = evidence / "P02-cx/steps.jsonl"
+        log.write_text(log.read_text() + "not an entry\n" + "".join(
+            json.dumps({"task": "T1", "attempt": 1, "step": n, "phase": "intent"}) + "\n" for n in (1, 2, 1)))
 
         rows, quant, report = self.analysed()
         self.assertEqual({k: (x["stopped"], x["steps"], x["attempts"]) for k, x in rows.items()}, {
@@ -3045,6 +3558,37 @@ if what == "provision":
         self.assertIn("- P01-cx: entries for a task this study does not have (T99).", report)
         # What is not a step, or is of an attempt the launcher never gave, hides none of the steps above.
         self.assertIn("- P02-opus: 1 entry with an attempt number the launcher did not give its task", report)
+        # Each note reaches the analysis whole, whatever it holds: two notes are two problems.
+        self.assertEqual([p["problem"] for p in quant["step_logs"]["problems"] if p["run"] == "P02-cx"],
+                         ["1 line that cannot be read as an entry (line 9)", "step numbers that go backwards "
+                          "(task T1, step 1 after step 2; task T1, step 1 after step 2)"])
+
+    def test_step_log_that_is_emptied_or_cannot_be_read_as_the_runs_own_does_not_switch_the_step_backstop_off(self):
+        self.usability({
+            # Begins two steps of T1, empties its step log, and begins two more under numbers the limit allows.
+            "P01-opus": [["act:2", "wait:read", "empty", "intent:3", "intent:1", "hang"]],
+            # Puts a link where its step log was, so that nothing it does from then on can be read as its own.
+            "P01-cx": [["act:1", "link", "hang"]],
+        }, tasks=self.tasks(steps=3))
+        launcher, output = self.launch_in_background("run")
+
+        def begun(run_id):  # the steps of each task that the launcher has counted in the run's attempt
+            attempts = self.entries()[run_id].get("attempts") or [{}]
+            return (attempts[-1].get("steps") or {}).get("begun")
+
+        self.wait_for(lambda: begun("P01-opus") == {"T1": 2}, "the launcher to have counted the first two steps")
+        self.release("read")
+        self.assertEqual(launcher.wait(timeout=30), 1)
+        entries, said = self.entries(), output.read_text()
+        # The count is the launcher's own, so it goes on from the two steps it had read: four begun, of three.
+        # And a log that cannot be read as the run's own leaves nothing to count, so that run is stopped too.
+        self.assertEqual({run_id: (e["state"], e.get("limited_by"), e["reason"]) for run_id, e in entries.items()}, {
+            "P01-opus": ("limited", "steps", "step limit: task T1, step 4 of 3"),
+            "P01-cx": ("limited", "steps", "step limit: its step log cannot be read as the run's own (it is a "
+                                           "symbolic link), so its steps cannot be counted")}, said)
+        self.assertRegex(said, r"P01-opus: its step log was (cut short, to 0 of|changed at line 1, among) the 4 "
+                               r"lines the launcher had read")
+        self.assertIn("P01-cx: stopping, step limit: its step log cannot be read as the run's own", said)
 
     def test_claim_that_the_success_check_denies_is_flagged_and_a_check_that_fails_to_run_is_no_verdict(self):
         self.usability({"P01-cx": [["write:1", "outcome:gave up", "write:all"]]}, tasks=self.tasks(checked=True),
@@ -3227,7 +3771,8 @@ if what == "provision":
                          r.stdout + r.stderr)
 
     def test_provision_command_that_outlived_its_launcher_is_stopped_before_the_run_is_provisioned_again(self):
-        self.usability({"P01-opus": [["write:1", "end:error"]]}, personas=2, accounts={}, models=[self.CLAUDE])
+        self.usability({"P01-opus": [["write:1", "end:error"], ["wait:hold", "write:all"]]}, personas=3, accounts={},
+                       models=[self.CLAUDE])
         gate, noted = self.sd / "provision-waits", self.sd / "provision.pid"
         gate.touch()
         first, _ = self.launch_in_background("run", "--runs", "P01-opus")
@@ -3247,6 +3792,12 @@ if what == "provision":
         records = [json.loads(f.read_text()) for f in self.sd.glob("accounts/P*.json")]
         self.assertEqual([(x["run"], x["times"], bool(x["secrets"])) for x in records], [("P01-opus", 1, True)])
 
+        # A run that is alive under its watchdog, with no launcher, when the next command is left behind.
+        resumed, _ = self.launch_in_background("resume", "--runs", "P01-opus")
+        self.wait_for(lambda: self.waiting() == {"P01-opus"}, "P01-opus to be under way again")
+        resumed.kill()
+        resumed.wait()
+        alive = self.starts()[-1]["pid"]
         # A command can leave a process of its own behind: here it ends on a SIGTERM that its worker ignores. With
         # the command gone nothing proves whose the worker is, so it is not killed, and nothing is run beside it.
         gate.touch()
@@ -3269,12 +3820,95 @@ if what == "provision":
                          r.stdout + r.stderr)
         self.assertIn(f"process group {command} still holds pid {worker}", r.stderr)
         self.assertIn(f"ps -o pid,pgid,command -p {worker} ", r.stderr)
+        # "stop" stops the run that is alive all the same. It starts no command of the study beside the worker
+        # either, and then says what holds the study up.
+        r = self.launch("stop")
+        self.assertEqual((self.gone(alive), self.states()["P01-opus"], r.returncode,
+                          f"process group {command} still holds pid {worker}" in r.stderr, self.gone(worker),
+                          self.account_calls(), record.read_bytes() if record.exists() else None),
+                         (True, "partial", 1, True, False, calls, on_record), r.stdout + r.stderr)
         # Once the lead has stopped it the group is empty, and the next command carries on from the record.
         os.kill(worker, signal.SIGKILL)
         self.wait_for(lambda: self.gone(worker), "the worker to end")
         r = self.launch("run", "--runs", "P02-opus")
         self.assertEqual((record.exists(), self.account_calls("P02-opus"), self.states()["P02-opus"]),
                          (False, ["provision", "stopped", "teardown", "provision", "teardown"], "done"),
+                         r.stdout + r.stderr)
+
+        # A command holds a lock for as long as it or anything it started lives, which every shell sees whatever
+        # processes it sees. Here its worker leaves the command's group for a session of its own, and keeps the lock.
+        gate.touch()
+        self.sd.joinpath("worker-leaves").touch()
+        noted.unlink()
+        third, _ = self.launch_in_background("run", "--runs", "P03-opus")
+        self.wait_for(lambda: noted.exists() and not gate.exists(), "the third provision command to be under way")
+        command, worker = int(noted.read_text()), int(self.sd.joinpath("worker.pid").read_text())
+        for pid in (command, worker):
+            self.addCleanup(lambda pid=pid: self.gone(pid) or os.kill(pid, signal.SIGKILL))
+        third.kill()
+        third.wait()
+        on_record, calls = record.read_bytes(), self.account_calls()
+        try:
+            here = os.readlink("/proc/self/ns/pid")
+        except OSError:
+            here = None  # none is named where there is no /proc, as on macOS: a command's record names none there
+        self.assertEqual(json.loads(on_record).get("namespace"), here)
+        # To a shell in another process namespace, as on the other side of a sandbox, the id on record names no
+        # process, or someone else's. Here that shell is this one, with the record naming another namespace. The
+        # lock is held, so the command is running where this shell cannot look: nothing is looked up or
+        # signalled under its id, and nothing is run beside it.
+        if here:
+            apart = json.dumps({**json.loads(on_record), "namespace": "pid:[0]"}).encode()
+            record.write_bytes(apart)
+            r = self.launch("run", "--runs", "P03-opus")
+            self.assertEqual((r.returncode, self.gone(command), self.account_calls(),
+                              record.read_bytes() if record.exists() else None), (1, False, calls, apart),
+                             r.stdout + r.stderr)
+            self.assertIn("accounts.provision for P03-opus ran, and that command, or something it started, is still "
+                          "running where this shell cannot look: it holds the command's lock", r.stderr)
+            self.assertIn(f"Run the launcher from the shell that started that command. {SANDBOX_HINT}", r.stderr)
+            record.write_bytes(on_record)
+        # The shell that started it stops the command. The worker is in no group the launcher can list, and its
+        # lock says that it is there all the same: it holds up the next command, as one found in the group does.
+        r = self.launch("run", "--runs", "P03-opus")
+        self.assertEqual((r.returncode, self.gone(command), self.gone(worker), self.account_calls(),
+                          record.read_bytes() if record.exists() else None),
+                         (1, True, False, [*calls, "stopped P03-opus"], on_record), r.stdout + r.stderr)
+        self.assertIn(f"process group {command} is empty, but the command's lock "
+                      f"({self.sd.resolve() / 'accounts/command.lock'}) is still held", r.stderr)
+        # Once nothing holds the lock the command has probably ended, with all it started: a sandbox that ends
+        # takes every process in it. That is no proof, as a process that closed the file it was given holds no
+        # lock, and this shell cannot look where the command ran. So a record of another namespace is never
+        # cleared from here: it is kept as it is, nothing is run beside what may be left, and its ids are not
+        # looked up or signalled, which here are those of a process of this shell that has nothing to do with
+        # the study. The message says what the lead is to do, and the lead does it.
+        os.kill(worker, signal.SIGKILL)
+        self.wait_for(lambda: self.gone(worker), "the worker to end")
+        bystander = subprocess.Popen([sys.executable, "-c", "import sys\nsys.stdin.read()"], stdin=subprocess.PIPE,
+                                     start_new_session=True)  # the leader of a group, which a signal would reach
+        self.addCleanup(bystander.communicate)  # which ends it
+        if here:
+            apart = json.dumps({**json.loads(on_record), "namespace": "pid:[0]", "pid": bystander.pid,
+                                "identity": run_watchdog.identity(bystander.pid)}).encode()
+            record.write_bytes(apart)
+            calls, lock = self.account_calls(), self.sd.resolve() / "accounts/command.lock"
+            r = self.launch("run", "--runs", "P03-opus")
+            self.assertEqual((r.returncode, bystander.poll(), self.account_calls(),
+                              record.read_bytes() if record.exists() else None), (1, None, calls, apart),
+                             r.stdout + r.stderr)
+            self.assertIn(f"accounts.provision for P03-opus ran. Nothing holds the command's lock ({lock}), so it "
+                          "has probably ended, but this shell cannot look where it ran to be sure", r.stderr)
+            self.assertIn(f"Run the launcher from the shell that started that command, which can look. {SANDBOX_HINT} "
+                          "If that shell was in a sandbox that has ended, the command ended with it: delete "
+                          f"{self.sd.resolve() / 'accounts/command.running'} (and {lock}, when it is there) and run "
+                          "this again.", r.stderr)
+            record.unlink()
+            lock.unlink()
+        # With no record the command is over, and what it left is cleared up as after any that was cut short:
+        # the run's own record says that its provisioning did not finish, so it is torn down before the next.
+        r = self.launch("run", "--runs", "P03-opus")
+        self.assertEqual((bystander.poll(), record.exists(), self.account_calls("P03-opus"), self.states()["P03-opus"]),
+                         (None, False, ["provision", "stopped", "teardown", "provision", "teardown"], "done"),
                          r.stdout + r.stderr)
 
     def test_usability_archive_keeps_the_evidence_without_a_secret_or_a_screenshot_that_could_show_one(self):
@@ -3317,21 +3951,23 @@ if what == "provision":
             self.assertNotIn("pw-", r.stdout + r.stderr)
             self.assertEqual((r.returncode, dest.exists()), (1, False))
             named.joinpath("link.md").unlink(missing_ok=True)  # which leaves the folder's name for the next
-        # Nor is a folder passed over: one that cannot be listed is not known to be clean, and one with nothing in
-        # it would be copied under its name. Each is refused in a sentence, before the copy that would have met it.
-        named.joinpath("note.md").unlink()
+        # Nor is a folder passed over that cannot be read: one that cannot be listed is not known to be clean, and
+        # nor is a file in one that can be listed and not searched. Each is refused in a sentence.
         self.addCleanup(lambda: named.is_dir() and named.chmod(0o755))  # so that the test's directory can be removed
-        where = "panel/personas/(a name that is not shown, 9 characters): "
-        for mode, said in ((0, "Permission denied"),
-                           (0o755, "the name of the folder or of a folder above it (a secret of P02-cx's")):
-            if not mode and not os.geteuid():
+        for mode, where in ((0, "panel/personas/(a name that is not shown, 9 characters): "),
+                            (0o400, "panel/personas/(a path of 2 names that is not shown, 17 characters): ")):
+            if not os.geteuid():
                 continue  # nothing is unreadable to root
             named.chmod(mode)
             r = archive()
-            self.assertIn(where + said, r.stderr)
+            self.assertIn(where + "Permission denied", r.stderr)
             self.assertNotIn("pw-", r.stdout + r.stderr)
             self.assertEqual((r.returncode, "Traceback" in r.stderr, dest.exists()), (1, False, False))
-        shutil.rmtree(named)
+        # A folder with nothing in it that is kept is not archived, so the secret in its name goes nowhere: it
+        # stays there, holding only a name that is left out, for the archive that follows.
+        named.chmod(0o755)
+        named.joinpath("note.md").unlink()
+        named.joinpath(".DS_Store").write_bytes(b"")
 
         # The second step of P02-opus's first task entered something secret, and its panellist said so.
         entries = [json.loads(line) for line in clean.splitlines()]
@@ -3340,7 +3976,8 @@ if what == "provision":
         log.write_text("".join(json.dumps(e) + "\n" for e in entries))
         for shot in evidence.glob("*/*.png"):
             shot.write_bytes(png(40, 20))
-        evidence.joinpath("P01-opus/notes.txt").write_text("Not evidence.\n")
+        for stray in ("notes.txt", "what I saw (2).txt"):  # the second is not a name that a message repeats
+            evidence.joinpath("P01-opus", stray).write_text("Not evidence.\n")
         # What a panellist saw after scrolling is a further view of its step, and evidence like the step's own.
         for view in ("P01-opus/T2-1b.png", "P02-opus/T1-2b.png"):
             evidence.joinpath(view).write_bytes(png(40, 20))
@@ -3359,6 +3996,13 @@ if what == "provision":
                       dest.joinpath("evidence/P02-opus/T1-2.png.left-out.txt").read_text())
         self.assertIn("the panellist of P02-cx was given a secret to type",
                       dest.joinpath("evidence/P02-cx/T2-1.png.left-out.txt").read_text())
+        # What was passed over is said with its run, which is the study's own word, whatever its name is.
+        self.assertIn("(P01-opus/notes.txt, P01-opus/(a name that is not shown, 18 characters))", r.stdout)
+        # The folder named with a secret held nothing to keep: it is not in the archive, nor is any empty folder,
+        # and no line names it.
+        self.assertEqual([str(f) for f in dest.rglob("*") if "pw-" in f.name or f.is_dir() and not any(f.iterdir())],
+                         [])
+        self.assertNotIn("pw-", r.stdout + r.stderr)
         # Nothing of the accounts travels but the identifiers, and the archive still loads, checks and scores.
         self.assertEqual([f.name for f in dest.iterdir() if f.name in ("panel", "scratch", "accounts", "logs")], [])
         self.assertEqual([str(f) for f in dest.rglob("*") if f.is_file()
@@ -3378,6 +4022,93 @@ if what == "provision":
             self.assertEqual(archive().returncode, 0)
             self.assertEqual(struct.unpack(">II", dest.joinpath("evidence/P01-opus/T1-1.png").read_bytes()[16:24]),
                              (20, 10))
+
+    def test_archive_of_a_study_it_cannot_write_turns_launchers_away_until_the_round_is_copied(self):
+        if not os.geteuid():
+            self.skipTest("root can write to a read-only directory")
+        self.usability({"P01-opus": [["write:all", "wait:never"]]}, models=[self.CLAUDE])
+        first, _ = self.launch_in_background("run", "--poll", 30)
+        self.wait_for(lambda: self.waiting() == {"P01-opus"}, "the run to have written its file")
+        first.kill()
+        first.wait()
+        # The launcher was killed, and its run with it, as a sandbox that ends takes them: nothing of the study
+        # is alive, and the run is still on record as running.
+        for line in self.sd.joinpath("logs/P01-opus.1.pid").read_text().splitlines()[:2]:  # its watchdog, then its CLI
+            os.kill(int(line.split()[0]), signal.SIGKILL)
+        self.wait_for(lambda: self.processes() == {"P01-opus": "gone"}, "the processes of the run to have gone")
+        for shot in self.sd.glob("panel/evidence/*/*.png"):
+            shot.write_bytes(png(40, 20))
+        # An ImageMagick that waits to be told to go on, and says that it was asked: the archive is then in the
+        # middle of its copy, for as long as the test likes. It reads no screenshot, so each is copied whole.
+        tools, lock_file, dest = self.tmp / "tools", self.sd / ".launch.lock", self.tmp / "archive/panel/round-1"
+        tools.mkdir()
+        tools.joinpath("magick").write_text(
+            f"#!{sys.executable}\nimport sys, time\nfrom pathlib import Path\nhere = Path(__file__).parent\n"
+            "(here / 'copying').touch()\ngive_up = time.time() + 30\n"
+            "while not (here / 'go').exists() and time.time() < give_up:\n    time.sleep(0.01)\nsys.exit(1)\n")
+        tools.joinpath("magick").chmod(0o755)
+
+        def archive(path):
+            return subprocess.Popen(
+                [sys.executable, str(self.scripts / "archive.py"), str(self.sd), "--dest", str(dest)],
+                env={**os.environ, "PATH": str(path)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        # What a sandbox that shows the study read-only gives the archive: nothing of it can be written, the lock
+        # file least of all, so the launcher's lock is not to be had.
+        modes = {path: stat.S_IMODE(path.stat().st_mode) for path in (self.sd, lock_file)}
+        aside = self.tmp / "lock-aside"
+        try:
+            # With no lock file to share, as in a study from before a study kept its lock file, nothing would
+            # keep a launcher from a study that may be at work: one with a run on record as running.
+            lock_file.rename(aside)
+            self.sd.chmod(modes[self.sd] & ~0o222)
+            unprotected = archive(self.bin)
+            said = unprotected.communicate(timeout=30)[1]
+            self.sd.chmod(modes[self.sd])
+            aside.rename(lock_file)
+            self.assertEqual((unprotected.returncode, dest.exists()), (1, False), said)
+            self.assertIn("1 run of this study is on record as running (P01-opus), and this shell can neither write "
+                          f"the study nor hold a lock on {lock_file.resolve()}, so the study cannot be protected from "
+                          "a launcher while it is copied. Nothing was archived.", said)
+            # A launcher that settles the run and ends by itself leaves the study at rest, with the lock file
+            # still there: the archive keeps a shared lock on it while it copies.
+            r = self.launch("stop")
+            self.assertEqual((r.returncode, self.states()["P01-opus"] == "running", lock_file.is_file()),
+                             (0, False, True), r.stdout + r.stderr)
+            before, settled = len(self.starts()), self.states()
+            for path, mode in modes.items():
+                path.chmod(mode & ~0o222)
+            copying = archive(tools)
+            self.background.append(copying)
+            self.wait_for(lambda: tools.joinpath("copying").exists() or copying.poll() is not None,
+                          "the archive to be copying the round")
+            # A launcher outside the sandbox can write the study, as this one can from here on. It is not given
+            # the study while the round is copied: it waits, starts nothing, and says what is in its way.
+            for path, mode in modes.items():
+                path.chmod(mode)
+            r = self.launch("run")
+            self.assertEqual((r.returncode, len(self.starts()) - before, self.states(), copying.poll()),
+                             (1, 0, settled, None), r.stdout + r.stderr)
+            self.assertEqual(r.stderr, "Something is reading this study and keeps a shared lock on "
+                                       f"{lock_file.resolve()} meanwhile, as archive.py does while it copies a study "
+                                       'from a shell that cannot write it, so "run" did nothing. Try again once it '
+                                       "has finished.\n")
+        finally:
+            tools.joinpath("go").touch()
+            for path, mode in modes.items():
+                if path.exists():
+                    path.chmod(mode)
+            if aside.exists():
+                aside.rename(lock_file)
+        said = "".join(copying.communicate(timeout=30))
+        # The round is archived as it was when the archive looked. The lock file is left where it was found, as
+        # it is the study's, and is no part of the round. The next launcher command has the study.
+        self.assertEqual((copying.returncode, dest.joinpath("evidence/P01-opus/T1-1.png").read_bytes(),
+                          json.loads(dest.joinpath("runs.json").read_text())[0]["state"], lock_file.is_file(),
+                          dest.joinpath(".launch.lock").exists()),
+                         (0, png(40, 20), settled["P01-opus"], True, False), said)
+        r = self.launch("status")
+        self.assertIn("Launcher: not running\n", r.stdout)
 
     # ---- follow-up questions (followup.py)
 

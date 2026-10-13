@@ -104,6 +104,12 @@ A session that still answers and whose process the system would not name is left
 its socket directory and the strict policy back in place, and named in "kept". "stop" is safe
 to run twice, and waits for a "start" that is still at work on the same record.
 
+A launcher that settles an attempt whose watchdog recorded another process namespace than its
+own says so (stop() apart, launch.py elsewhere()). The daemon and the browser on record are
+then ids of that namespace, which name no process here, or someone else's: neither is looked
+up or signalled. The sessions are still found by their sockets, where the system names each
+listening process as this namespace knows it, and everything else is done as above.
+
 What "stop" removes, and on what proof. The record is read as any file a stranger could have
 written: nothing is deleted because the record says so.
 - The record itself is opened without following a symbolic link and without waiting for anyone,
@@ -672,11 +678,13 @@ def start(session: dict, cwd, viewport=VIEWPORT, state_file=None, delete_state: 
     return info
 
 
-def stop(log) -> dict:
+def stop(log, apart: bool = False) -> dict:
     """Stop the session of the attempt with this log base: {"found", "left", "kept", "said"}.
     "found" is whether a process of it was still running, "left" the pids still running
     afterwards, "kept" what was left in place, each with its reason, and "said" one line for a
-    person. Raises Refused, with nothing touched, for a record it will not act on."""
+    person. Raises Refused, with nothing touched, for a record it will not act on. apart is for
+    an attempt that was recorded in another process namespace than the caller's: the daemon and
+    the browser on record are then not looked up or signalled (module docstring)."""
     with held(record_of(log), create=False) as f:
         info = load(f, log) if f else {}
         if not info.get("socket_dir"):
@@ -686,14 +694,15 @@ def stop(log) -> dict:
         if info.get("stopped"):
             return {"found": False, "left": info.get("left") or [], "kept": info.get("kept") or [],
                     "said": "its browser session was stopped already"}
-        return ended(f, info, log)
+        return ended(f, info, log, apart)
 
 
-def ended(f, info: dict, log) -> dict:
+def ended(f, info: dict, log, apart: bool = False) -> dict:
     """End the session of a record and what it left, and note it on the record (module docstring,
-    "What "stop" does" and "What "stop" removes")."""
+    "What "stop" does" and "What "stop" removes"). With apart, without the daemon and the browser
+    on record, which are ids of another process namespace."""
     policy, path = policy_of(log), info["socket_dir"]
-    daemon, chrome = info.get("daemon"), info.get("browser")
+    daemon, chrome = (None, None) if apart else (info.get("daemon"), info.get("browser"))
     found = alive(daemon) or alive(chrome)
     daemons, asked, said_yes, allowed = [daemon] if daemon else [], [], [], False
     folder, unproven = proven(info)

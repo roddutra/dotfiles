@@ -7,8 +7,9 @@ was agreed with the user is part of the record) and followups.json (the question
 "## Follow-up <n>" sections of the persona files, which check_runs.py reads). Dropped: the site
 copies, in panel/sites or <study>/sites (the archive keeps the concepts once, separately),
 panel/materials (regenerate with capture.py), panel/scratch, logs/ (raw harness output, which
-contains everything a panellist read and wrote), .launch.lock and .capture-*, the scratch of a
-capture. Only what KEEP names is copied, so nothing else beside study.json travels.
+contains everything a panellist read and wrote), .launch.lock, which every study has and which
+stays behind, and .capture-*, the scratch of a capture. Only what KEEP names is copied, so
+nothing else beside study.json travels.
 
 forms.json is written to the archive too: the form of each "files" concept, from its source files
 while they can be read, else from the study's own record (panel_lib.py, "Forms"). An archive
@@ -16,11 +17,31 @@ made without --concepts has no source to tell a PDF from an image, and analyze.p
 
 Every markdown file kept gets the synthetic panel notice (panel_lib.NOTICE) when it lacks it:
 under the heading the file opens with, or at the very top when it opens with anything else. A
-file that has the line anywhere is left as it is, so archiving twice changes nothing. CSV, JSON
+file that has the line anywhere is left as it is, so archiving twice changes nothing, and the
+closing line says the same both times: how many markdown files of the round carry the notice,
+not how many were given it. CSV, JSON
 and every other kind of file are copied byte for byte, because a line added to one would break
 whatever reads it, and so is everything --concepts copies. An archived round still analyses.
 Archiving to a place that holds an earlier archive replaces what has the same name. For a concept
 file whose content differs, a line says so.
+
+The kept files are found by one walk (kept_files()) and copied one by one, those the walk found
+and no others, each opened without following a symbolic link at its name or at a folder above
+it (open_kept()), as the walk opens each folder it lists: a panellist can write under panel/,
+and nothing there may bring a file from outside the study into the archive, or the names of
+one into its plan. A folder is in the archive only as part of the path of a file, so one that
+holds nothing kept, or only a __pycache__ or a .DS_Store, is not archived.
+The round is built in a scratch folder beside the destination (scratch_beside()), and nothing of
+an earlier archive is copied into it. Everything that reads the study happens there, so an
+archive that stops at a refusal below, or at a file that changed under the copy, leaves the
+destination as it was. Then the round is published (publish()). To a destination that is not
+there, in one rename. Into one that holds an earlier archive, file by file, each moved into
+place whole: what has the same name is replaced, the rest stays, and a folder left with nothing
+in it is removed. One that cannot be removed, or cannot be listed to see what it holds, is
+named on stderr with the system's reason and left: the round is archived all the same, and no
+mode is changed to get at it. That is not one step: stopped part of the way, it leaves some
+files of this round and the others as the earlier archive had them, each of them whole, and
+archiving again finishes it.
 
 With --concepts, also copies each concept's source to <study-root>/concepts/<id>/ and takes one
 full-page screenshot per page into <study-root>/screenshots/ via snapshot.py. What the source is
@@ -36,16 +57,28 @@ depends on the concept's kind (panel_lib.py, "Concept kinds"):
           cannot be opened is skipped, and the line for the concept says how many of its pages
           were screenshotted and how many were not
 
-Two refusals, each with nothing archived. A study that a launcher has (launch.py, followup.py or
+Three refusals, each with nothing archived. A study that a launcher has (launch.py, followup.py or
 init_study.py --force) is refused: archive.py takes the launcher's own lock on the study
 (launch.Lock) and holds it until the round is copied, so no follow-up can be asked or settled
-under the copy. A study with a follow-up question that is not settled is refused too, checked
+under the copy. Of a study it cannot write, as in a sandbox that shows it read-only, it keeps a
+shared lock on the same file for as long (take_study()), which turns every launcher away. The
+file is there in a study at rest: the scaffold makes it and no launcher removes it (launch.Lock).
+One case is left with neither lock, a study from before that which has no lock file, read from
+a shell that cannot make one: it refuses that one with a run on record as running, and copies
+any other with nothing to keep a first launcher from starting under the copy. A study with a
+follow-up question that is not settled is refused too, checked
 under that lock: a follow-up attempt with no end in runs.json, or a record in followups.json
 with no outcome or with a decision still to carry out. Until a launcher has settled it, the
 persona file may hold what will be rejected and put back (the snapshot rule in panel_lib.py),
 and an archive has no logs/ to put it back from. A study no launcher ever ran (native mode) is
 locked for the copy like any other, and an archived round, which has no logs/, has nothing to
-settle and is copied as it is.
+settle and is copied as it is. The third is of a study with something at or under a kept name
+that cannot be read as the study's own: a symbolic link, which could bring in a file from outside
+the study, a FIFO, a socket or a device, which is no file and may never answer, and a file or a
+folder that may not be read or listed. Each is named with the reason, and none is followed or
+opened. Most are found by the walk, before anything is copied. A file that can no longer be read
+when it is copied, or that a review study, which is scanned for nothing, first opens then, ends
+the archive in the same words.
 
 A usability study has no concepts and no key.md. Its archive holds the other kept files and its
 evidence, panel/evidence/<run id>/ as evidence/<run id>/ (panel_lib.run_evidence):
@@ -63,33 +96,32 @@ evidence, panel/evidence/<run id>/ as evidence/<run id>/ (panel_lib.run_evidence
                 PNG image. The step log entry stays, so the finding can still be cited. A run
                 that was given no secret loses only what is marked
 Nothing else in an evidence folder is copied, a link least of all, and a line counts what was
-passed over. An evidence folder is opened and read without following a symbolic link, at the
-evidence root, at the run's folder or at a file's name (panel_lib.evidence_fd): a panellist can
-write under panel/, and a link there must never bring a file from outside the study into the
-archive. Never copied: panel/scratch (a panellist's account.json), accounts/ (the account
-records, the fingerprint record and what a command of the study wrote when it failed), saved
-browser states and logs/. The archived study.json
+passed over and names the first few, each after its run id. An evidence folder is opened and
+read without following a symbolic link, at the evidence root, at the run's folder or at a file's
+name (panel_lib.evidence_fd): a panellist can write under panel/, and a link there must never
+bring a file from outside the study into the archive. Never copied: panel/scratch (a panellist's
+account.json), accounts/ (the account records, the fingerprint record and what a command of the
+study wrote when it failed), saved browser states and logs/. The archived study.json
 has every secret of accounts.map replaced with panel_lib.REDACTED, identifiers kept, and a line
 says so: it loads as before, and nothing else in it is changed. A study without a map has its
 study.json copied byte for byte.
 
-Three more refusals for a usability study, all before anything is copied and under the lock:
+Two more refusals for a usability study, both before anything is copied and under the lock, and
+the third above reaches further:
   - a test account is still in force (its run is not in a final state, or its teardown failed):
     the archive would describe credentials that work
   - a secret value of any run's test account is in a file the archive would hold, or in the name
-    of a screenshot, of a kept file or of a kept folder, one with nothing in it included: every
-    kept file is scanned, the step logs and the archived study.json among them (panel_lib.py,
-    "Secrets"). Each file is named with its lines and whose secret it was, never the value
-  - a file or a folder the archive would hold cannot be read as the study's own: a step log or
-    another kept file that may not be read, a kept folder that may not be listed, a symbolic
-    link among the kept files, or an evidence folder or the evidence root that is one. Each is
-    named with the reason, and none is followed: a file that could not be scanned and a folder
-    that could not be listed are not known to be clean, and a link could bring in a file from
-    outside the study
+    of a screenshot, of a kept file or of a folder above one: every kept file is scanned, the
+    step logs and the archived study.json among them (panel_lib.py, "Secrets"). Each file is
+    named with its lines and whose secret it was, never the value. A folder that holds nothing
+    kept is not archived, so its name goes nowhere
+  - what cannot be read as the study's own includes a step log or another kept file that could
+    not be scanned, and an evidence folder or the evidence root that is a symbolic link or no
+    folder: a file that could not be scanned is not known to be clean
 A panellist can write under panel/, so the path of a file or a folder there may be its own text,
-in the name of a folder as much as of a file. No message, and no note kept in place of a
-screenshot, repeats one unchecked: each path and each screenshot's name stands as
-panel_lib.shown_path() shows it, whole when it is clean, and otherwise as far down as it is,
+in the name of a folder as much as of a file, in a study of either type. No message, and no note
+kept in place of a screenshot, repeats one unchecked: each path and each screenshot's name stands
+as panel_lib.shown_path() shows it, whole when it is clean, and otherwise as far down as it is,
 with what is below described: "panel/personas/(a path of 2 names that is not shown, 17
 characters)". A path with a secret value in it is said with whose secret it was.
 
@@ -100,11 +132,16 @@ Usage: archive.py <study-dir> --dest <archive>/customer-research/<date-topic>/pa
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
+import fcntl
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -112,6 +149,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import accounts  # noqa: E402
 import launch  # noqa: E402
 import panel_lib as pl  # noqa: E402
+import run_watchdog as watchdog  # noqa: E402
 import snapshot  # noqa: E402
 
 KEEP = {  # study path -> archive path
@@ -125,13 +163,15 @@ KEEP = {  # study path -> archive path
     "panel/_panel-instructions.md": "panel-instructions.md",
     "panel/personas": "personas",
 }
-IGNORED = ("__pycache__", ".DS_Store")  # the names copy() leaves out of a folder, whatever is under them
+IGNORED = ("__pycache__", ".DS_Store")  # the names left out of a folder, whatever is under them
 SCALE = 50     # per cent of its size a step's screenshot is brought down to, as snapshot.py does a concept's page
 COLOURS = 256  # and the colours it keeps: a screenshot stays a PNG, under the name its step log gives it
 PNG = b"\x89PNG\r\n\x1a\n"  # what every PNG file begins with
 
 
 def copy(src: Path, dst: Path):
+    """Copy a concept's source, which is the lead's own, for --concepts. Nothing of the study is
+    copied with this: it follows a link (copy_kept())."""
     if src.is_dir():
         shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*IGNORED))
     elif src.exists():
@@ -156,8 +196,10 @@ def copy_items(items: list[tuple[str, Path]], target: Path) -> list[str]:
 
 
 def add_notice(dst: Path) -> int:
-    """Give every markdown file at or under dst the synthetic panel notice. Returns how many lacked it."""
-    added = 0
+    """Give every markdown file at or under dst the synthetic panel notice. Returns how many carry
+    it. Not how many lacked it: the round is built afresh each time, so that would count files
+    that are no different from the ones an earlier archive published."""
+    carry = 0
     files = sorted(dst.rglob("*.md")) if dst.is_dir() else [dst] if dst.is_file() and dst.suffix == ".md" else []
     for f in files:
         try:
@@ -166,20 +208,50 @@ def add_notice(dst: Path) -> int:
             continue
         if pl.NOTICE not in text:
             f.write_text(pl.with_notice(text))
-            added += 1
-    return added
+        carry += 1
+    return carry
 
 
 def take_study(sd: Path):
     """Take the launcher's lock on the study, so that no launcher asks or settles a follow-up
     while the round is copied. Exits while a launcher has the study. Returns the lock, to
-    release once the round is copied, or None for a study directory that cannot be written (an
-    archived round kept read-only): no launcher can have that one either."""
+    release once the round is copied, or None for a study that is archived with no lock at all.
+
+    A study directory that cannot be written gives no such lock: an archived round kept
+    read-only, which no launcher of this shell can have either, or a study that a sandbox shows
+    read-only, which may be at work outside it. The archive then keeps a shared lock on the
+    lock file, which a descriptor that only reads can take (launch.Lock.share()): no launcher
+    is given the study from before the looks below until the round is copied, so none can
+    start a run in between and die, leaving the copy to be made over a run that is alive. It
+    is refused while a launcher has the study, and, under that lock, while a run is alive where
+    this shell cannot look, which the lock of its watchdog says (launch.Lock.blind()).
+
+    The lock file is there to share in a study at rest: the scaffold makes it, and a launcher
+    that ends leaves it (launch.Lock.make(), release()). No lock can be had where there is
+    none all the same, in a study from before that or in a round that was archived, or where
+    no flock can tell. The same is then looked for with nothing held, and nothing keeps a
+    launcher from starting afterwards. A study with a run on record as running, read last, is
+    then refused: a launcher that came and went since the first look left it so, and a study
+    that may be at work cannot be protected from one while it is copied. Any other is
+    archived as it is, as a round that was archived read-only always was: that one case is
+    not protected from a first launcher that starts while it is copied."""
     lock = launch.Lock(sd)
     if lock.acquire("archive", 0, must=False):
         return lock
-    if lock.holder(sd) or os.access(sd, os.W_OK):
+    if os.access(sd, os.W_OK):
         lock.refuse()
+    if lock.share("archive"):
+        return lock
+    try:
+        running = [e["run"] for e in pl.read_runs(sd) if launch.in_flight(e)] if (sd / "runs.json").exists() else []
+    except ValueError:  # not valid JSON: it names no run
+        running = []
+    if running:
+        raise SystemExit(
+            f"{pl.plural(len(running), 'run')} of this study {pl.agree(len(running), 'is', 'are')} on record as "
+            f"running ({', '.join(running)}), and this shell can neither write the study nor hold a lock on "
+            f"{lock.path}, so the study cannot be protected from a launcher while it is copied. Nothing was "
+            f"archived. Archive it from a shell that can write the study. {pl.SANDBOX_HINT}")
     return None
 
 
@@ -230,46 +302,298 @@ def left_out(sd: Path, known: dict, run: str, name: str, evidence: dict, given: 
     return f"{pl.shown_path(known, name)} was left out of this archive: {why}.\n"
 
 
-def kept_files(sd: Path) -> tuple[list[Path], list[Path], list[tuple[Path, str]]]:
-    """Every file the KEEP names would bring into an archive, study.json aside, every folder they
-    would bring with nothing in it, and what among and above them is not read, each with why: a
-    symbolic link, because copying follows a link, so one could bring in a file from outside the
-    study, and a folder that cannot be listed, because nothing says what it holds and copying
-    would stop at it. A folder that holds a file or a folder is in the path of each, so between
-    them the files and the empty folders have the path of every folder an archive would hold.
-    Nothing is looked for at or under a name of IGNORED: copy() brings none of it."""
-    files, empty, unread = [], [], []
+def kept_files(sd: Path) -> tuple[list[tuple[Path, Path]], list[tuple[Path, str]]]:
+    """Every file the KEEP names bring into an archive, each with the path the archive holds it
+    under, and what among them is not read, each with why. One walk says what everything at or
+    under a kept name is, without following a link and without opening a file:
+      a regular file   is kept
+      a folder         is listed, and the walk goes on in it. An archive has a folder only as
+                       part of the path of a file, so one that holds nothing kept is not in it
+      a symbolic link  is not read: what it points at could be a file from outside the study
+      anything else    (a FIFO, a socket, a device) is not read: opening one can wait for ever
+    and whatever cannot be told apart, or a folder that cannot be listed, is not read either,
+    with the system's reason: nothing says what it is or holds. Nothing is looked for at or
+    under a name of IGNORED, and a name of KEEP that the study does not have is passed over.
 
-    def unlisted(err: OSError):  # what os.walk() would pass over without a word
-        unread.append((Path(err.filename), pl.unread(err)))
+    A panellist can put a link where a folder was between any two looks at it, so no folder is
+    listed by its path. Each is opened from the study directory down, no part of the way through
+    a link (panel_lib.folder_fd), what it holds is listed from that descriptor, and each entry
+    is told apart by its name in that descriptor: what is listed is the folder that was opened,
+    whatever now has its name. One opened this way that is a folder no longer is not read. Two
+    descriptors are open at most, however deep the study goes."""
+    files, unread = [], []
 
-    for kept in (k for k in KEEP if k != "study.json"):
-        top = sd / kept
-        if top.is_symlink() or not top.is_dir():
-            files += [top] if top.is_symlink() or top.is_file() else []  # a link is refused when it is read
+    def kind(folder: int, name: str) -> str:  # what an entry of an open folder is: "file", "folder" or why not
+        mode = os.lstat(name, dir_fd=folder).st_mode
+        return ("file" if stat.S_ISREG(mode) else "folder" if stat.S_ISDIR(mode) else
+                "it is a symbolic link" if stat.S_ISLNK(mode) else "it is neither a regular file nor a folder")
+
+    def why(err: OSError) -> str:  # folder_fd() names the part that is a link, which is not repeated
+        return ("it or a folder above it is a symbolic link, or no folder" if isinstance(err, pl.Unsafe)
+                else pl.unread(err))
+
+    def listed(f: Path) -> list[tuple[str, str]]:  # (name, kind) of what a folder holds, in name order
+        folder, found = pl.folder_fd(sd, f.relative_to(sd).parts), []
+        try:
+            for name in sorted(set(os.listdir(folder)) - set(IGNORED)):
+                try:
+                    found.append((name, kind(folder, name)))
+                except OSError as err:
+                    found.append((name, pl.unread(err)))
+        finally:
+            os.close(folder)
+        return found
+
+    for kept, held in KEEP.items():
+        *above, name = Path(kept).parts
+        try:
+            folder = pl.folder_fd(sd, above)
+            try:
+                what = kind(folder, name)
+            finally:
+                os.close(folder)
+        except FileNotFoundError:  # the study has no such name, or no panel/ to hold it
             continue
-        for folder, folders, names in os.walk(top, onerror=unlisted):
-            folders[:] = [name for name in folders if name not in IGNORED]  # so none of these is walked
-            own = 0  # what the folder holds that is no link: a link is refused, so it keeps no folder from being empty
-            for name in sorted([*folders, *(name for name in names if name not in IGNORED)]):
-                f = Path(folder) / name
-                if f.is_symlink():
-                    unread.append((f, "it is a symbolic link"))
+        except OSError as err:
+            what = why(err)
+        todo = [(sd / kept, Path(held), what)]
+        while todo:
+            f, to, what = todo.pop()
+            if what == "file":
+                files.append((f, to))
+            elif what != "folder":
+                unread.append((f, what))
+            else:
+                try:  # the last is taken first
+                    todo += [(f / name, to / name, what) for name, what in reversed(listed(f))]
+                except OSError as err:
+                    unread.append((f, why(err)))
+    return files, unread
+
+
+def refuse_unread(plan: dict, unread: list[tuple[Path, str]]):
+    """Exit, with nothing archived, when a file or a folder the archive would hold cannot be read
+    as the study's own: unread, each with why. Each path stands as panel_lib.shown_path() shows
+    it, because any part of one under panel/ may be a panellist's own text."""
+    if not unread:
+        return
+    sd = plan["sd"]
+
+    def said(f: Path, why: str) -> str:  # a reason of pl.evidence_fd()'s begins with the path itself
+        own = str(f.relative_to(sd))
+        return f"  {pl.shown_path(plan['known'], own)}{why[len(own):] if why.startswith(own) else ': ' + why}"
+
+    raise SystemExit(
+        f"{pl.plural(len(unread), 'file or folder', 'files or folders')} the archive would hold cannot be read "
+        "as the study's own, so nothing was archived:\n" + "\n".join(said(f, why) for f, why in unread)
+        + "\nNothing was read through a symbolic link"
+        + (", and a file that could not be scanned is not known to be clean" if plan["scanned"] else "")
+        + ". Put a plain file or folder that can be read at each name, or remove it, then archive again.")
+
+
+def review_plan(cfg: dict) -> dict:
+    """What archiving a review study takes, decided before anything is copied: the files it
+    keeps (kept_files()). Exits, with nothing archived, when something among them cannot be read
+    as the study's own. It has no test accounts, so no secret is known and no file is scanned."""
+    files, unread = kept_files(cfg["_dir"])
+    plan = {"sd": cfg["_dir"], "known": pl.known_secrets(cfg), "scanned": False, "files": files, "study": None}
+    refuse_unread(plan, unread)
+    return plan
+
+
+def open_kept(sd: Path, f: Path) -> int:
+    """Open a file that kept_files() listed, to copy it: a descriptor. Every folder between the
+    study directory and the file is opened without following a symbolic link, and so is the
+    file (panel_lib.open_below), as a persona file is opened by whatever reads one: a link put
+    there since the walk brings in nothing from outside the study. Raises OSError, with the
+    reason (panel_lib.unread()), when a folder on the way is a link or no folder, the file is a
+    link or no regular file, or either may not be read."""
+    return pl.open_below(sd, f, most=sys.maxsize)  # copied, not read whole: its size is no matter
+
+
+def copy_kept(plan: dict, work: Path):
+    """Copy the kept files into work: the files the plan lists (kept_files()), each to the path
+    the archive holds it under, and nothing else. No folder is walked again, and none is made
+    but to hold a file. Each file is opened without following a link (open_kept()) and written
+    to a file made anew (run_watchdog.fresh()), with its modification time. study.json is
+    written from the plan's text when the plan has one. Exits as refuse_unread() does, once
+    every file has been tried, when one cannot be read after all: one that has changed since
+    the plan was made, or one of a review study, which is scanned for nothing and so is first
+    opened here."""
+    unread = []
+    for f, to in plan["files"]:
+        target = work / to
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if plan["study"] and to == Path("study.json"):
+            with os.fdopen(watchdog.fresh(target), "w") as out:
+                out.write(plan["study"][0])
+            continue
+        try:
+            source = os.fdopen(open_kept(plan["sd"], f), "rb")
+        except OSError as err:
+            unread.append((f, pl.unread(err)))
+            continue
+        with source:
+            st = os.fstat(source.fileno())
+            with os.fdopen(watchdog.fresh(target), "wb") as out:
+                shutil.copyfileobj(source, out)
+        os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+    refuse_unread(plan, unread)
+
+
+def claim(scratch: Path) -> int | None:
+    """Take the lock that says a scratch folder is in use: flock on the folder itself, which the
+    system lets go when the process that has it ends, however it ends. A descriptor that holds
+    the lock, or None when another process has it, or the folder has gone. No name and no file
+    says whose a scratch folder is, so none can be taken for another's. Raises OSError for a
+    folder that cannot be opened or, where flock does not work, locked."""
+    try:
+        fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    ours = False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        ours = os.path.samestat(os.fstat(fd), os.lstat(scratch))  # not one removed since it was opened
+    except (BlockingIOError, FileNotFoundError):
+        pass
+    finally:
+        if not ours:
+            os.close(fd)
+    return fd if ours else None
+
+
+def clear_scratch(dest: Path):
+    """Remove the scratch folders that archives to dest left beside it when they were killed:
+    those whose lock no process has (claim()). One that is locked is another archive at work,
+    and one that cannot be opened or locked is not known to be left behind: both stay."""
+    for left in sorted(f for f in dest.parent.iterdir() if f.name.startswith(f".{dest.name}.archive-")):
+        with contextlib.suppress(OSError):
+            lock = claim(left)
+            if lock is not None:
+                shutil.rmtree(left, True)
+                os.close(lock)
+
+
+@contextlib.contextmanager
+def scratch_beside(dest: Path):
+    """The folder a round is built in, before any of it is at dest: <dest's name> in a scratch
+    folder of its own, <dest's folder>/.<dest's name>.archive-<random>, beside dest and so on
+    its filesystem, where a move is a rename. Everything that reads the study happens while the
+    round is built, so whatever stops that leaves dest untouched (publish() is what changes it).
+    The scratch folder holds only this round: nothing of an earlier archive is copied into it.
+
+    Two archives can run to one destination at once (the study lock is the study's, and a study
+    kept read-only is archived under a lock that is shared, or under none), so each has a scratch
+    folder of its own name, locked while its archive lives (claim()). Whatever ends the caller,
+    an interruption too, the scratch folder is removed, with the folders that were made above
+    dest to hold it when nothing was put in them. Only a kill leaves one behind, unlocked, and
+    the next archive to that destination removes it (clear_scratch())."""
+    made = [folder for folder in (dest.parent, *dest.parent.parents) if not folder.exists()]  # the deepest first
+    scratch = lock = None
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        clear_scratch(dest)
+        while lock is None:  # None: another archive took it for one left behind, before it was locked
+            scratch = Path(tempfile.mkdtemp(prefix=f".{dest.name}.archive-", dir=dest.parent))
+            try:
+                lock = claim(scratch)
+            except OSError:  # no flock here: no archive can take it for one left behind, and one left behind stays
+                break
+        work = scratch / dest.name  # made with the modes of any folder, where the scratch folder is this user's alone
+        work.mkdir()
+        yield work
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, True)
+        if lock is not None:
+            os.close(lock)
+        for folder in made:
+            try:
+                folder.rmdir()
+            except OSError:  # it holds the archive, or something that is not this archive's
+                break
+
+
+def other_kind(plan: dict) -> list[Path]:
+    """The archive paths that the evidence of this round takes the place of: for each screenshot
+    the name of the other kind, the screenshot itself where a note now stands for it, and its
+    note where the screenshot now travels. An earlier archive may hold one, of a screenshot
+    since marked or a note since lifted, and publish() removes it."""
+    return [Path("evidence", x["run"], name if name in x["notes"] else name + pl.LEFT_OUT)
+            for x in plan["runs"] for name in x["evidence"]["screenshots"]]
+
+
+def publish(work: Path, dest: Path, other: list[Path]) -> list[str]:
+    """Put the round built in work at dest. Where nothing is at dest, in one step: work is
+    renamed to it, and dest is the whole round or is not there. Where an earlier archive is, a
+    folder cannot take its place in one step, and no state is made in which it has been moved
+    away: each file of the round is moved into dest under its own name (os.replace), so every
+    file in dest is whole at every moment, a file of the same name is replaced and every other
+    file there stays. First what the round holds under the other kind of name is removed
+    (other), and last every folder under dest that holds nothing, which an archive never has,
+    the ones an older archive.py left there too.
+
+    A folder that holds nothing and cannot be removed (its parent may not be written), or one
+    that cannot be listed, so that nothing says whether it holds anything, is left as it is.
+    The round is all there by then, so that fails nothing: returns a line for each, with the
+    system's reason, for the caller to say. No mode is changed to get at one. A folder that
+    holds something is never tried, because the system may refuse that with the same reason
+    as one it may not remove.
+
+    So publishing over an earlier archive is not one step. Stopped part of the way, by an error,
+    an interruption or a kill, it leaves a dest in which some files are this round's and the
+    others the earlier archive's, each of them whole, and a screenshot or its note may be
+    missing. Archiving again finishes it. Raises OSError when the one step fails, with dest as
+    it was, and exits saying the above when a later one does."""
+    if not os.path.lexists(dest):
+        os.rename(work, dest)
+        return []
+    gone, left = set(), []  # the folders removed, and a line for each that was left
+
+    def unlisted(err: OSError):  # os.walk() passes over a folder it cannot list, and says so only here
+        if err.errno == errno.ENOENT:
+            gone.add(err.filename)
+        else:
+            left.append(f"A folder in the archive could not be listed ({pl.unread(err)}), so it was left as it is, "
+                        f"empty or not: {err.filename}")
+
+    try:
+        for name in other:
+            (dest / name).unlink(missing_ok=True)
+        for folder, _, names in os.walk(work):
+            to = dest / Path(folder).relative_to(work)
+            to.mkdir(exist_ok=True)
+            for name in names:
+                os.replace(Path(folder, name), to / name)
+        for folder, folders, names in os.walk(dest, topdown=False, onerror=unlisted):
+            if Path(folder) == dest or names or any(os.path.join(folder, name) not in gone for name in folders):
+                continue  # it holds something
+            try:
+                os.rmdir(folder)
+            except OSError as err:
+                if err.errno in (errno.ENOTEMPTY, errno.EEXIST):  # something was put in it since it was listed
                     continue
-                own += 1
-                if name in names:
-                    files.append(f)
-            if not own:
-                empty.append(Path(folder))
-    return files, empty, unread
+                if err.errno != errno.ENOENT:  # ENOENT: it has gone already
+                    left.append("An empty folder was left in the archive, because it could not be removed "
+                                f"({pl.unread(err)}): {folder}")
+                    continue
+            gone.add(folder)
+        return left
+    except OSError as err:
+        raise SystemExit(
+            f"The archive could not be finished ({err.strerror or 'a file could not be moved into place'}). "
+            f"{dest} holds an earlier archive, and the files of this round were being moved into it one by one: "
+            "some are there now and the others are as the earlier archive had them, each of them whole. Archive "
+            "again to finish it.") from None
 
 
 def usability_plan(cfg: dict) -> dict:
-    """What archiving a usability study takes, decided before anything is copied: the text of
-    its study.json when that is not copied as it is, what is kept and left out of each run's
-    evidence folder, and the lines to print. Exits, with nothing archived, while a test account
-    is in force, when a file the archive would hold has a secret value, and when one cannot be
-    read as the study's own (module docstring)."""
+    """What archiving a usability study takes, decided before anything is copied: the files it
+    keeps (kept_files()), the text of its study.json when that is not copied as it is, what is
+    kept and left out of each run's evidence folder, and the lines to print. Exits, with nothing
+    archived, while a test account is in force, when a file the archive would hold has a secret
+    value, and when one cannot be read as the study's own (module docstring)."""
     sd = cfg["_dir"]
     records = accounts.records(sd)
     known = pl.known_secrets(cfg, [r for r in records if accounts.in_force(r)])
@@ -285,15 +609,11 @@ def usability_plan(cfg: dict) -> dict:
     runs = [e for e in pl.read_runs(sd) if e["role"] == "panellist"] if (sd / "runs.json").exists() else []
     given = {r["run"] for r in records if r.get("secrets_given")}
     given |= {e["run"] for e in runs if (e.get("account") or {}).get("secrets_given")}
-    plan = {"study": study, "runs": [], "lines": lines, "sd": sd, "known": known}
-    texts, empty, unread = kept_files(sd)
+    files, unread = kept_files(sd)
+    plan = {"study": study, "runs": [], "lines": lines, "sd": sd, "known": known, "scanned": True, "files": files}
 
     def at(f: Path) -> str:  # a path in a message: any part of one under panel/ may be a panellist's own text
         return pl.shown_path(known, f.relative_to(sd))
-
-    def unreadable(f: Path, why: str) -> str:  # a reason of pl.evidence_fd()'s begins with the path itself
-        own = str(f.relative_to(sd))
-        return f"  {at(f)}{why[len(own):] if why.startswith(own) else ': ' + why}"
 
     found, strays = [], []  # the files with a secret value, each with where; what an evidence folder holds besides
     try:
@@ -323,10 +643,13 @@ def usability_plan(cfg: dict) -> dict:
             found.append(f"  {at(where)}: the name of {pl.plural(named, 'screenshot')}")
         plan["runs"].append({"run": e["run"], "evidence": evidence, "given": e["run"] in given,
                              "notes": {name: note for name, note in notes.items() if note}})
-        strays += [f"{e['run']}/{name}" for name in evidence["other"]]
-    plan["strays"] = [pl.shown(known, name, "a name that is not shown") for name in strays + loose]
+        # The run id is the study's own word, and stands: only the name, a panellist's text, may be described.
+        strays += [pl.shown_path(known, f"{e['run']}/{name.rstrip('/')}") + "/" * name.endswith("/")
+                   for name in evidence["other"]]
+    plan["strays"] = strays + [pl.shown(known, name, "a name that is not shown") for name in loose]
 
-    for f, text in [*((f, None) for f in texts), (sd / "study.json", study[0] if study else None)]:
+    for f, to in files:
+        text = study[0] if study and to == Path("study.json") else None  # as the archive will hold it
         owners = pl.secrets_in(known, f.relative_to(sd).as_posix())  # a file is archived under its own name
         if owners:
             found.append(f"  {at(f)}: the name of the file or of a folder above it ({pl.secret_owners(owners)})")
@@ -338,17 +661,7 @@ def usability_plan(cfg: dict) -> dict:
             continue
         if hits:
             found.append(f"  {at(f)}: {pl.secret_places(hits)}")
-    for f in empty:  # copied too, under its own name, and in the path of no file
-        owners = pl.secrets_in(known, f.relative_to(sd).as_posix())
-        if owners:
-            found.append(f"  {at(f)}: the name of the folder or of a folder above it ({pl.secret_owners(owners)})")
-    if unread:
-        raise SystemExit(
-            f"{pl.plural(len(unread), 'file or folder', 'files or folders')} the archive would hold cannot be read "
-            "as the study's own, so nothing was archived:\n"
-            + "\n".join(unreadable(f, why) for f, why in unread)
-            + "\nNothing was read through a symbolic link, and a file that could not be scanned is not known to be "
-            "clean. Put a plain file or folder that can be read at each name, or remove it, then archive again.")
+    refuse_unread(plan, unread)
     if found:
         raise SystemExit(
             f"A secret value of a test account is in {pl.plural(len(found), 'file or folder', 'files or folders')} "
@@ -380,9 +693,10 @@ def shrink(target: Path, convert: list[str]) -> bool:
 def copy_evidence(plan: dict, dest: Path) -> list[str]:
     """Copy each run's step log and screenshots to dest/evidence/<run id>/, with a note in place
     of each screenshot the plan leaves out. Each file is read as the plan read it, without
-    following a link (panel_lib.open_evidence). What an earlier archive left under a name that
-    is now the other kind, a screenshot since marked or a note since lifted, is removed.
-    Returns the lines to print."""
+    following a link (panel_lib.open_evidence), and one that cannot be read as it was then ends
+    the archive as refuse_unread() does. What an earlier archive holds under a name that is now
+    the other kind is not here to remove: publish() does that (other_kind()). Returns the lines
+    to print."""
     convert = next(([tool] for tool in ("magick", "convert") if shutil.which(tool)), None)
     sd, jobs, logs, withheld = plan["sd"], [], 0, []
 
@@ -390,7 +704,11 @@ def copy_evidence(plan: dict, dest: Path) -> list[str]:
         return pl.shown_path(plan["known"], f"{run}/{name}")
 
     def bring(run: str, name: str, target: Path):
-        with os.fdopen(pl.open_evidence(sd, run, name), "rb") as source, open(target, "wb") as copy:
+        try:
+            source = os.fdopen(pl.open_evidence(sd, run, name), "rb")
+        except OSError as err:  # it has changed since the plan read it
+            refuse_unread(plan, [(pl.evidence_dir(sd, run) / name, pl.unread(err))])
+        with source, open(target, "wb") as copy:
             shutil.copyfileobj(source, copy)
 
     for x in plan["runs"]:
@@ -403,7 +721,6 @@ def copy_evidence(plan: dict, dest: Path) -> list[str]:
             logs += 1
         for name in evidence["screenshots"]:
             note = x["notes"].get(name)
-            (target / (name if note else name + pl.LEFT_OUT)).unlink(missing_ok=True)
             if note:
                 (target / (name + pl.LEFT_OUT)).write_text(note)
                 withheld.append((x, name))
@@ -460,28 +777,31 @@ def main():
     cfg = pl.load_study(args.study_dir)
     sd = cfg["_dir"]
     dest = args.dest.resolve()
-    noticed, said = 0, []
+    usability, said, left = cfg["type"] == "usability", [], []
     lock = take_study(sd)
     try:
         refuse_unsettled(sd)
-        plan = usability_plan(cfg) if cfg["type"] == "usability" else None
-        for src, dst in KEEP.items():
-            if plan and plan["study"] and src == "study.json":
-                dest.mkdir(parents=True, exist_ok=True)
-                (dest / dst).write_text(plan["study"][0])
-                continue
-            copy(sd / src, dest / dst)
-            noticed += add_notice(dest / dst)
-        if plan:
-            said = plan["lines"] + copy_evidence(plan, dest)
+        plan = usability_plan(cfg) if usability else review_plan(cfg)
         forms = pl.file_forms(cfg)
-        if forms:  # with none known, a record an earlier archive left there stays
-            pl.write_forms(dest, forms)
+        try:
+            with scratch_beside(dest) as work:
+                copy_kept(plan, work)
+                noticed = sum(add_notice(work / held) for held in KEEP.values())
+                if usability:
+                    said = plan["lines"] + copy_evidence(plan, work)
+                if forms:  # with none known, a record an earlier archive left there stays
+                    pl.write_forms(work, forms)
+                left = publish(work, dest, other_kind(plan) if usability else [])
+        except OSError as err:  # in building the archive: what could not be read of the study has its own message
+            raise SystemExit(f"The archive could not be written ({err.strerror or 'a file could not be copied'}), so "
+                             f"nothing was archived: {dest} is as it was.") from None
     finally:  # the round is copied: what follows reads the concepts, which no launcher writes
         if lock:
             lock.release()
+    if left:  # the round is archived whole: what could not be tidied away is said, and fails nothing
+        print(*left, sep="\n", file=sys.stderr, flush=True)
     print(*said, sep="\n", end="\n" if said else "")
-    if args.concepts and plan:
+    if args.concepts and usability:
         print("A usability study has no concepts, so --concepts copied nothing.")
     elif args.concepts:
         root = dest.parents[1] if dest.parent.name == "panel" else dest
@@ -510,8 +830,8 @@ def main():
                      f"{pl.agree(got, 'it is', 'they are')} now, which may no longer be what the panel saw." if got
                      else " The archive has nothing of how it looked."))
     size = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
-    print(f"Archived {sd.name} to {dest} ({size / 1e6:.1f} MB). Synthetic panel notice added to "
-          f"{pl.plural(noticed, 'markdown file')} that lacked it.")
+    print(f"Archived {sd.name} to {dest} ({size / 1e6:.1f} MB). {pl.plural(noticed, 'markdown file')} of this round "
+          f"{pl.agree(noticed, 'carries', 'carry')} the synthetic panel notice.")
 
 
 if __name__ == "__main__":

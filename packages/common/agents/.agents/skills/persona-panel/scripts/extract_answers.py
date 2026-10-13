@@ -12,7 +12,8 @@ Both files start with the same eight columns, which say whose row it is. "run" i
 "persona" the persona's slug, "model" the model key, and "complete" 1 when
 panel_lib.run_progress says the run is complete. The other four mean what they mean in
 scores.csv. analyze.py tallies complete runs only. A run has rows for the concepts it wrote a
-section for, so a run with no file has none.
+section for, so a run with no file has none, nor one whose file cannot be read as its own (a
+symbolic link or a FIFO at its name: panel_lib.persona_bytes, and check_runs.py says why).
 
 answers.csv. "question" is the question's place in "find_the_answer", from 1. "verdict" is Found,
 Partly or Not found, "where" what the panellist wrote after it, and "raw" the entry as written.
@@ -37,6 +38,9 @@ A run whose latest follow-up question is not settled yet is read as it stood bef
 Works on a live study and on an archived one. Run it after extract_scores.py, before analyze.py.
 
 A usability study has none of these fields, and is refused in one line.
+
+Where the system refuses one of the two files (a sandboxed shell tool, a study directory that is
+not yours to write), one sentence names the file and the reason, and the exit code is 1.
 
 Usage: extract_answers.py <study-dir>
 """
@@ -66,10 +70,9 @@ def main():
     sd = cfg["_dir"]
     questions = cfg["find_the_answer"]
     runs = pl.run_records(sd, cfg)
-    (sd / "analysis").mkdir(exist_ok=True)
     verdicts, entries = Counter(), Counter()
-    with open(sd / "analysis" / "answers.csv", "w", newline="") as f, \
-            open(sd / "analysis" / "lines.csv", "w", newline="") as g:
+    with pl.output(sd / "analysis" / "answers.csv", newline="") as f, \
+            pl.output(sd / "analysis" / "lines.csv", newline="") as g:
         aw, lw = csv.writer(f), csv.writer(g)
         aw.writerow([*WHO, "question", "question_text", "verdict", "where", "raw"])
         lw.writerow([*WHO, "entry", "status", "text", "forward_to", "note", "raw"])

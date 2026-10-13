@@ -1,9 +1,14 @@
 """What launch.py says about a study without starting anything: the plan, and the usage record.
 
 launch.py owns the commands (plan, usage); this module works out the facts and words them. It
-knows no harness: everything about one comes from its runner's capabilities(), check() and
-model_status().
+knows no harness: everything about one comes from its runner's capabilities(), check(),
+shell_check() and model_status().
 
+    usable(name)                  whether a runner's CLI can be used from this shell: installed
+                                  and signed in, and able to do a run here at all. The same
+                                  judgement stops "plan", "run" and a follow-up
+    unwritable_study(cfg)         why this shell cannot start a run as far as the study directory
+                                  goes: the launcher records every run there
     unfit(cfg, entry)             why a run or job cannot be started on its runner as study.json
                                   has it. The same judgement stops "plan" and "run"
     materials(cfg)                what is captured under panel/materials, per concept and in all
@@ -139,6 +144,37 @@ def table(rows: list[list], indent: str = "  ") -> list[str]:
 
 
 # ---------------------------------------------------------------- what a runner cannot do
+
+def usable(name: str) -> dict:
+    """Whether a runner's CLI can be used from the shell this command runs in: {"ok", "message",
+    "shell"}. First its check(): installed, signed in, its options still accepted. Then, when
+    that passes, its shell_check(): whether this shell lets the CLI do a run at all, which a
+    sandboxed shell tool may not while the check passes. "shell" is False when that is what
+    stops it, and the message then says what the CLI cannot do here and the two ways out
+    (pl.SANDBOX_HINT). None when the check itself failed, and the message is the CLI's. Neither
+    makes a model call. The plan asks here, and so does every command that starts a process
+    (launch.fitness()): what one refuses, the others do."""
+    runner = runners.get(name)
+    checked = runner.check()
+    if not checked["ok"]:
+        return {"ok": False, "message": checked["message"], "shell": None}
+    here = runner.shell_check()
+    if here["ok"]:
+        return {"ok": True, "message": checked["message"], "shell": True}
+    return {"ok": False, "shell": False,
+            "message": f"{checked['message'].strip().rstrip('.')}, but from this shell it "
+                       f"{stop(here['message'])} {pl.SANDBOX_HINT}"}
+
+
+def unwritable_study(cfg: dict) -> str | None:
+    """Why nothing can be started from this shell as far as the study directory goes, as the end
+    of a sentence, or None when a file can be written there. The launcher's own part of what a
+    shell must allow (usable() asks each runner for its CLI's): it records every run in the
+    study directory, and every run writes there."""
+    why = runners.unwritable(cfg["_dir"])
+    return (f"this shell cannot write to the study directory {cfg['_dir']} ({why}), where the launcher records "
+            f"every run and every run writes, so no run can be started from it. {pl.SANDBOX_HINT}") if why else None
+
 
 def label(entry: dict) -> str:
     """The name of an entry's model entry: its model key for a panellist run, its role for a job
@@ -399,7 +435,9 @@ def usability_lines(plan: dict) -> list[str]:
     out += ["  Step limits: a panellist is told each task's limit and keeps to it itself. At the limit it records "
             '"ran out of steps" and goes on to the next task.',
             "    The launcher is the backstop: it reads each run's step log while the run is in flight, and an "
-            "intent entry numbered above its task's limit stops the run as limited, after the grace period."]
+            "intent entry numbered above its task's limit stops the run as limited, after the grace period.",
+            "    It counts the steps a log shows, and stops a run whose log it cannot read: a run that logs no step "
+            "is bounded by its time limit alone."]
     checked = [t for t in u["tasks"] if t["success_check"]]
     if checked:
         out += [f"  Success checks: {plural(len(checked), 'task')} of {len(u['tasks'])} "
@@ -835,8 +873,8 @@ def ceiling(runs: list[dict], jobs: list[dict], pool: dict) -> dict:
 
 def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolded: bool, launcher: dict | None) -> dict:
     """The plan as one JSON-ready object. Starts no run and writes nothing to the study: the
-    only processes are each runner's check() and model_status(), which make no model call. Either
-    may let a harness refresh its own login.
+    only processes are each runner's check(), shell_check() and model_status(), which make no
+    model call. A check or a model status may let a harness refresh its own login.
 
     runs are the panellist entries (runs.json's, or the ones study.json plans when scaffolded
     is false), jobs the analyst and writer entries study.json plans with anything a launcher
@@ -871,6 +909,9 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         if problem:
             missing.append(f"{stop(problem)} init_study.py and capture.py stop on it, so no run can start.")
     problems += pl.usability_problems(cfg)  # a command of the study whose file is not there
+    locked = None if native else unwritable_study(cfg)  # a native study starts nothing through the launcher
+    if locked:
+        problems.append(locked[0].upper() + locked[1:])
     no_poppler = pl.poppler_missing(cfg)
     if no_poppler and short:
         missing.append(f"{no_poppler}. capture.py cannot turn a PDF into materials without it.")
@@ -919,9 +960,10 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     checked = []
     for name in dict.fromkeys(m["runner"] for m in models if not native):
         caps = runners.get(name).capabilities()
-        check = runners.get(name).check()
+        check = usable(name)  # installed, signed in, and able to do a run from this shell
         checked.append({
             "runner": name, "provider": caps["provider"], "ok": bool(check["ok"]), "message": check["message"],
+            "shell": check["shell"],
             "concurrency": pl.runner_concurrency(cfg, name, caps["default_concurrency"]),
             "entries": [m["entry"] for m in models if m["runner"] == name],
             "billing_env_set": [v for v in caps["billing_env"] if os.environ.get(v)],  # names, never values

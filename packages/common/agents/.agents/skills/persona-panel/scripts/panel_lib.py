@@ -22,7 +22,8 @@ Standard library only. Every script takes a study directory laid out as:
                               <study>/sites/ instead, where no panellist can read one. A "url" or
                               "files" concept has no copy (concept kinds, below)
         materials/concept-<L>/<page>/
-        personas/<pid>-<slug>--<key>.md, or ...--<key>-r<n>.md for replicate n > 1
+        personas/<pid>-<slug>--<key>.md, or ...--<key>-r<n>.md for replicate n > 1. None is
+                              read or written through a symbolic link (persona_bytes(), below)
         scratch/<run id>/     and, in a usability study with accounts, its account.json: what
                               the run's panellist is told of its test account (below)
         evidence/<run id>/    usability only: the run's step log, steps.jsonl, and the
@@ -41,10 +42,13 @@ Standard library only. Every script takes a study directory laid out as:
                               in total)
     <study>/logs/             launch.py only: <run id>.<attempt>.in, .out and .err, the input and
                               output of each CLI process it started; .pid, where the attempt's
-                              watchdog records itself and the CLI before the CLI runs, and,
+                              watchdog records itself and the CLI before the CLI runs, the
+                              process namespace they run in where the system names one, and,
                               for as long as it runs, the command that starts the attempt's
-                              browser session; .end, the end record the watchdog writes when the
-                              attempt has ended (both formats in run_watchdog.py); for an
+                              browser session; .lock, an empty file the watchdog holds a lock
+                              on for as long as it lives, which is how any shell tells that it
+                              does; .end, the end record the watchdog writes when the
+                              attempt has ended (all three in run_watchdog.py); for an
                               attempt of a run that may browse, .browser, the record of the
                               browser session its watchdog starts before the CLI and stops
                               after it, .policy, that session's action policy while it is up
@@ -59,10 +63,17 @@ Standard library only. Every script takes a study directory laid out as:
                               attempt that put a follow-up question, .before, the persona file
                               as it was, kept until the attempt's end is in runs.json (the
                               snapshot rule, below), and .rejected.md, the file as a rejected
-                              follow-up left it. A process that never
+                              follow-up left it; and, in a usability study,
+                              <run id>.<attempt>.evidence, a folder: what the run's evidence
+                              folder held after that attempt, moved here when the run was
+                              next started afresh (launch.py). It is the lead's alone, and
+                              nothing reads it as evidence. A process that never
                               ran as the CLI is no attempt: its files stay until the next
                               attempt, which has the same number, replaces them
-    <study>/.launch.lock      launch.py only: present while a launcher has the study
+    <study>/.launch.lock      launch.py only: the study's lock file, which a launcher holds a
+                              lock on while it has the study and which names that launcher
+                              meanwhile. Made empty by init_study.py, emptied by a launcher
+                              that ends, and never removed (launch.py, Lock)
     <study>/.capture-<pid>-*/ capture.py only: the scratch folder of one capture, named after its
                               process, where each page or item is captured before it moves
                               under panel/materials, beside a record of any move under way. One
@@ -177,7 +188,12 @@ launcher's to issue: it is on the run's entry in runs.json ("task_attempts", iss
 before the message is made. An entry that carries a number the launcher did not issue, or that
 is not in the form of an entry (no whole step number, a phase that is neither), is left out
 before anything is read from the log (counted()): it supersedes no step, and gives a run no
-more steps (steps_begun(), the launcher's backstop). step_notes() says what is wrong with a
+more steps (steps_begun(), the launcher's backstop). The backstop keeps its own count of the
+steps a run's process has begun, in runs.json, so nothing a panellist does to its log takes a
+step off it, and it stops a run whose log is there and cannot be read as the run's own. It
+counts what a log shows and no more: a run that logs no step is bounded by its time limit. A
+run that is started afresh, in a new session, starts with an empty evidence folder: what the
+folder held is moved to logs/ first. step_notes() says what is wrong with a
 log's form. A screenshot is saved beside the log as <task>-<step>.png, or
 <task>-a<attempt>-<step>.png from the second attempt on. What a panellist saw of the same page
 after scrolling is a further view of the step, named with a letter after the step number
@@ -193,6 +209,15 @@ without following a symbolic link and without waiting, as an open of a FIFO woul
 least of all, and what is refused is named with the reason (run_evidence() "refused" and
 "log_problem"). The step log, the backstop, the scan, check_runs.py, extract_scores.py and
 archive.py all read through the same functions.
+
+A persona file is read the same way, in a review study as in a usability study: persona_bytes()
+is the one way one is opened, by every script that reads one, and it follows no link, at the
+file or at a folder between the study directory and it (open_below(), which archive.py copies
+through too), reads a regular file only, and never waits. What stands at a persona file's name
+and cannot be read so is no persona file: read_persona() reads it as no file, so its run is not
+done and nothing is extracted from it, and check_runs.py blocks, naming the file and the reason
+(persona_problem()). What a launcher writes to a persona file, to settle a follow-up, goes
+through no link either (write_persona()), nor does a scaffold's (init_study.py).
 
 Secrets. A secret of a test account (a password, a token, a one-time code) may be in no persona
 file, step log, analysis file or archive. check_runs.py and archive.py scan for every value any
@@ -286,10 +311,22 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   asked its watchdog to stop at a task's step limit: {"limit": "steps", "task",
                   "attempt", "step", "of", "at", "grace"}, the intent entry that went past the
                   limit, when the launcher decided and the grace it asked with. It is on
-                  record before the request, and is what makes the run "limited".
-                  "step_entries" is there only for an attempt of a usability run: how many
-                  entries its step log held when it started. The backstop counts what the
-                  attempt added after them.
+                  record before the request, and is what makes the run "limited". In place
+                  of the task, the attempt, the step and the limit it has "unread", the
+                  reason, when the run was stopped because its step log could not be read as
+                  the run's own.
+                  "steps" is there only for an attempt of a usability run: the backstop's own
+                  count, which only goes up. "begun" is {task id: the steps of it the
+                  process has begun}, as far as the launcher read the log while the process
+                  was alive. "seen", there while the attempt runs, is the marks of the
+                  log's lines as last read, which start as the lines the log held when the
+                  attempt started: the backstop counts what the attempt adds after them.
+                  "rewritten" is there when the log stopped holding what had been read of
+                  it, cut short or changed at an earlier line: how many times. What the log
+                  held from the first changed line on was then counted on top.
+                  "evidence_aside" is there only for an attempt that started a usability run
+                  afresh over what earlier attempts had left in its evidence folder: where
+                  under logs/ that was moved to.
                   "browser_left" ({"found", "left", "kept"}) is there only for an attempt
                   whose watchdog did not stop its browser session, so that a launcher did,
                   or whose session was stopped with something left: whether a session was
@@ -298,8 +335,8 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   "watchdog" when the watchdog stopped it, and with "refused", the reason,
                   when the session's record could not be trusted and nothing was touched.
                   "was" is there only while the attempt runs: the run's state, pid, session,
-                  reason and reset_at before it, so that an attempt whose process never ran
-                  as the CLI can be taken back.
+                  reason, reset_at and task_attempts before it, so that an attempt whose
+                  process never ran as the CLI can be taken back.
                   A followup attempt has three more: "followup" (the follow-up's number),
                   "answer" (its outcome, as in followups.json) and "usage" (what the harness
                   reported for this process alone, each figure null when it gave none). It
@@ -318,7 +355,9 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   attempts. A follow-up has an allowance of its own (limits.followup)
     reason        why the run stopped, in a sentence; null while running and when done. For a
                   blocked run it carries the harness's own message, which says whether it was
-                  a usage limit, a rate limit or a capacity refusal
+                  a usage limit, a rate limit or a capacity refusal. In a usability study a
+                  harness's message that holds a secret of a test account is not kept: the
+                  reason says that it is withheld, and names the files in logs/ that have it
     reset_at      epoch seconds when the limit that blocked the run lifts, when the harness
                   said, else null
     extended      times "resume --extend" gave the run one more allowance of its limits
@@ -343,7 +382,9 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
     task_attempts usability only, for a run that was continued with a task under way: {task
                   id: n}, the attempt the launcher told the run to log that task under
                   (runs.py issue_attempts()). A task it does not name is on attempt 1. An entry
-                  of the step log with any other number counts for nothing (counted())
+                  of the step log with any other number counts for nothing (counted()). Gone
+                  again when the run is started afresh: a new session is on attempt 1 of
+                  every task, in a step log that holds nothing else
     released      usability only: epoch seconds when the lead let go of the run's test account
                   with "launch.py release" while the run was unfinished. "run" and "resume"
                   leave such a run alone unless it is named with --released, which takes the
@@ -352,6 +393,11 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   harness. A purged session cannot be resumed. Its usage stays in "sessions"
     lost          {session id: epoch seconds}: the sessions a resume found gone from the
                   harness. Treated as purged ones are
+    unsaved       {session id: epoch seconds}: the sessions that the runner, when their process
+                  ended, found its harness had not kept (parse_result() "session_saved" false:
+                  a harness that could not write where it keeps sessions). Such a run cannot be
+                  resumed or asked a follow-up, and "status" says so. Not noted for a failed
+                  run, which "run" starts afresh in a new session
 
 Job entries. launch.py adds one entry per analyst and writer job (synthesis_jobs()) when
 "run --role analyst" or "run --role writer" plans them, and rewrites one while its job is
@@ -385,7 +431,7 @@ process, each time one ends, and when a launcher takes over a study, and compare
 the last one recorded:
 
     hashes     {persona file, relative to the study directory: SHA-256 of its content, or null
-               when the file is missing}: the last value seen
+               when the file is missing or cannot be read as the run's own}: the last value seen
     changes    one object per change made while the file's own run was not running and other
                processes were: "file", "run" (the owner), "at" (epoch seconds, when the launcher
                saw it) and "running" (the runs and jobs alive since the hash before)
@@ -466,7 +512,9 @@ The snapshot rule. From the moment a follow-up attempt is in runs.json until its
 the persona file may hold what settling will reject. Until then nothing reads the file for
 scores, answers, lines, checks or progress: read_persona() reads the copy made before the
 question, logs/<run id>.<attempt>.before, and every reader goes through it (load_runs(),
-run_records(), launch.py and runs.py). A script that read a copy says so in one line per run
+run_records(), launch.py and runs.py). The copy is the launcher's own, and is made and opened as
+the other files an attempt keeps in logs/ are (keep_copy(), read_copy(): run_watchdog.py,
+fresh() and opened()). A script that read a copy says so in one line per run
 (unsettled_lines()). An archive has no logs/, so there the file itself is read, and archive.py
 refuses a study with a follow-up that is not settled.
 
@@ -491,7 +539,9 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import fnmatch
 import hashlib
+import io
 import ipaddress
 import json
 import math
@@ -507,7 +557,7 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from run_watchdog import Unsafe  # a file that is not read: a symbolic link, or no regular file
+from run_watchdog import Unsafe, fresh, opened  # Unsafe: a file that is not read, a link or no regular file
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 ASSETS = SKILL_DIR / "assets"
@@ -638,6 +688,9 @@ NOTICE = ("Synthetic panel: the feedback in this study was generated by AI perso
           "It is not user research.")
 # The name roster.py gives a skeleton persona. init_study.py refuses a study that still has one.
 SKELETON_NAME = "TODO"
+# What every script says after a refusal that a sandboxed shell tool can cause: the two ways out.
+SANDBOX_HINT = ("If your shell tool is sandboxed, ask your harness to run this command outside its sandbox, or run "
+                "launch.py from a terminal.")
 
 
 # ---------------------------------------------------------------- wording
@@ -1215,18 +1268,13 @@ def unread(err: OSError) -> str:
     return err.strerror or str(err)
 
 
-def evidence_fd(study_dir: Path, run: str | None) -> int:
-    """Open a run's evidence folder (evidence_dir()) to read from it, or with run None the
-    evidence root that holds every run's: a descriptor, for evidence_names() and for opening
-    the files in it by dir_fd. A panellist can write under panel/, and so can put a symbolic
-    link where the evidence root or its own folder was: each part of the way below the study
-    directory is opened without following one, so nothing outside the study is ever listed or
-    read through this. Raises FileNotFoundError when there is no such folder, and Unsafe, naming
-    the part, when one is a link or no folder."""
-    live = (Path(study_dir) / "panel").is_dir()
-    parts = (*(Path(EVIDENCE).parts if live else (Path(EVIDENCE).name,)), *([] if run is None else [run]))
-    if run is not None and (not run or run in (".", "..") or "/" in run or "\x00" in run):
-        raise Unsafe("the run id is no folder name")
+def folder_fd(study_dir: Path, parts) -> int:
+    """Open a folder below the study directory, given by the names on the way down to it: a
+    descriptor, to list it and to open what is in it by dir_fd. A panellist can write under
+    panel/, and so can put a symbolic link where a folder was: each part of the way below the
+    study directory is opened without following one, so nothing outside the study is ever
+    listed, read or written through this. Raises FileNotFoundError when there is no such
+    folder, and Unsafe, naming the part, when one is a link or no folder."""
     fd = os.open(study_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         for i, part in enumerate(parts):
@@ -1244,6 +1292,53 @@ def evidence_fd(study_dir: Path, run: str | None) -> int:
         os.close(fd)
         raise
     return fd
+
+
+def parts_below(study_dir: Path, path) -> tuple[str, ...]:
+    """The names on the way from the study directory down to a path under it. Raises Unsafe for
+    a path that is not under it, or that goes back up."""
+    try:
+        parts = Path(path).relative_to(study_dir).parts
+    except ValueError:
+        parts = ()
+    if not parts or ".." in parts:
+        raise Unsafe("it is not a path under the study directory")
+    return parts
+
+
+def open_below(study_dir: Path, path, most: int = READ_MOST) -> int:
+    """Open a file under the study directory that a panellist may have put there, to read it: a
+    descriptor. Every folder between the study directory and the file is opened without
+    following a symbolic link (folder_fd()), and so is the file, without waiting
+    (open_regular()): nothing outside the study is read through this, whatever was put at the
+    file's name or at a folder's since anyone last looked. Raises OSError, with the reason
+    (unread()): FileNotFoundError when there is no such file, Unsafe when a folder on the way
+    is a link or no folder, or the file is a link, no regular file or holds more than `most`
+    bytes, and the system's own error when either may not be read."""
+    *folders, name = parts_below(study_dir, path)
+    try:
+        folder = folder_fd(study_dir, folders)
+    except Unsafe:  # which names the folder, and a name under panel/ may be a panellist's own text
+        raise Unsafe("a folder above it is a symbolic link, or no folder") from None
+    try:
+        return open_regular(name, dir_fd=folder, most=most)
+    finally:
+        os.close(folder)
+
+
+def evidence_fd(study_dir: Path, run: str | None) -> int:
+    """Open a run's evidence folder (evidence_dir()) to read from it, or with run None the
+    evidence root that holds every run's: a descriptor, for evidence_names() and for opening
+    the files in it by dir_fd. A panellist can write under panel/, and so can put a symbolic
+    link where the evidence root or its own folder was: each part of the way below the study
+    directory is opened without following one (folder_fd()), so nothing outside the study is
+    ever listed or read through this. Raises FileNotFoundError when there is no such folder,
+    and Unsafe, naming the part, when one is a link or no folder."""
+    live = (Path(study_dir) / "panel").is_dir()
+    parts = (*(Path(EVIDENCE).parts if live else (Path(EVIDENCE).name,)), *([] if run is None else [run]))
+    if run is not None and (not run or run in (".", "..") or "/" in run or "\x00" in run):
+        raise Unsafe("the run id is no folder name")
+    return folder_fd(study_dir, parts)
 
 
 def evidence_names(study_dir: Path, run: str | None) -> list[tuple[str, str]]:
@@ -1281,21 +1376,25 @@ def read_evidence(study_dir: Path, run: str, name: str) -> bytes:
         return f.read()
 
 
-def step_log_stamp(study_dir: Path, run: str) -> tuple[int, int] | None:
-    """The size and change time of a run's step log, to tell whether it has changed since it was
-    last read, None when there is none that can be read as the run's. Asked without following a
-    link, as the log is read."""
+def step_log_stamp(study_dir: Path, run: str) -> tuple | None:
+    """What tells whether a run's step log has changed since it was last read: which file it is,
+    its size, and when it and its mode last changed. None when the run has no log, or no
+    evidence folder. Asked without following a link, as the log is read. Raises OSError, with
+    the reason (unread()), when there is something at the log's name, or at its folder's, that
+    cannot be read as the run's: a symbolic link, a FIFO, a folder that may not be opened."""
     try:
         folder = evidence_fd(study_dir, run)
-    except OSError:
+    except FileNotFoundError:
         return None
     try:
         st = os.stat(STEP_LOG, dir_fd=folder, follow_symlinks=False)
-    except OSError:
+    except FileNotFoundError:
         return None
     finally:
         os.close(folder)
-    return (st.st_size, st.st_mtime_ns) if stat.S_ISREG(st.st_mode) else None
+    if not stat.S_ISREG(st.st_mode):
+        raise Unsafe("it is a symbolic link" if stat.S_ISLNK(st.st_mode) else "it is not a regular file")
+    return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
 
 
 def step_log(study_dir: Path, run: str) -> str | None:
@@ -1309,6 +1408,14 @@ def step_log(study_dir: Path, run: str) -> str | None:
         return None
 
 
+def step_lines(study_dir: Path, run: str) -> tuple[list[str], str]:
+    """A run's step log as the launcher's backstop reads it: the lines that are whole, each ended
+    by a line feed, and what stands after the last of them, which a panellist may still be
+    writing. Both empty when the run has no log. Raises OSError as step_log() does."""
+    *lines, rest = (step_log(study_dir, run) or "").split("\n")
+    return lines, rest
+
+
 def read_steps(study_dir: Path, run: str) -> tuple[list[dict], list[int]]:
     """A run's step log: its entries in file order, and the 1-based numbers of the lines that
     are no entry (not a JSON object, or one with no task). Both empty when there is no log, or
@@ -1316,9 +1423,13 @@ def read_steps(study_dir: Path, run: str) -> tuple[list[dict], list[int]]:
     as the panellist wrote it, with "attempt" filled in: 1 where it gave none, and 0, which is
     never issued (counted()), where it gave one that is no whole number above 0."""
     try:
-        lines = (step_log(study_dir, run) or "").splitlines()
+        return steps_of((step_log(study_dir, run) or "").splitlines())
     except OSError:
         return [], []
+
+
+def steps_of(lines: list[str]) -> tuple[list[dict], list[int]]:
+    """read_steps(), for lines of a step log that were read already."""
     entries, odd = [], []
     for i, line in enumerate(lines, start=1):
         if not line.strip():
@@ -1392,7 +1503,7 @@ def task_steps(entries: list[dict], issued: dict[str, int]) -> dict[str, dict]:
     return out
 
 
-def steps_begun(cfg: dict, added: list[dict]) -> dict | None:
+def steps_begun(cfg: dict, added: list[dict], begun: dict[str, int] | None = None) -> dict | None:
     """The backstop of a task's step limit (launch.py), over the entries one process of a run
     added to its step log: {"task", "step", "of"} for the first "intent" entry that begins a
     step beyond its task's limit, None when none does. An entry is beyond the limit when its
@@ -1400,8 +1511,12 @@ def steps_begun(cfg: dict, added: list[dict]) -> dict | None:
     for that task. Every intent of a task of the study counts, whatever attempt it carries: the
     process logs one attempt of a task, the one the launcher issued, so an entry that names
     another neither starts the count again nor escapes it. "step" is the entry's own number
-    when that is above the limit, else how many steps of the task the process has begun."""
-    limits, begun = {t["id"]: t["steps"] for t in cfg["tasks"]}, {}
+    when that is above the limit, else how many steps of the task the process has begun.
+
+    begun is {task id: the steps of it the process had begun before these entries}, for a
+    caller that reads the log a part at a time. It is added to, so the count is the caller's to
+    keep and goes on from one part to the next whatever becomes of the log between them."""
+    limits, begun = {t["id"]: t["steps"] for t in cfg["tasks"]}, {} if begun is None else begun
     for e in added:
         n = step_number(e)
         if e.get("phase") != "intent" or n is None or e["task"] not in limits:
@@ -1451,6 +1566,33 @@ def step_notes(cfg: dict, entries: list[dict], odd: list[int], issued: dict[str,
     if back:
         notes.append(f"step numbers that go backwards ({'; '.join(back[:3])}{'; ...' if len(back) > 3 else ''})")
     return notes
+
+
+def join_notes(notes: list[str]) -> str:
+    """Several notes as one cell of a CSV file (runs.csv, "step_notes"), for split_notes() to
+    take apart again: the notes with "; " between them, and in a note a backslash before each
+    ";" and each backslash of its own, so that nothing a note holds reads as the end of it. A
+    note with no text at all is written as a backslash and a 0."""
+    return "; ".join(note.replace("\\", "\\\\").replace(";", "\\;") or "\\0" for note in notes)
+
+
+def split_notes(cell: str) -> list[str]:
+    """The notes join_notes() put in a cell, whatever each holds. A cell written before a note's
+    own ";" had its backslash holds none, and reads as it always did, apart at every "; ": a
+    note of that time that has one of its own (step numbers that went backwards more than
+    once) still comes apart there. extract_scores.py writes the cell anew."""
+    notes, note, chars = [], "", iter(cell)
+    for c in chars:
+        if c == "\\":  # what comes after it is the note's own
+            c = next(chars, "")
+            note += "" if c == "0" else c
+        elif c == ";":  # the end of a note, with the space after it
+            next(chars, None)
+            notes.append(note)
+            note = ""
+        else:
+            note += c
+    return [*notes, note] if cell else []
 
 
 _OUTCOMES = "|".join(r"\s+".join(map(re.escape, o.split())) for o in USABILITY_OUTCOMES)
@@ -2209,6 +2351,24 @@ def read_runs(study_dir: Path) -> list[dict]:
     return runs
 
 
+def not_written(path: Path, err: OSError) -> str:
+    """What a script says when the system will not let it write one of its own files under the
+    study directory, as a sandboxed shell tool does: one sentence that names the file and gives
+    the system's reason. Never a traceback."""
+    return f"The system refused to write {path} ({unread(err)})."
+
+
+def output(path: Path, **how):
+    """Open one of a script's output files for writing, in a folder that is made when it is not
+    there. Where the system refuses either, the script ends with not_written()'s sentence and
+    exit code 1."""
+    try:
+        Path(path).parent.mkdir(exist_ok=True)
+        return open(path, "w", **how)
+    except OSError as err:
+        raise SystemExit(not_written(path, err))
+
+
 def write_atomic(path: Path, text: str):
     """Replace a file in one step, so a reader or a killed writer never sees half of it."""
     path = Path(path)
@@ -2234,10 +2394,11 @@ def read_modifications(study_dir: Path) -> dict:
     return {"hashes": record.get("hashes") or {}, "changes": record.get("changes") or []}
 
 
-def file_hash(path: Path) -> str | None:
-    """SHA-256 of a file's content, None when there is no such file."""
+def file_hash(study_dir: Path, path: Path) -> str | None:
+    """SHA-256 of a persona file's content (persona_bytes()), None when there is no such file, or
+    none that can be read as its run's own."""
     try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        return hashlib.sha256(persona_bytes(study_dir, path)).hexdigest()
     except OSError:
         return None
 
@@ -2257,11 +2418,12 @@ def sessions_of(entry: dict) -> list[str]:
 
 def held_sessions(study_dir: Path, runs: list[dict], now: float) -> list[dict]:
     """The sessions that runs.json entries record and that their harnesses still hold, neither
-    purged nor lost, each as an entry of the earlier-sessions record (module docstring)."""
+    purged nor lost nor found unsaved, each as an entry of the earlier-sessions record (module docstring)."""
     return [{"run": e["run"], "runner": e["runner"], "session": session,
              "workdir": str(workdir(study_dir, e.get("role") or "panellist")), "replaced": round(now)}
             for e in runs if e.get("runner")
-            for session in sessions_of(e) if session not in {**(e.get("purged") or {}), **(e.get("lost") or {})}]
+            for session in sessions_of(e)
+            if session not in {**(e.get("purged") or {}), **(e.get("lost") or {}), **(e.get("unsaved") or {})}]
 
 
 def read_earlier_sessions(study_dir: Path) -> list[dict]:
@@ -2330,12 +2492,34 @@ def asking(entry: dict) -> dict | None:
     return last if last and last.get("kind") == "followup" and last.get("ended") is None else None
 
 
-def copy_atomic(source: Path, dest: Path):
-    """Make dest a copy of source in one step, as write_atomic() writes a text."""
-    dest = Path(dest)
-    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-    shutil.copyfile(source, tmp)
-    os.replace(tmp, dest)
+def as_text(content: bytes) -> str:
+    """What a file holds, as Path.read_text() reads it."""
+    return io.TextIOWrapper(io.BytesIO(content)).read()
+
+
+def read_copy(path: Path) -> bytes | None:
+    """What a copy of a persona file that a launcher keeps in logs/ holds (.before,
+    .rejected.md), None when there is none, or none that is the launcher's own: it is opened as
+    every file of an attempt is (run_watchdog.opened()), never through a symbolic link and
+    never waiting."""
+    try:
+        with os.fdopen(opened(path, most=READ_MOST), "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def keep_copy(path: Path, content: bytes):
+    """Keep a copy of a persona file in logs/, in one step, as write_atomic() writes a text: a
+    copy on disk is whole. It is made anew (run_watchdog.fresh()), so nothing left at its name
+    is written through."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with os.fdopen(fresh(tmp), "wb") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def followup_section(n: int, question: str, answer: str, from_reply: bool = False) -> str:
@@ -2349,24 +2533,28 @@ def followup_section(n: int, question: str, answer: str, from_reply: bool = Fals
                       *(["", FROM_REPLY] if from_reply else []), ""])
 
 
-def followup_change(cfg: dict, before: Path, after: Path, n: int, quote=str) -> tuple[str, str]:
-    """What follow-up n did to a persona file, from the copy made before the question (before)
-    and the file now (after): (kind, why). quote is how why repeats a line of the file, which in
-    a usability study is shown()'s to decide.
+def followup_change(cfg: dict, before: bytes, after: Path, n: int, quote=str) -> tuple[str, str]:
+    """What follow-up n did to a persona file, from what the copy made before the question holds
+    (before, read_copy()) and the file now (after, under the study directory): (kind, why).
+    quote is how why repeats a line of the file, which in a usability study is shown()'s to
+    decide.
 
     "section": the file is the copy plus one appended section that opens with the heading
     "## Follow-up <n>", holds something under it and has no other "## " or "### " heading, and
     the scores, ranking, unit sections and progress parse as they did. That is all a follow-up
     may do. "none": nothing was added. "blank": the heading was added with nothing under it.
-    "other": anything else, with why in a clause. White space at the very end of the copy is not
-    held against the file, since an editor that appends may tidy it.
+    "other": anything else, with why in a clause: a file that can no longer be read as the run's
+    own (persona_bytes()) among it. White space at the very end of the copy is not held against
+    the file, since an editor that appends may tidy it.
     """
-    old = Path(before).read_text()
+    old = as_text(before)
     try:
-        new = Path(after).read_text()
-    except OSError:
+        new = as_text(persona_bytes(cfg["_dir"], after))
+    except FileNotFoundError:
         return "other", "its persona file is gone"
-    was, now = parse_persona_file(before, cfg), parse_persona_file(after, cfg)
+    except OSError as err:
+        return "other", f"its persona file can no longer be read as the run's own ({unread(err)})"
+    was, now = parse_persona_file(after, cfg, old), parse_persona_file(after, cfg, new)
     if not new.startswith(old.rstrip()):
         rescored = sorted(u for u in {*was["scores"], *now["scores"]}
                           if was["scores"].get(u) != now["scores"].get(u))
@@ -2426,7 +2614,7 @@ def study_units(cfg: dict) -> list[str]:
     return list(label_map(cfg))
 
 
-def parse_persona_file(path: Path, cfg: dict, text: str | None = None) -> dict:
+def parse_persona_file(path: Path, cfg: dict, text: str) -> dict:
     """Parse one run file. Returns scores per unit, ranking, order, and structural problems.
 
     "model" is the model key and "replicate" the replicate number, both from the file name;
@@ -2434,15 +2622,13 @@ def parse_persona_file(path: Path, cfg: dict, text: str | None = None) -> dict:
     sections in file order, each {"n", "text"}: the number in its "## Follow-up <n>" heading and
     the section from that heading to the next "## " heading. Nothing else here reads them.
 
-    text is the file's content when it is not to be read from path, which then only names the
-    run. A reader of scores or progress calls read_persona(), which decides that.
+    text is the file's content, and path only names the run: nothing is read here. A reader of
+    scores or progress calls read_persona(), which decides what to read and reads it.
     """
     path = Path(path)
     labels, n_factors = study_units(cfg), len(cfg["factors"])
     heading = STUDY_TYPES[cfg["type"]]["heading"]
     m = FILE_RE.match(path.name)
-    if text is None:
-        text = path.read_text()
     lines = text.split("\n")
     replicate = int(m["rep"] or 1) if m else 1
     out = {
@@ -2782,9 +2968,63 @@ def same_line(text: str) -> str:
 
 
 def personas_dir(study_dir: Path) -> Path:
-    """panel/personas in a live study; personas/ in an archived round (archive.py flattens panel/)."""
-    live = Path(study_dir) / "panel" / "personas"
-    return live if live.is_dir() else Path(study_dir) / "personas"
+    """panel/personas in a live study; personas/ in an archived round (archive.py flattens panel/).
+    To name it, as evidence_dir() names a run's evidence folder: whatever reads a file in it
+    reads through persona_bytes()."""
+    live = (Path(study_dir) / "panel").is_dir()
+    return Path(study_dir) / ("panel/personas" if live else "personas")
+
+
+def persona_bytes(study_dir: Path, path: Path) -> bytes:
+    """What a persona file holds: the one way a persona file is opened, by every script that
+    reads one. A panellist can write under panel/, so what stands at the file's name is read as
+    something another process may have put there (open_below()): no symbolic link is followed,
+    at the file or at a folder between the study directory and it, only a regular file is
+    read, and the open never waits, as it would for a FIFO. Raises FileNotFoundError when the
+    run has no file, and another OSError, with the reason (unread()), when what is there cannot
+    be read as the run's own. That is no persona file: its run is not done, nothing is taken
+    from it, and check_runs.py names it with the reason (persona_problem())."""
+    with os.fdopen(open_below(study_dir, path), "rb") as f:
+        return f.read()
+
+
+def persona_problem(study_dir: Path, path: Path) -> str | None:
+    """Why what stands at a persona file's name cannot be read as its run's own
+    (persona_bytes()), None when it can, or nothing is there."""
+    try:
+        os.close(open_below(study_dir, path))
+    except FileNotFoundError:
+        return None
+    except OSError as err:
+        return unread(err)
+    return None
+
+
+def write_persona(study_dir: Path, path: Path, content: str | bytes):
+    """Replace a persona file in one step, as write_atomic() replaces a file, and through no
+    symbolic link: its folder is opened as persona_bytes() opens it (folder_fd()), the content
+    goes to a file made anew in that folder (run_watchdog.fresh()), and that file takes the
+    name, so a link left at the name goes and what it points at is not written. Raises OSError,
+    with the reason (unread()), when a folder on the way is a link or no folder, or the file
+    cannot be put there."""
+    *folders, name = parts_below(study_dir, path)
+    try:
+        folder = folder_fd(study_dir, folders)
+    except Unsafe:
+        raise Unsafe("a folder above it is a symbolic link, or no folder") from None
+    tmp = f".{name}.{os.getpid()}.tmp"
+    try:
+        with os.fdopen(fresh(tmp, mode=0o666, dir_fd=folder), "wb" if isinstance(content, bytes) else "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.replace(tmp, name, src_dir_fd=folder, dst_dir_fd=folder)
+        except OSError:  # a folder at the name: nothing of this stays in a folder panellists read
+            os.unlink(tmp, dir_fd=folder)
+            raise
+    finally:
+        os.close(folder)
 
 
 def run_progress(cfg: dict, parsed: dict | None) -> dict:
@@ -2859,7 +3099,9 @@ def _entry_now(study_dir: Path, path: Path, entry: dict | None, run: str | None)
 
 def read_persona(study_dir: Path, cfg: dict, path: Path, entry: dict | None = None) -> dict | None:
     """A run's persona file as its scores, answers and progress stand: parse_persona_file() with
-    "unsettled" added, or None when the run has no file. The one place that chooses what to read.
+    "unsettled" added, or None when the run has no file, or none that can be read as its own
+    (persona_bytes(): a symbolic link, a FIFO or a folder at its name is no persona file). The
+    one place that chooses what to read.
 
     path is the persona file and entry the run's runs.json entry, when it has one. For a run
     whose latest follow-up attempt is not settled (asking()), the copy made before the question
@@ -2890,18 +3132,16 @@ def read_persona(study_dir: Path, cfg: dict, path: Path, entry: dict | None = No
     study_dir, path = Path(study_dir), Path(path)
     run = entry["run"] if entry else None
 
-    def copy(e, attempt):
-        try:
-            return (study_dir / "logs" / f"{e['run']}.{attempt['n']}.before").read_text()
-        except OSError:  # an archive, or settled since runs.json was read
-            return None
+    def copy(e, attempt):  # None in an archive, or when settled since runs.json was read
+        held = read_copy(study_dir / "logs" / f"{e['run']}.{attempt['n']}.before")
+        return None if held is None else as_text(held)
 
     for _ in range(LOOKS):
         attempt = asking(entry or {})
         before = copy(entry, attempt) if attempt else None
         try:
-            text = path.read_text() if before is None else before
-        except OSError:  # the run has no file
+            text = as_text(persona_bytes(study_dir, path)) if before is None else before
+        except OSError:  # the run has no file, or none that can be read as its own
             text = None
         now = _entry_now(study_dir, path, entry, run)
         steady = _attempts(now) == _attempts(entry)
@@ -2925,19 +3165,37 @@ def unsettled_lines(runs: list[dict]) -> list[str]:
     return [f"{r['run']}: {UNSETTLED}" for r in runs if r.get("unsettled")]
 
 
-def load_runs(study_dir: Path, cfg: dict) -> list[dict]:
-    """Every persona file in the study, parsed (read_persona()). For the runs.json entries, see
-    read_runs()."""
+def persona_files(study_dir: Path) -> list[tuple[Path, dict | None]]:
+    """Every persona file a study has or expects, in name order, each with its run's entry in
+    runs.json, None for a file that no entry names: what the personas folder holds under a
+    persona file's name, whatever it is, and the file of each panellist entry, there or not.
+    The folder is listed as its files are read, through no symbolic link (folder_fd()): one
+    that is a link, or reached through one, is listed as holding nothing."""
     study_dir = Path(study_dir)
-    seg = {p["id"]: p.get("segment", "") for p in cfg["personas"]}
     entries = {}  # persona file name -> its run's entry: an archive moves the file, so match it by name
     if (study_dir / "runs.json").exists():
         entries = {Path(e["file"]).name: e for e in read_runs(study_dir) if e["role"] == "panellist"}
     folder = personas_dir(study_dir)
-    names = {p.name for p in folder.glob("*--*.md")} | {name for name, e in entries.items() if asking(e)}
+    try:
+        fd = folder_fd(study_dir, folder.relative_to(study_dir).parts)
+    except OSError:
+        names = []
+    else:
+        try:
+            names = fnmatch.filter(os.listdir(fd), "*--*.md")
+        finally:
+            os.close(fd)
+    return [(folder / name, entries.get(name)) for name in sorted({*names, *entries})]
+
+
+def load_runs(study_dir: Path, cfg: dict) -> list[dict]:
+    """Every persona file in the study, parsed (read_persona()): of those persona_files() lists,
+    the ones that can be read as their run's own. For the runs.json entries, see read_runs()."""
+    study_dir = Path(study_dir)
+    seg = {p["id"]: p.get("segment", "") for p in cfg["personas"]}
     runs = []
-    for name in sorted(names):
-        r = read_persona(study_dir, cfg, folder / name, entries.get(name))
+    for path, entry in persona_files(study_dir):
+        r = read_persona(study_dir, cfg, path, entry)
         if r:
             r["segment"] = seg.get(r["pid"], "")
             runs.append(r)
@@ -2950,8 +3208,9 @@ def run_records(study_dir: Path, cfg: dict) -> list[dict]:
     Expected runs are the panellist entries of runs.json, then any persona file no entry names;
     without a runs.json, the persona files found. Each record has "run", "pid", "model" (the
     model key), "replicate", "segment", "parsed" (parse_persona_file's result, None when the run
-    has no file), "progress" (run_progress), "state" (run_state) and "unsettled" (whether the
-    file was read as it stood before a follow-up that is not settled: read_persona()).
+    has no file, or none that can be read as its own), "progress" (run_progress), "state"
+    (run_state) and "unsettled" (whether the file was read as it stood before a follow-up that
+    is not settled: read_persona()).
     """
     study_dir = Path(study_dir)
     seg = {p["id"]: p.get("segment", "") for p in cfg["personas"]}

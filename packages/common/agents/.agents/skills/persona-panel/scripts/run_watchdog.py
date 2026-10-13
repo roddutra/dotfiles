@@ -8,11 +8,13 @@ limit, the stop, ending the processes a CLI leaves behind, and the record of whe
 attempt ended. Standard library only, and nothing of the skill is imported: this start-up is
 paid once per attempt.
 
-    run_watchdog.py [--hooks <json>] <pid fd> <end record> <seconds> <grace> <command> [<argument> ...]
+    run_watchdog.py [--hooks <json>] <pid fd> <lock fd> <end record> <seconds> <grace> <command> [<argument> ...]
 
     --hooks      commands to run around the CLI (see "Hooks"): one JSON object
     pid fd       the attempt's pid file (logs/<run id>.<attempt>.pid), open and locked by the
                  launcher that starts this process
+    lock fd      the attempt's lock file (logs/<run id>.<attempt>.lock), open, made anew by that
+                 launcher and never written: see "The lock of an attempt"
     end record   the file to write when the attempt has ended (logs/<run id>.<attempt>.end)
     seconds      the attempt's time limit: what is left of the run's allowance
     grace        seconds a process gets between SIGTERM and SIGKILL
@@ -24,13 +26,19 @@ of all three streams, and it writes to nothing but its two files. Its hooks writ
 
 What it does, in order:
 
-1. Starts a child that begins a session of its own and waits. The CLI is then the leader of a
-   process group that holds everything it starts, in a session without a terminal.
+1. Takes the lock of the attempt, which it holds until it exits (see "The lock of an attempt").
+   Then starts a child that begins a session of its own and waits. The CLI is then the leader
+   of a process group that holds everything it starts, in a session without a terminal.
 2. Writes the pid file, two lines: "<pid> <start identity>" for itself, then for the CLI. The
    identity is the process's start time (process()), which tells it from a later process that
-   was given the same id.
-3. Runs the "before" hook, when there is one, with its process on a third line of the pid file
-   for as long as it runs (see "Hooks"). Then lets the child become the CLI, or, when the
+   was given the same id. Where the system names the process namespace this attempt runs in
+   (namespace()), one line more says which: "namespace <identity>". The ids above name these
+   processes only to a shell in that namespace. The line decides nothing of whether the attempt
+   is alive, which the lock says. launch.py goes by it for one thing: it looks up no id that
+   was recorded in another namespace than its own, and says so of the CLI of a watchdog that
+   has gone without an end record.
+3. Runs the "before" hook, when there is one, with its process on a line of its own in the pid
+   file for as long as it runs (see "Hooks"). Then lets the child become the CLI, or, when the
    hook failed, lets it end without becoming anything. The lock on the pid file drops when
    both have closed it: the child by becoming the CLI, the watchdog once it knows the child
    did, or once it has written the end record of a child that never became the CLI. So
@@ -58,13 +66,14 @@ succeeds by exiting with code 0. One that outlasts its seconds (HOOK when none a
 killed with its group, and has failed. A request to stop does not cut a hook short.
 - "before" runs once the attempt is on record in the pid file and before the CLI exists. When it
   fails the CLI is never executed: the end record says so under "refused", as it does of a
-  command the system refused. Its process, the leader of its group, is the third line of the pid
-  file, "<pid> <start identity>", from before it can do anything until it has ended and been
-  reaped: it waits for that line as the CLI's child waits for its own, and ends without running
-  the command when the watchdog dies first. The line is taken out before the CLI is let go. So
-  a pid file with a third line is of an attempt whose watchdog was killed while "before" ran,
-  whose CLI was never executed, and whose "before" may still be running with no one to wait
-  for it: launch.py ends it before it undoes what the hook was to do.
+  command the system refused. Its process, the leader of its group, is the third process of the
+  pid file, a line "<pid> <start identity>" after the others, from before it can do anything
+  until it has ended and been reaped: it waits for that line as the CLI's child waits for its
+  own, and ends without running the command when the watchdog dies first. The line is taken out
+  before the CLI is let go. So a pid file with a third process is of an attempt whose watchdog
+  was killed while "before" ran, whose CLI was never executed, and whose "before" may still be
+  running with no one to wait for it: launch.py ends it before it undoes what the hook was to
+  do.
 - "after" runs once "before" has been attempted, however that and the CLI ended: by itself, at
   the time limit, on a request to stop, or never having been executed. It runs after the CLI
   and its process group have gone and before the end record is written, so a reader of the end
@@ -75,9 +84,29 @@ group. Until then it is at least a zombie, so its process id, which is the group
 have been given to another process or group, and every signal sent here reaches this attempt's
 processes or nothing. After the reap the group is never signalled again.
 
+The lock of an attempt. The watchdog holds an exclusive flock on the attempt's lock file from
+before the pid file names it until it exits, and the system lets go of it when the process
+ends, however it ends. So the lock says whether this watchdog is alive, to every shell that can
+open the file: a shell in another process namespace, as inside a harness's sandbox, sees the
+lock where it sees no process of the attempt, and one outside a sandbox that has ended finds
+the lock free where the ids on record can tell it nothing. launch.py asks with a shared lock
+that is not waited for and is let go at once (launch.py taken(), unseen()). The lock is taken
+once, on a file made for this attempt alone, and waited for: all that can be in its way is
+such a question, which is gone in an instant, so there is nothing to ask again. The descriptor
+is closed when a child of the watchdog becomes its command, the CLI or a hook, so nothing a
+panellist runs holds the lock or can let go of it. A child that has not become its command yet
+holds a copy, and ends at once when the watchdog dies (become(), hook()). The child that waits
+to be the CLI, and that of a "before" command, hold the pid file the same way, and launch.py
+reads that only when they have let go of it (recorded()): so it never asks the lock while one
+of them holds it for a watchdog that is dead. The child of an "after" command holds its copy
+for the instant before it becomes the command. Where the file system has no locks the watchdog
+runs without one, and launch.py goes by the ids on record, as it does for an attempt from
+before watchdogs held a lock.
+
 The files of an attempt. Whatever an attempt keeps in logs/ and reads back is read as a file
-that another process may have put there, here and in launch.py and browser_session.py, which
-use the two functions of this file for it. opened() opens one without following a symbolic
+that another process may have put there, here and in launch.py, browser_session.py and
+panel_lib.py (the copy of a persona file made before a follow-up question), which use the two
+functions of this file for it. opened() opens one without following a symbolic
 link and without waiting for anyone, as an open of a FIFO would, and gives it up unread
 (Unsafe) unless it is a regular file of this user of a record's size. fresh() makes one anew:
 what had its name is unlinked, never followed and never written through.
@@ -111,6 +140,7 @@ launcher's to undo.
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import select
 import signal
@@ -152,14 +182,14 @@ def opened(path, flags: int = os.O_RDONLY, mode: int = 0o644, dir_fd: int | None
     return fd
 
 
-def fresh(path, flags: int = os.O_WRONLY, mode: int = 0o644) -> int:
+def fresh(path, flags: int = os.O_WRONLY, mode: int = 0o644, dir_fd: int | None = None) -> int:
     """Make a file anew at a path, to write it: a descriptor. Whatever had that name is unlinked
     first, a symbolic link and not what it points at, and none is followed or written through."""
     try:
-        os.unlink(path)
+        os.unlink(path, dir_fd=dir_fd)
     except FileNotFoundError:
         pass
-    return os.open(path, flags | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, mode)
+    return os.open(path, flags | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, mode, dir_fd=dir_fd)
 
 
 def process(pid) -> tuple[str, str] | None:
@@ -182,6 +212,17 @@ def process(pid) -> tuple[str, str] | None:
 def identity(pid) -> str | None:
     found = process(pid)
     return found[1] if found else None
+
+
+def namespace() -> str | None:
+    """The process namespace this process runs in, as the system names it, or None where it
+    names none (no /proc, as on macOS). A process id means its process only within the
+    namespace: a shell in another, as inside a harness's sandbox, finds no process under it,
+    or someone else's."""
+    try:
+        return os.readlink("/proc/self/ns/pid")
+    except OSError:
+        return None
 
 
 def signal_group(group: int, sig: int) -> bool:
@@ -357,8 +398,14 @@ def main():
     if args[:1] == ["--hooks"]:
         import json  # only for an attempt with hooks: the others start their CLI sooner without it
         hooks, args = json.loads(args[1]), args[2:]
-    handle, end, seconds, grace, argv = int(args[0]), args[1], float(args[2]), float(args[3]), args[4:]
+    handle, watch, end = int(args[0]), int(args[1]), args[2]
+    seconds, grace, argv = float(args[3]), float(args[4]), args[5:]
     os.set_inheritable(handle, False)  # or the CLI would hold the lock on the pid file for as long as it runs
+    os.set_inheritable(watch, False)   # nor may the CLI or a hook hold the attempt's lock: it says this process lives
+    try:  # held from here until this process ends, and never closed: see "The lock of an attempt"
+        fcntl.flock(watch, fcntl.LOCK_EX)
+    except OSError:
+        pass  # a file system without locks: launch.py goes by the ids on record
     wake, wake_w = os.pipe()
     os.set_blocking(wake, False)
     os.set_blocking(wake_w, False)
@@ -371,7 +418,9 @@ def main():
         become(argv, inherited, go, go_w, said_w)
     os.close(go)
     os.close(said_w)
-    os.write(handle, f"{os.getpid()} {identity(os.getpid()) or ''}\n{cli} {identity(cli) or ''}\n".encode())
+    within = namespace()
+    os.write(handle, (f"{os.getpid()} {identity(os.getpid()) or ''}\n{cli} {identity(cli) or ''}\n"
+                      + (f"namespace {within}\n" if within else "")).encode())
     failed = hook(hooks, "before", inherited, wake, handle) if hooks else None
     if not failed:
         os.write(go_w, b"\n")

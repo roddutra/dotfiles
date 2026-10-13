@@ -175,6 +175,7 @@ The plan lists the browsing gaps only for a study whose panellists can browse on
 ### All runners
 
 - A run is `blocked` when its harness turns the request away: a usage limit, a rate limit or a capacity refusal. The reason in `status` is the harness's own message, which says which one it was.
+- In a usability study a harness's message that holds a secret of a test account is neither printed nor kept. The reason then names the attempt's `.err` and `.out` files in `logs/`, which have it (`references/usability.md`, Safety).
 - A capacity refusal was seen in a real Codex run ("Selected model is at capacity"): the run became `blocked`, and `resume` finished it later.
 - A usage limit could not be triggered on any harness, so how one is recognised is inferred from the binaries and old sessions. If runs end `failed` or `partial` with a limit message as their reason, the limit was not recognised: wait for it to lift, continue with `resume` (partial) or `run` (failed), and report the message so the runner can be fixed.
 - Dollar figures under a subscription login are list-price equivalents. They say how much allowance is used, not what is paid.
@@ -222,15 +223,15 @@ The launcher enforces, on every runner:
 - what a follow-up question may change: the persona file is copied before the question, and anything but one appended `## Follow-up <n>` section is rejected and the file put back. Until the launcher has settled it, every script reads the copy for scores and progress
 - the synthetic panel notice in an analyst's or the writer's saved output: added under the title when the job left it out
 - with browsing on, the browser session of each attempt, and what it refuses ([Browser sessions](#browser-sessions))
-- in a usability study, each task's step limit, as the backstop to the panellist's own count, and each run's test account: provisioned before its first attempt and torn down when the run is done, limited or failed
+- in a usability study, each task's step limit, as the backstop to the panellist's own count and only for the steps its step log shows (a run that logs none is bounded by its time limit), and each run's test account: provisioned before its first attempt and torn down when the run is done, limited or failed
 
 Each run's own watchdog process enforces its time limit, so a killed launcher does not unbound its runs. The watchdog also ends whatever the CLI started and left running, and records when and how the run ended. The next `run`, `resume` or `stop` settles the run from that record, or adopts it while it is still alive. A follow-up question is settled the same way, in recorded steps that a later launcher finishes without deciding again (`scripts/panel_lib.py`, "Settling").
 
 - `--grace` is given to a watchdog when its run starts. A run already going keeps the grace it has.
 - `--poll` is how often the launcher looks for runs that have ended and for a request to stop. Time limits do not depend on it.
-- `stop` reaches each run through its watchdog, with or without a launcher alive.
+- `stop` reaches each run through its watchdog, with or without a launcher alive. In a usability study it stops the runs even while a process left by a command of the study holds every other command up, then says so and exits with 1 (`references/usability.md`, Commands).
 - A process that starts a session of its own leaves the CLI's process group, and the watchdog cannot end it.
-- A watchdog that was itself killed records nothing. The next `run`, `resume` or `stop` kills its CLI's process group if the CLI is still running. If the CLI has gone and a group of its id still has processes, the launcher cannot prove they are the run's: it leaves them alone and names their pids, as does `status` until the run next starts. Check them and stop them yourself.
+- A watchdog that was itself killed records nothing. The next `run`, `resume` or `stop` kills its CLI's process group if the CLI is still running. If the CLI has gone and a group of its id still has processes, the launcher cannot prove they are the run's: it leaves them alone and names their pids, as does `status` until the run next starts. Check them and stop them yourself. Where no list of processes can be had (no `/proc` and no `ps`), it says that it could not check the group, never that nothing is left.
 
 The harness enforces what it has a switch for:
 
@@ -260,7 +261,7 @@ The `claude` and `codex` runners strip instruction files, memory, skills, hooks 
 
 Both CLIs can replace the prompt, with every tool still working. An A/B of ten panellist runs (five per arm, the same two personas on haiku, sonnet and Codex) showed no difference in persona voice, template discipline, scores or ranking larger than the difference between two runs of the same arm. Scores differed between the arms by a mean of 0.42 a cell, with no direction (+0.07 signed), the same concept ranked first in all ten runs, and nothing broke. The one measurable gain was about 30% fewer input tokens on Codex.
 
-- **Decision (Rod, 13 October 2026):** both runners keep the default prompt, because overriding it brought no tangible benefit or difference in the research output. The question is set aside, not closed.
+- **Decision (the user, 13 October 2026):** both runners keep the default prompt, because overriding it brought no tangible benefit or difference in the research output. The question is set aside, not closed.
 - **The `pi` runner** was not part of the experiment and is unchanged. Pi's own system prompt stays ([`pi`](#pi), above).
 - **Before changing this,** read the full record: `docs/specs/persona-panel-expansion.md`, "System prompt override (experiment and decision)", under Discovery. It has what each CLI replaces and still sends, the results, when to revisit, and the arguments and traps for each runner. The option that would replace the prompt, and its trap, are named in each runner's docstring.
 
@@ -273,8 +274,9 @@ Add one module, `scripts/runners/<name>.py`. The registry lists the package's mo
 | `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps` |
 | `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. `run["browse"]` says whether the run may browse, and `run["browser_env"]` is then what its environment needs to reach its session. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
 | `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: no harness tried so far inherits the tools on resume, and most inherit nothing |
-| `parse_result(stdout, stderr, exit_code, session_id=None)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done. The `session_id` argument is the one the command was built with, for a harness whose output does not name its session |
+| `parse_result(stdout, stderr, exit_code, session_id=None)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost", "session_saved", "cannot_run"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done. The `session_id` argument is the one the command was built with, for a harness whose output does not name its session |
 | `check()` | `{"ok", "message"}`: installed, signed in, and the options the runner passes still parse, with no model call. Asking can make a harness refresh its own login, which the runner must never read or relay |
+| `shell_check()` | `{"ok", "message"}`: whether the shell the launcher is in lets the CLI do a run at all, asked after a `check()` that passed. No model call, no network test, every command under a timeout. On failure the message is what the CLI cannot do there, as clauses that each start "cannot", with the system's or the CLI's own words in brackets |
 | `purge_command(session_id, workdir)` | The argv that deletes one session, or None |
 | `model_status(entry)` | `{"known", "images", "signed_in", "provider", "message"}` for one model entry, with no model call. None means the runner cannot tell, and its `capabilities()` and `check()` stand. `known` or `signed_in` false refuses the launch, and `images` false refuses a full-materials study. Like `check()`, it may make a harness refresh its own login |
 
@@ -288,6 +290,9 @@ Rules for a runner:
 - `image_attach` says what the harness can do. No runner attaches images yet, and nothing reads it.
 - Map a refusal that will pass (a usage limit, a rate limit, no capacity) to `usage_limit`, and put the harness's own words in `message`: the launcher prints them as the reason.
 - Set `session_lost` when the CLI refuses a resume because the session is gone. The launcher then starts the run afresh if it wrote nothing, and otherwise leaves it to the lead. Without it, such a resume reads as a CLI that could not be started, and closes the runner for the command.
+- In `shell_check()`, test with `unwritable()` the directory where the harness keeps its sessions, and anything more the CLI needs to run at all, such as a sandbox of its own. Test the folder the sessions go in, not only a configuration directory above it: the `codex` runner tests both, because either can be the one that cannot be written. Refuse only on what is known to stop a run: a test that cannot be made, or that fails in a way nothing has explained, passes.
+- Set `cannot_run` when a process's output shows that no run of the CLI can work from that shell, whatever the prompt: a clause that starts "it could not", with the CLI's words in brackets. The launcher then does not retry, and starts nothing more on the runner in the command. Add a pattern only for output that was seen, and mark it verified.
+- Set `session_saved` to false when the process ran in a session and the harness holds none of that id, and leave it None when the runner cannot tell. The launcher then says that the run cannot be resumed or asked a follow-up, and refuses both.
 - Report usage with a `scope`: `session` when the figures are running totals for the session, `process` when they cover one process. The launcher totals a run with `merge_usage()` and `total_usage()` and never double counts a resumed session.
 - Never read, store or relay a provider login.
 - List in `isolation_gaps` whatever could not be switched off for any run, in plain words. The plan prints it.
@@ -302,16 +307,17 @@ Helpers to reuse from `runners/__init__.py`:
 - `last_line()`: the CLI's own message at the end of stderr
 - `exited()`: the exit code for a message, or "exit code unknown"
 - `run_cli()`: run a status command for `check()`
+- `unwritable()`: why nothing can be written in a directory, tested with a write that leaves nothing behind. A directory that is not there yet is judged by the nearest one above it that is, and a file where a directory belongs, there or on the way to it, is a reason of its own
 - `launch_effort()`: the effort to pass, refusing a level the harness lacks
 
-Before writing the module, settle by experiment what the existing docstrings record: the flags that exclude instructions while the login keeps working, tool restriction, the budget cap, output and session id, resume after a kill, a resume of a session that is gone, the shape of a usage limit, where sessions live, and a check without a model call. Mark each fact verified or inferred.
+Before writing the module, settle by experiment what the existing docstrings record: the flags that exclude instructions while the login keeps working, tool restriction, the budget cap, output and session id, resume after a kill, a resume of a session that is gone, the shape of a usage limit, where sessions live, a check without a model call, and what the CLI does in a shell that cannot write its configuration directory or reach its provider. Mark each fact verified or inferred.
 
 The new harness also gets its summary in this document: a column in both tables above and a section under [Capabilities](#capabilities), in plain words. Keep its flags, variables and commands in the module's docstring.
 
 Tests run against fake CLIs, never a model. The pattern is in `packages/common/agents/tests/persona_panel_fakes/`:
 
 - `fake_<cli>.py` stands in for the CLI: it answers the version and login commands and prints recorded output for a headless run. Environment variables steer it (`FAKE_<CLI>` picks the recorded run, `FAKE_PANEL` plays whole runs from a plan, `FAKE_CLI_LOG` records each invocation).
-- `<cli>/*.jsonl` is output recorded from the real CLI, trimmed: `ok`, `resume-1`, `resume-2`, `budget`, `error`, `killed`. A shape that could not be recorded is named `*.inferred.jsonl`. For Pi they are entries of its session file, which the fake writes where the runner reads them.
+- `<cli>/*.jsonl` is output recorded from the real CLI, trimmed: `ok`, `resume-1`, `resume-2`, `budget`, `error`, `killed`, and what a sandboxed shell made of a run (`claude/unreachable`, `codex/nested`). A shape that could not be recorded is named `*.inferred.jsonl`. For Pi they are entries of its session file, which the fake writes where the runner reads them.
 - `install(bin_dir)` puts the fakes on `PATH`. Add the new CLI to `CLIS` in `__init__.py`.
 - `RunnerTest` in `tests/test_persona_panel.py` holds the runner contracts: the launch and resume command, and result parsing for each outcome.
 
@@ -376,21 +382,86 @@ The message is the question inside the frame of `assets/followup-message.md`, th
 
 ## When the lead's own sandbox blocks the launcher
 
-The launcher needs four things from the shell that runs it: to start the harness CLIs, network access for them, write access to the study directory, and write access to each CLI's own configuration directory, where it keeps its sessions.
+A harness may run its shell tool in a sandbox. The launcher needs four things from the shell it is started in:
 
-What a real run from inside a harness's sandbox showed:
+- write access to the study directory, where it records every run and every run writes
+- for each runner the study uses, write access to the folder where the CLI keeps its sessions, and for the `codex` CLI to its home above that folder too
+- whatever else that CLI needs to run at all: the `codex` CLI builds a sandbox of its own for every run
+- network access for the CLIs
 
-| Sandbox | What happened |
-|---|---|
-| Read-only | `status` and `plan` worked. Every command that writes was refused in one sentence naming the file it could not write, and nothing started |
-| Writable, with network, home directory read-only | A Claude Code run started and completed. The CLI saved no session transcript, so the run could not be resumed and its session could not be purged |
-| A Codex sandbox | A Codex run could not start. The CLI passed the check, then exited at once with "failed to initialize in-process app-server client: Read-only file system" |
+`plan` tests the first three, and `run`, `pilot`, `resume` and `followup.py ask` test them again before they start anything. The test makes no model call, leaves nothing behind and adds under a second to the plan. A runner the shell cannot run is shown as `CANNOT BE USED` in place of `ready`, with what it cannot do there and the two ways out, and the command exits with 1. Other runners are judged on their own, and `--allow-missing` goes ahead with them. Network access is not tested, because a proxy or a custom endpoint makes any general test unreliable: a run's own output shows it (below).
 
-A CLI that exits with an error before printing anything never ran. The launcher then says "could not be started", with the command and the CLI's message. It records no attempt, marks nothing failed, and starts nothing more on that runner in the command. A run whose CLI started, printed output and then failed is `failed`, and `run` retries it once.
+The two ways out, which every such refusal names: ask the harness to run the command outside its sandbox, or run `launch.py` from a terminal.
+
+### What was tried
+
+Checked on 13 October 2026 on Linux, with claude 2.1.296 and codex-cli 0.162.1: one text-only study of four runs, two on a `claude` entry and two on a `codex` entry. The runs were made before the tests above existed, when `plan` said "ready" everywhere. The last column is what `plan` says since, checked the same day in the same shells with no model.
+
+| Where `run` was started | What the runs did | `plan` now |
+|---|---|---|
+| A Claude Code session's shell tool, its sandbox off | 4 done, usage recorded, sessions purged | Both ready |
+| A terminal, in a clean login environment | The same | Both ready |
+| No terminal: `nohup`, stdin from `/dev/null` | The same | Both ready |
+| Codex sandbox, read-only (also the default of a headless Codex session) | Nothing started: `run` was refused in one sentence, for the lock file it could not write | Refuses the study directory and both runners |
+| Codex sandbox, `workspace-write` | Codex: the CLI exited before printing anything ("could not be started"). Claude Code: no network, so each run failed after about 3 minutes and its retry after 3 more | Refuses both runners |
+| The same, with network access | Codex: the same. Claude Code: 2 of 2 done, and no session saved | Refuses both runners |
+| The same, with `~/.codex` and `~/.claude` writable | Claude Code: 2 of 2 done, sessions saved. Codex: each run called the model, had every shell command refused, wrote nothing and was retried, for up to 160,000 input tokens a run | Refuses `codex`, `claude` ready |
+| A Codex session as the lead, `run` approved to run outside its sandbox | 4 done, sessions purged | Refused inside the sandbox, in a second real run the same day: the lead then asked for `run` outside it, and all four runs were done |
+
+`run` itself was tried again only in the read-only sandbox, where the lock refusal stops it. In the others its refusal rests on the same test as `plan`'s.
+
+### What a refusal means, and what gets past one
+
+- **The study directory cannot be written.** `plan` names it as a problem, and every command that needs the lock is refused in one sentence naming the lock file. `status` still works. `check_runs.py` prints its table, then one sentence for the file it could not write, and its exit code is what the table says. `extract_scores.py`, `extract_answers.py` and `analyze.py` end with one sentence and exit code 1.
+- **A CLI cannot write its configuration directory.** A Claude Code run there completes and saves no session. A Codex CLI there does not start.
+- **The `codex` CLI cannot build its sandbox.** This is every Codex run started inside another Codex sandbox: the outer sandbox hides the directory of Codex's own background service, and the CLI will not build a sandbox without it. No writable directory changes that, and the outer sandbox refuses that directory as a writable root.
+
+If a run starts all the same, the launcher has a second line for each case:
+
+- **A CLI that exits with an error before printing anything never ran.** The launcher says "could not be started", with the command and the CLI's message. It records no attempt, marks nothing failed, and starts nothing more on that runner in the command.
+- **A run whose output shows that its CLI cannot work from this shell is not retried.** That is a Codex run whose every shell command was refused a sandbox, and a Claude Code run that could not reach its provider after its own retries (about 3 minutes with no network). The run is `failed` with the CLI's words as the reason, its attempt and session stay on record, and nothing more starts on that runner in the command. Recognised from recorded output of the two CLIs. No such output has been seen from `pi`, or from `codex` without a network.
+- **A run whose session was not saved says so.** When a process ends, the `claude` and `pi` runners look for its session where the harness keeps them. When there is none the launcher prints "session not saved: this run cannot be resumed or asked a follow-up" once, `status` shows it on the run, `resume` starts the run afresh only if it wrote nothing, and `followup.py` refuses it.
+
+A run whose CLI started, printed output and then failed for any other reason is `failed`, and `run` retries it once. In a usability study the retry, like every start that is not a resume, begins with an empty evidence folder: what the folder held is moved to `logs/<run id>.<attempt>.evidence/` (`references/usability.md`, Running).
 
 The CLI's own output for every attempt is in `logs/<run id>.<attempt>.out` and `.err`. On the `pi` runner that is the final reply alone.
 
-Fix the lead's permissions for that command, or run the launcher from a terminal. The lead can still read `launch.py <study> status`, `runs.json` and the persona files.
+### A lead on Codex
+
+- **Inside the sandbox** (`workspace-write`, with the study in the workspace): `status`, `check_runs.py` and a first `plan`. `plan` there answers for the sandbox, so it refuses the runners and exits with 1. That is expected, and it is not the plan to confirm: it never says `ready`.
+- **Outside the sandbox, `plan` first.** After a `plan` that refuses for the shell, ask for approval to run `launch.py <study> plan` outside the sandbox too, and give the reason: it calls no model, starts nothing, and only there answers for the shell the runs will start from. Go on when that plan shows every runner as `ready`. Without it, a lead started four runs having seen only a plan that refused.
+- **Confirm that plan with the user, and say in the session that they agreed.** The approval of `run` may be decided by an automatic reviewer, itself a model. It refused the run while nothing in the session said the user had agreed to the materials going to the providers, and allowed the same run once the session said so.
+- **Outside the sandbox, then `launch.py <study> run`.** Ask for approval to run that one command outside the sandbox, and give the reason: the CLIs it starts need the network, their own configuration directories and, for `codex`, a sandbox of their own.
+- **A study with no `codex` entry can stay inside,** when the sandbox has network access and the Claude configuration directory is a writable root. `plan` inside then shows `claude` as `ready`, and is the plan to confirm.
+- **Use the session's own shell tool, and wait on it.** Given a foreground command of several minutes, the lead reached for another tool it had been configured with, which was refused. If the shell tool hands back before the launcher has ended, do not start the command again: poll `launch.py <study> status` until it says "Launcher: not running".
+- **`status` inside the sandbox reports what is on record.** The sandbox cannot see processes outside it. While the launcher runs, `status` there prints "Launcher: running" with the command and process id on record, then one line: this shell cannot see the launcher's processes, and run states are as last recorded. It says nothing of any run's process or browser session and calls no run gone. "Launcher: not running" is reliable there: it comes from the launcher's lock, which every shell sees, not from looking for its process.
+- **`stop` goes outside too.** Inside the sandbox it signals nothing and says so, and `run` and `resume` are refused while the launcher has the study. The launcher records the process namespace it runs in beside its process id. A process inside the sandbox that happens to hold that id, even under the same start time, is not taken for the launcher: `status` still says that it cannot see the launcher's processes, and `stop` still signals nothing.
+- **After a launcher that was killed, its runs go on where the sandbox cannot see them, and every shell can tell.** The launcher's lock is free then. Each run's watchdog holds a lock of its own for as long as it lives, on `logs/<run id>.<attempt>.lock`, and a shell sees a lock whatever processes it sees. `status` inside the sandbox prints "Launcher: not running", shows each run still at work with no "process alive", "process gone" or browser session, and prints the same line: this shell cannot see the launcher's processes, and run states are as last recorded.
+- **While such a run is at work, every command that takes the study is refused there, and changes nothing.** `stop`, `run`, `pilot`, `resume`, `check`, `release`, `purge-sessions --yes`, `followup.py ask`, `init_study.py --force` and `archive.py` exit with 1, name the runs they cannot see, settle and signal nothing, and start no second copy of a run. `followup.py list` lists and settles nothing. Run the command outside the sandbox: the launcher there adopts the live runs and settles the ones that ended.
+- **In a read-only sandbox the lock file is refused first, and `archive.py` is refused for the runs.** Where the sandbox shows the study read-only, a command that needs the lock is refused in one sentence naming the lock file, whatever the runs are doing ([above](#what-a-refusal-means-and-what-gets-past-one)). `archive.py` goes on without the launcher's lock for a study it cannot write, which is how a round that was archived read-only is archived again. It keeps a shared lock on `.launch.lock` instead, from before it looks at the study until the round is copied, which a shell that only reads can do. Under it, it asks each watchdog's lock, so it too exits with 1 and names the runs it cannot see, and archives nothing.
+- **While `archive.py` copies a study it cannot write, no launcher is given the study.** Its shared lock turns every launcher away, so none can start a run under the copy. A launcher command outside the sandbox waits 5 seconds for the lock, then exits with 1 and says that something is reading the study, and to try again once it has finished. It has started and changed nothing.
+- **A study at rest keeps its `.launch.lock`, so a read-only shell can lock it.** `init_study.py` makes the file, empty, and a launcher that ends empties it and leaves it. No command removes it, so do not delete it. "Launcher: not running" is what `status` says of it between launchers, and only a launcher that was killed leaves one for the next to report as stale.
+- **One case is not protected: a study from before the lock file was kept.** It has no `.launch.lock` until a launcher command has taken it once from a shell that can write it, and a read-only shell cannot make one. `archive.py` refuses that study with a run on record as running, saying that it cannot be protected from a launcher while it is copied: archive that one outside the sandbox. Any other it copies as it is, with nothing to keep a first launcher from starting during the copy, so start none on that study until the archive has finished.
+- **A run that has ended holds nothing up.** Its watchdog let go of its lock when it ended, so every shell knows. `status` shows it as "process gone", inside the sandbox too. Once no run is still at work out of sight, the next `stop`, `run` or `resume` settles it from its end record, from whichever shell it is run.
+- **A launcher started inside the sandbox takes its runs with it when it is killed, and the next command settles them.** The sandbox ends with its command, and every process in it. The runs leave no end record, but their locks are free, so `status` outside shows them as "process gone" and the next `stop`, `run` or `resume` from any shell settles them as runs whose watchdog was killed. Their process ids were the sandbox's own and name nothing outside it, so that launcher looks none of them up, signals nothing, and adds to each run's reason that "its CLI could not be checked from this shell because it ran in another process namespace". That covers the daemon and the browser on record for the run's browser session: a session still answering at its socket is asked to close there, and no process is signalled under either id. Nothing has to be edited by hand.
+- **A sandbox that stays open keeps its runs.** If the launcher was killed inside a sandbox that goes on, its runs are still at work in it, and the shell outside is then the one that cannot see them: `status` and the refusals there are as above. They end when the sandbox does, and any shell settles them then.
+- **A command of a usability study is treated the same way.** A provision, teardown, reset or success check that was running when its launcher was killed holds a lock of its own, on `accounts/command.lock`, and its record names the process namespace it was started in. From the other side of the sandbox the next launcher command looks up and signals nothing under the recorded process id, never clears the record by itself, starts no command and exits with 1: run the launcher from the shell that started the command. With the lock held it says that the command is running where this shell cannot look. With the lock free it says that the command has probably ended, which it cannot check: a process that closed the lock file holds no lock. This is the one place where a study waits for the lead after a sandbox has ended: the command ended with the sandbox, no shell is left that can look, and the message says to delete `accounts/command.running` and `accounts/command.lock` and run the launcher again (`references/usability.md`, Commands).
+- **When a run's reason has that note, look where the run was started.** A watchdog that was killed can leave its CLI running. A launcher in the shell that started the run ends that CLI. A launcher in any other shell cannot look for it, and the note says so. Nothing is left when the sandbox the run was in has ended. Otherwise look for the CLI with `ps` in the shell that started it, and stop it there.
+- **The note about another process namespace is Linux only.** macOS names none, so neither a watchdog nor a launcher records one there. A run whose watchdog was killed is looked for by its process ids, as it always was, and so is the launcher that a lock file names. A lock file written before launchers recorded a namespace is read the same way. The locks are the same on both.
+
+`status`, `plan`, `run`, `resume` and `stop` were checked on 13 October 2026 inside `codex sandbox`, `workspace-write` and read-only, with no model, against a launcher running outside it on fake CLIs. The same day, with that launcher killed and its runs alive: `status`, `stop`, `run`, `resume`, `init_study.py --force` and `followup.py list` inside `workspace-write`, then `status` and `stop` outside it, which adopted both runs and stopped them. With its runs ended instead: `status` and `stop` inside, which settled both. A launcher started inside `codex sandbox` and killed there was checked too: `status`, `stop` and `resume` outside, which settled both runs and then continued them. So was one killed inside a sandbox that stayed open: `status` and `stop` outside, refused until the sandbox had ended. `archive.py` was checked the same day inside `codex sandbox`, `workspace-write` with only its working directory writable and the study read-only outside it: refused for the launcher while that ran, and for the runs it could not see once the launcher was killed, with nothing archived. The shared lock of `archive.py` and the lock of a command were checked the same day in a `bwrap` sandbox with a process namespace of its own, on fake CLIs. With the study bound read-only: `archive.py` inside was refused for a run alive outside, and while it copied a study at rest, one that a killed launcher had left and one whose launcher had ended by itself, a launcher command outside waited 5 seconds and was refused for the reader, then `stop` outside had the study at once after the archive was interrupted. With the study writable: a launcher command on the other side of the sandbox from a provision command, in both directions, was refused while the command lived, and again once it had ended and left a worker that held no lock, with the record kept and nothing signalled or started. With the command inside a sandbox that had then ended, `run` outside was refused until the record was deleted, and then ran `teardown` before it provisioned again.
+
+Not tested:
+
+- macOS, for the locks of the watchdogs: they are plain `flock`, which macOS has, and none of the above was run there
+- a process inside the sandbox that holds the launcher's process id under the same start time: no sandbox was made to produce one. The automated tests cover it with a lock file edited to name a live process and another namespace
+- a command of a usability study left on the other side of `codex sandbox`, and `archive.py` there while a launcher starts outside it: both were checked under `bwrap` only, as above
+- an interactive Codex session, where the same request goes to the user as an approval prompt
+- full access mode: with no model, the `codex` CLI could build its sandbox under it, and no run was made
+- `pilot`, `resume`, `followup.py ask`, `purge-sessions --yes` and the analyst and writer jobs from a Codex lead. Each starts a CLI or writes to a harness's own folders as `run` does, so expect them to need the same approval
+- macOS, where Codex's sandbox is a different one, and the `pi` runner in any sandbox: its test of the shell is inferred
+
+With no way to run a command outside the sandbox and no terminal, native mode is the fallback ([Native mode](#native-mode)). The lead can always read `launch.py <study> status`, `runs.json` and the persona files.
 
 ## Running `launch.py` from a terminal
 
@@ -406,4 +477,5 @@ python3 launch.py <study> resume
 
 - Ctrl-C stops the runs cleanly and leaves them resumable. A second Ctrl-C skips the grace period.
 - Closing the terminal does the same, unless the launcher was started under `nohup`: it leaves a hang-up signal that is already ignored alone, and carries on. A terminal multiplexer works too.
+- No terminal is needed either. Under `nohup` with stdin from `/dev/null`, as a scheduled job starts a command, a whole panel ran to the end (13 October 2026).
 - Exit code 0 means every run the command covered is done.

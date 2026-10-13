@@ -4,11 +4,16 @@
 Answers what the runner uses: `--version`, `auth status [--text]`, and a headless run (`-p`),
 for which it prints output recorded from the real CLI (claude/*.jsonl) under the session id it
 was given. Like the real CLI it refuses an unknown option before anything else, stream-json
-without --verbose, a session id that is not a UUID, and a run with no prompt on stdin.
+without --verbose, a session id that is not a UUID, and a run with no prompt on stdin. And like
+the real CLI it keeps a transcript of a run under its projects directory, named for the session,
+and carries on without one where that directory cannot be written.
 
 Steering, through the environment:
 
-    FAKE_CLAUDE    ok (default), usage_limit, budget or error: the recorded run to print
+    FAKE_CLAUDE    ok (default), usage_limit, budget, error or unreachable: the recorded run to
+                   print. unreachable is a run with no network: no run reaches the provider
+                   unsaved: a run is played as usual and no transcript of it is kept, as where
+                   the CLI cannot write its projects directory
                    hang: print a run cut off part-way, then sleep until killed
                    signed_out: `auth status` reports no login, and a run ends as "error"
                    no_flag:<option>: the CLI no longer has that option
@@ -35,7 +40,7 @@ import panellist  # noqa: E402
 RECORDED = Path(__file__).resolve().parent / "claude"
 MODE = os.environ.get("FAKE_CLAUDE", "ok")
 RUNS = {"ok": ("ok", 0), "usage_limit": ("usage-limit.inferred", 1), "budget": ("budget", 1),
-        "error": ("error", 1), "signed_out": ("error", 1), "hang": ("killed", None)}
+        "error": ("error", 1), "signed_out": ("error", 1), "hang": ("killed", None), "unreachable": ("unreachable", 1)}
 OPTIONS = {"-p": 0, "--session-id": 1, "--resume": 1, "--model": 1, "--effort": 1, "--max-budget-usd": 1,
            "--safe-mode": 0, "--restricted": 0, "--strict-mcp-config": 0, "--disable-slash-commands": 0,
            "--settings": 1, "--tools": 1, "--allowed-tools": 1, "--permission-mode": 1,
@@ -58,8 +63,26 @@ def finish(code, out="", err="", stdin=None, model_call=False):
     sys.exit(code)
 
 
+def config_home():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+
+
+def keep_transcript(session):
+    """The transcript of a run, where the real CLI keeps it: <projects>/<working directory with
+    every other character as "-">/<session id>.jsonl. A resume adds to it."""
+    if MODE == "unsaved":
+        return
+    try:
+        folder = Path(config_home(), "projects", re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()))
+        folder.mkdir(parents=True, exist_ok=True)
+        with open(folder / f"{session}.jsonl", "a") as f:
+            f.write("{}\n")
+    except OSError:
+        pass  # the real CLI runs all the same, and leaves no transcript
+
+
 def auth_status(text):
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    home = config_home()
     status = {"loggedIn": MODE != "signed_out", "authMethod": "claude.ai", "apiProvider": "firstParty",
               "projectsDirectory": f"{home}/projects", "configDirectory": home}
     if MODE == "signed_out":
@@ -106,6 +129,7 @@ def main():
             out = out.replace(json.dumps(REPLY)[1:-1], json.dumps(reply)[1:-1])
         return out.replace(json.loads(out.splitlines()[0])["session_id"], session)
 
+    keep_transcript(session)
     panellist.play("claude", session, "--resume" in found, prompt, recording, RUNS,
                    f"No conversation found with session ID: {session}\n")
     name, code = RUNS.get(MODE.split(":")[0], RUNS["ok"])

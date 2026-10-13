@@ -97,6 +97,9 @@ goes to its own files, for example quant-no-haiku or quant-no-P03, so the unfilt
 stays. --exclude-persona is how a variant written only to test a trait is kept out of the
 headline: read "Variants" in the unfiltered view, which has both sides of the pair.
 
+Where the system refuses one of the two output files (a sandboxed shell tool, a study directory
+that is not yours to write), one sentence names the file and the reason, and the exit code is 1.
+
 Usage: analyze.py <study-dir> [--exclude-model haiku] [--exclude-persona P03] [--segment mortgage]
 """
 
@@ -453,8 +456,8 @@ def usability(cfg: dict, rows: list[dict], runs: list[dict], names: dict, task_r
         points = stuck_points(cfg, task_rows, step_rows or [])
         res["stuck_points"] = {"definition": STUCK_DEFINITION, "dwell_steps": DWELL, "last_steps": LAST,
                                "points": points}
-        problems = [{"run": r["run"], "problem": note} for r in runs for note in (
-            (r.get("step_notes") or "").split("; ") if r.get("step_notes") else [])]
+        problems = [{"run": r["run"], "problem": note} for r in runs
+                    for note in pl.split_notes(r.get("step_notes") or "")]
         problems += [{"run": r["run"], "problem": "no step log, though the run wrote a task section"}
                      for r in runs if r["written"] and r.get("step_entries") == "0"]
         res["step_logs"] = {"problems": problems}
@@ -662,8 +665,9 @@ def main():
         raise SystemExit(f"The output name {base!r} {pl.NAME_RULE}. Give another with --out.")
 
     def write(printed):
-        (sd / "analysis" / f"{base}.md").write_text("\n".join(md))
-        (sd / "analysis" / f"{base}.json").write_text(json.dumps(without_nan(res), indent=2, default=str))
+        with pl.output(sd / "analysis" / f"{base}.md") as f, pl.output(sd / "analysis" / f"{base}.json") as g:
+            f.write("\n".join(md))
+            g.write(json.dumps(without_nan(res), indent=2, default=str))
         print("\n".join(printed))
         print(f"Wrote analysis/{base}.md and analysis/{base}.json")
 

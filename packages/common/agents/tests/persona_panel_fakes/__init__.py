@@ -21,11 +21,15 @@ CLI's binary and old sessions point to.
     claude/budget          stopped by --max-budget-usd
     claude/error           an API error (not signed in)
     claude/killed          a run cut off by SIGTERM: no result line
+    claude/unreachable     a run with no network, inside a sandbox: two of its ten retries, then
+                           the error result (recorded 13 October 2026)
     codex/ok               a run with one shell command
     codex/resume-1, -2     a first turn and a later resume of the same thread (with a warning item)
     codex/budget           stopped by the under-development token budget
     codex/error            a turn the API refused
     codex/killed           a run cut off by SIGTERM: no closing event
+    codex/nested           a run inside another Codex sandbox: every shell command refused, the
+                           turn completed (recorded 13 October 2026, whole)
     codex/session-file     the token_count event of a session file under $CODEX_HOME/sessions
     pi/ok                  the session file of a run with one tool call: header, prompt, two requests
     pi/resume              what a resume adds to that file: the message and the reply

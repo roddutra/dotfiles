@@ -22,6 +22,12 @@ Flags, per run:
     a hand edit added it), and an answer on record whose section is missing. Both are notes, and
     neither blocks: a follow-up never changes a score
 
+A persona file that cannot be read as its run's own blocks, in a row of its own that names the
+file and the reason: a symbolic link, a FIFO or a folder at its name, a link at a folder above
+it, or a file that may not be read (panel_lib.persona_bytes). A panellist can put any of them
+there, and no script reads through one: the run is not done, and nothing of it is checked,
+scored or extracted. Put a plain file that can be read at the name, or remove what is there.
+
 A usability study has more, per run (panel_lib.py, "Secrets" and run_evidence()):
   - a secret value of any run's test account in its persona file or its step log, or in the name
     of a file in its evidence folder, which blocks: the file, the line and whose secret it was
@@ -56,8 +62,14 @@ question (panel_lib.read_persona): a line under the table names each such run. C
 launcher has settled it.
 
 Exit code 1 when any run has a blocking problem (missing, duplicate, unscored, unknown, changed
-by another run, holding a secret value, or with a file that could not be scanned), or an
-analysis file holds a secret value or could not be scanned.
+by another run, holding a secret value, with a file that could not be scanned, or with a
+persona file that cannot be read as its own), or an analysis file holds a secret value or could
+not be scanned.
+
+The table is printed, and written to analysis/checks.md. Where the system refuses the file (a
+sandboxed shell tool, a study directory that is not yours to write), the table is printed all
+the same, one sentence on stderr names the file and the reason, and the exit code is still what
+the table says.
 
 Usage: check_runs.py <study-dir>
 """
@@ -166,7 +178,7 @@ def check_evidence(run: dict, cfg: dict, known: dict, ids: dict[str, set[str]],
     sd, blocking, notes = cfg["_dir"], [], []
     evidence = pl.run_evidence(cfg, sd, run["run"])
     texts = []  # of the files that could be read
-    for what, form, read in (("persona file", "", lambda: pl.read_kept(pl.personas_dir(sd) / run["file"])),
+    for what, form, read in (("persona file", "", lambda: persona_text(sd, run["file"])),
                              ("step log", "jsonl", lambda: pl.step_log(sd, run["run"]))):
         try:
             text = read()
@@ -216,6 +228,34 @@ def check_evidence(run: dict, cfg: dict, known: dict, ids: dict[str, set[str]],
             notes.append(f"names an identifier of {other_run}'s test account "
                          f"({listed([json.dumps(v) for v in seen])}): it may have seen that run's session")
     return blocking, notes
+
+
+def persona_text(sd: Path, name: str) -> str:
+    """A run's persona file as it is now, to scan it: read as text whatever it holds, and as
+    every persona file is read (panel_lib.persona_bytes). The run itself may have been read
+    from the copy made before a follow-up that is not settled."""
+    return pl.persona_bytes(sd, pl.personas_dir(sd) / name).decode(errors="replace")
+
+
+def unread_rows(cfg: dict, runs: list[dict], known: dict | None) -> list[str]:
+    """A row of the table for each persona file that cannot be read as its run's own (module
+    docstring), which blocks. runs are the ones that were read: one read from the copy made
+    before an unsettled follow-up has its file put right when that is settled, and no row here.
+    The path of a file under panel/ may be a panellist's own text, and is shown as
+    panel_lib.shown_path() allows."""
+    sd, read, rows = cfg["_dir"], {r["file"] for r in runs}, []
+    for path, entry in pl.persona_files(sd):
+        why = None if path.name in read else pl.persona_problem(sd, path)
+        if not why:
+            continue
+        if known is None:  # a review study has no secret to look for: only what a name is made of decides
+            known = pl.known_secrets(cfg)
+        m = pl.FILE_RE.match(path.name)
+        run = (entry["run"] if entry else pl.run_id(m["pid"], m["model"], int(m["rep"] or 1)) if m
+               else path.stem)
+        rows.append(f"| {pl.shown(known, run, 'a run id that is not shown')} | its persona file "
+                    f"{pl.shown_path(known, path.relative_to(sd))} cannot be read as the run's own ({why}) | - |")
+    return rows
 
 
 def scan_study(cfg: dict) -> tuple[dict, dict, list[str], int]:
@@ -277,12 +317,18 @@ def main():
         if blocking or notes:  # a run id is made from a file's name, which in panel/ may be a panellist's own
             name = pl.shown(known, r["run"], "a run id that is not shown") if known else r["run"]
             lines.append(f"| {name} | {'; '.join(blocking) or '-'} | {'; '.join(notes) or '-'} |")
+    unread = unread_rows(cfg, runs, known)
+    lines, bad = lines + unread, bad + len(unread)
     expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
     lines += ["", f"{pl.plural(len(runs), 'run file')} of {expected} expected; {bad} with blocking problems."]
     lines += found + pl.unsettled_lines(runs)
-    (sd / "analysis").mkdir(exist_ok=True)
-    (sd / "analysis" / "checks.md").write_text("\n".join(lines) + "\n")
-    print("\n".join(lines))
+    print("\n".join(lines), flush=True)
+    kept = sd / "analysis" / "checks.md"
+    try:  # after the table: a study directory that cannot be written still gets its checks
+        kept.parent.mkdir(exist_ok=True)
+        kept.write_text("\n".join(lines) + "\n")
+    except OSError as err:
+        print(pl.not_written(kept, err), file=sys.stderr)
     sys.exit(1 if bad or leaks else 0)
 
 

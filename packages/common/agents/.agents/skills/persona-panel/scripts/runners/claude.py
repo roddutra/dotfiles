@@ -90,6 +90,12 @@ stderr then holds the CLI's message. A resume of a session that has no transcrip
 `No conversation found with session ID: <id>` on stderr and nothing on stdout, exit code 1
 (verified, also after the transcript was removed): that is "session_lost".
 
+With no network (verified on 13 October 2026, in a sandbox that allowed none) a run prints its
+init line, ten `api_retry` lines over about three minutes, then an error result whose text is
+`API Error: Can't reach the API server`, a dash, `check your internet or DNS (EAI_AGAIN)`, with
+`terminal_reason` `api_error`, no `api_error_status` and exit code 1. A second run from the same
+shell ends the same way, so that text is "cannot_run" (UNREACHABLE below).
+
 Usage, scope "session": tokens come from `modelUsage` (summed over models) and cost from
 `total_cost_usd`. Both are running totals for the whole session, including resumes and spend
 by a process that was killed. The top-level `usage` object covers this process only and is all
@@ -103,6 +109,13 @@ with a folder of the same name beside it for subagent transcripts. `claude auth 
 projectsDirectory. There is no command that deletes one session (`claude purge <dir>` deletes
 every session started in a directory, and that directory's memory), so purge_command removes
 the transcript itself. Removing it makes the id unknown to `--resume` (verified).
+
+Where the projects directory cannot be written, a run still starts, reads, writes its files and
+ends with a clean result, and leaves no transcript (verified on 13 October 2026, with the
+configuration directory read-only in a sandbox): nothing can resume it, ask it a follow-up or
+purge it, and nothing in its output says so. So shell_check() tests that directory with a
+write before any run, and parse_result() looks for the transcript of the session a process
+ran in: none is "session_saved" false.
 
 Not settled: the exact headless output at a usage limit; whether `claude auth status` notices
 a revoked token; whether the account email can be kept out of context.
@@ -118,7 +131,8 @@ import uuid
 
 import browser_session
 
-from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
+from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, \
+    unwritable, usage
 
 CLI = "claude"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -153,6 +167,10 @@ USAGE_LIMIT = {
 }
 # How a resume of a session that is gone starts its one line on stderr.
 SESSION_LOST = "No conversation found with session ID"  # verified
+# The text of an error result when the CLI could not reach its provider at all, after its own ten
+# retries: no run from the same shell does better. Verified for a shell with no network (the name
+# lookup failed, EAI_AGAIN). Any character stands for the apostrophe, which the CLI may print curly.
+UNREACHABLE = re.compile(r"Can.t reach the API server")
 # The CLI's reply to a run with no prompt, which check() uses as proof that every option parsed.
 NO_PROMPT = "Input must be provided"  # verified
 UUID = re.compile(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}")
@@ -252,9 +270,24 @@ def _usage_limit(res: dict, lines: list[dict]) -> tuple[bool, int | None]:
     return hit, reset if isinstance(reset, (int, float)) else None
 
 
+def _projects() -> str | None:
+    """The directory the CLI keeps its transcripts under, as the CLI itself reports it (also
+    when it is signed out). None when it does not say."""
+    return _auth_status(_env())[1].get("projectsDirectory") or None
+
+
+def _transcripts(session_id) -> list[str] | None:
+    """The transcripts of a session, by id under the projects directory. None when the id is
+    not one this runner made, or the CLI does not say where its transcripts are."""
+    projects = _projects() if UUID.fullmatch(session_id or "") else None
+    return glob.glob(os.path.join(glob.escape(projects), "*", session_id + ".jsonl")) if projects else None
+
+
 def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
     lines = json_lines(stdout)
     out = result(session_id=next((x["session_id"] for x in lines if isinstance(x.get("session_id"), str)), None))
+    found = _transcripts(out["session_id"])  # of a process that got as far as naming its session
+    out["session_saved"] = None if found is None else bool(found)
     res = next((x for x in reversed(lines) if x.get("type") == "result"), None)
     if res is None:
         out["message"] = last_line(stderr) or f"{CLI} ended without a result ({exited(exit_code)})"
@@ -271,6 +304,8 @@ def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
     else:
         limited, reset_at = _usage_limit(res, lines)
         out.update(outcome="usage_limit" if limited else "error", reset_at=reset_at, message=reason)
+        if not limited and UNREACHABLE.search(reason):
+            out["cannot_run"] = f"it could not reach its provider ({reason})"
     return out
 
 
@@ -305,6 +340,21 @@ def check() -> dict:
     return {"ok": True, "message": f"{version[1]}, signed in ({signed_in})"}
 
 
+def shell_check() -> dict:
+    """Whether the projects directory can be written: a run in a shell where it cannot leaves
+    no transcript (module docstring, "Sessions"). That is the directory the transcripts go
+    under, wherever the configuration directory is, which a run does without (the same
+    paragraph), so that one is not tested. Nor is the folder of one working directory beneath
+    the projects directory: this is not told the working directory. The CLI has no sandbox of
+    its own to build, and whether it reaches its provider is seen in a run's own output
+    (UNREACHABLE)."""
+    projects = _projects()
+    why = unwritable(projects) if projects else None
+    if why:
+        return {"ok": False, "message": f"cannot write to {projects}, where it keeps its sessions ({why})"}
+    return {"ok": True, "message": ""}
+
+
 def model_status(entry: dict) -> dict:
     """Nothing is known of one model without a call to it, so the answers for the whole CLI
     stand: every model reads images, and check() covers the login. An unknown model fails at the API."""
@@ -314,8 +364,5 @@ def model_status(entry: dict) -> dict:
 def purge_command(session_id: str, workdir) -> list | None:
     """Removes the session's transcript and the folder beside it, found by id under the CLI's
     projects directory. None when the id is not one this runner made or no transcript exists."""
-    if not UUID.fullmatch(session_id or ""):
-        return None
-    projects = _auth_status(_env())[1].get("projectsDirectory")
-    found = glob.glob(os.path.join(glob.escape(projects), "*", session_id + ".jsonl")) if projects else []
+    found = _transcripts(session_id)
     return ["rm", "-rf", "--", found[0], found[0][:-len(".jsonl")]] if found else None

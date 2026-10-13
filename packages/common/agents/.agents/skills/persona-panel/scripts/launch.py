@@ -35,7 +35,9 @@ States, recorded in runs.json (fields in panel_lib.py):
   failed    the process ended with nothing written           next: run
 
 How it behaves:
-- The persona file decides "done", never the exit code (panel_lib.run_state).
+- The persona file decides "done", never the exit code (panel_lib.run_state). Only a plain file
+  is one: a symbolic link, a FIFO or a folder at its name, or a link at a folder above it, is
+  read as no file (panel_lib.persona_bytes), so its run is not done. check_runs.py says why.
 - "run" starts only pending and failed runs, and retries a failed one once. "resume" continues
   only partial and blocked runs, in their original sessions. A run with no session to continue
   is started afresh when it has written nothing, and otherwise left for you to decide. That
@@ -61,12 +63,31 @@ How it behaves:
 - A process that exits with an error before printing anything never ran as the CLI: a sandbox
   that lets the CLI start and then refuses what it needs ends this way. No attempt is recorded
   and nothing is marked failed. The launcher prints the command and the CLI's message, starts
-  nothing more on that runner in this command, and suggests a terminal. A run whose CLI started,
-  printed and then failed is failed, and retried once.
-- Before anything starts, every runner needed is checked (installed, signed in, options still
-  accepted). If one fails nothing starts, unless --allow-missing, which leaves its runs alone.
-  Nor does a run that may browse start while the agent-browser CLI is not on PATH: "plan" names
-  that as a problem, and "run", "pilot" and "resume" refuse.
+  nothing more on that runner in this command, and names the two ways out of a sandboxed shell
+  tool (panel_lib.SANDBOX_HINT): ask the harness to run the command outside its sandbox, or
+  run launch.py from a terminal. A run whose CLI started, printed and then failed is failed,
+  and retried once.
+- A process whose output shows that no run of its CLI can work from this shell (its runner's
+  parse_result() says "cannot_run": the CLI could not build its own sandbox, or could not reach
+  its provider) is not retried, and nothing more starts on that runner in this command: the
+  next would spend the same time and tokens to end the same way. The attempt stays on record,
+  with its usage and its session, which may hold the materials and can be purged. The run is
+  failed with the CLI's own words as the reason, and the launcher names the two ways out once.
+- Before anything starts, every runner needed is checked: installed, signed in, options still
+  accepted (its check()), and able to do a run from this shell at all (its shell_check(): the
+  directory where its harness keeps sessions can be written, and whatever else the runner knows
+  its CLI needs, such as a sandbox of its own). So is the study directory, which must take a
+  file. Neither check makes a model call or tests the network. If a runner fails nothing
+  starts, unless --allow-missing, which leaves its runs alone. A runner that this shell cannot
+  run is refused by name, with what it cannot do here and the two ways out. Nor does a run
+  that may browse start while the agent-browser CLI is not on PATH: "plan" names that as a
+  problem, and "run", "pilot" and "resume" refuse.
+- A run whose process ended in a session that its harness did not keep (parse_result() says
+  "session_saved": false, as where the harness could not write its own folder) is said once,
+  when the attempt ends: "session not saved: this run cannot be resumed or asked a follow-up".
+  The session is noted on the run ("unsaved"), "status" shows the same words, "resume" starts
+  the run afresh when it has written nothing and otherwise leaves it alone, and followup.py
+  refuses it. A failed run is not noted: "run" starts it in a new session anyway.
 - No panellist run starts while a concept of the study has nothing captured under
   panel/materials, or is short of a page, state or item: "run", "pilot" and "resume" name the
   concepts, what each lacks and capture.py, as "plan" does. Analyst and writer jobs do not read
@@ -74,11 +95,71 @@ How it behaves:
 - One launcher per study (.launch.lock). The lock file is opened without following a symbolic
   link and without waiting: a link or a FIFO left at its name is no lock, "status" then shows
   no launcher, and a command that needs the study refuses in a sentence until the lead has
-  deleted it. Processes outlive the launcher and write to <study>/logs/, so a launcher that
+  deleted it. The file is the study's from its scaffold on (init_study.py), and no command
+  removes it: a launcher that ends empties the record it wrote there and leaves the file, so
+  the next launcher and every command that reads lock the same one. A file that is empty names
+  no launcher. One that still names a launcher which is gone was left by a launcher that was
+  killed: the next says "Cleared a stale lock" and writes over it.
+  Whether a launcher has the study is what the lock says, from whatever shell it
+  is asked: "status", "plan" and "stop" ask with a shared lock that is not waited for and is
+  let go at once (taken()), and a launcher that finds only such a lock in its way asks again,
+  so none of them can turn a launcher away. A shell in another process namespace, as inside a
+  harness's sandbox, sees the lock and no process of the study. "status" there says "Launcher:
+  running" with the command and process id on record, then one line: this shell cannot see
+  the launcher's processes, and run states are as last recorded. It says nothing of any run's
+  process or browser session, and calls no run gone. "stop" there signals nothing and says
+  where to run it, and a command that needs the study is refused as anywhere. So "Launcher:
+  not running" means the same in every shell. The launcher records the process namespace it
+  runs in beside its process id, where the system names one (run_watchdog.py namespace()): a
+  process of another namespace that holds that id, under that start identity, is not taken
+  for the launcher and is never signalled (Lock.holder()).
+  Processes outlive the launcher and write to <study>/logs/, so a launcher that
   was killed loses nothing: the next one settles the runs
   that have ended, from their end records, and adopts the ones still alive, without starting a
   duplicate. Each watchdog records itself and its CLI in <study>/logs/ before the CLI runs, so
   a run is found even when the launcher died before noting it in runs.json.
+- No launcher settles, stops, starts again or scaffolds over a run that is alive where it
+  cannot look. With no launcher there is no study lock to tell by, so each attempt has a lock
+  of its own: its watchdog holds logs/<run id>.<attempt>.lock for as long as it lives, and the
+  system lets go of it when the watchdog ends, however it ends (run_watchdog.py, "The lock of
+  an attempt"). Every shell sees that lock, whatever processes it sees, and it is asked as the
+  study's is (taken()). A run in flight whose watchdog holds its lock and is not to be seen
+  under the id it recorded is out of sight (unseen(), out_of_sight()): alive, in another
+  process namespace than the shell's. "status" there shows its process as "unseen", says
+  nothing of its browser session, does not call it gone, and prints the line it prints of a
+  launcher it cannot see. Every command that takes the study (run, pilot, resume, stop, check,
+  release, purge-sessions --yes, followup.py ask, init_study.py --force, archive.py) leaves
+  the lock as it found it, changes and signals nothing, and exits with 1, naming the runs and
+  the two ways out of a sandboxed shell tool (Lock.acquire()). "followup.py list" lists, and
+  settles nothing. Where the study cannot be written either, as in a sandbox that shows it
+  read-only, no command is given the lock, and each that needs it says so of the lock file.
+  archive.py goes on without it there, for a round that was archived read-only, and keeps a
+  shared lock on the lock file in its place until the round is copied (Lock.share()): no
+  launcher is given the study meanwhile, so none can start a run under the copy, and one that
+  tries says after ASKING seconds that the study is being read, and to try again. Under that
+  lock the locks of the watchdogs are asked all the same, which a descriptor that only reads
+  can do, and the archive is refused in the same words (Lock.blind()). A study at rest has
+  that file to share, as it is never removed. Where there is none all the same, in a study
+  from before the scaffold made one that no command has taken since, or flock cannot tell,
+  nothing keeps a launcher away: archive.py then copies only a study with no run on record as
+  running, and refuses any other.
+- A lock that is free is a watchdog that has ended, in whatever namespace it ran: the run is
+  then any launcher's to settle, from its end record or as one whose watchdog was killed. So a
+  launcher that was started inside a sandbox and killed with it, watchdogs and CLIs and all,
+  holds no study up: the next command from any shell settles its runs. One thing is left that
+  a launcher then cannot do. Each watchdog records the process namespace it runs in, where the
+  system names one (run_watchdog.py namespace(): Linux does, macOS does not). When a watchdog
+  has gone without an end record and that namespace is not the shell's, the ids on record
+  name no process here, or someone else's: the launcher looks none of them up and signals
+  nothing, settles the run as one whose watchdog was killed, and says, in a line and in the
+  run's reason, that its CLI could not be checked from this shell because it ran in another
+  process namespace (elsewhere()). Its browser session is stopped by its socket alone: the
+  daemon and the browser on that session's record are ids of the same namespace, and are not
+  looked up or signalled either (Supervisor.browser_left()). That is all the namespace a
+  watchdog records is for: it never keeps a command from the study.
+- An attempt with no lock file is from before watchdogs held one, and one whose lock cannot be
+  asked is on a file system without locks: either is looked for by the process ids on record,
+  as it always was.
 - The CLI's standard input, output and error of an attempt are logs/<run id>.<attempt>.in,
   .out and .err. Each is made anew and handed to the process by descriptor, and read back
   without following a link or waiting, so a link or a FIFO put at one of those names neither
@@ -87,8 +168,10 @@ How it behaves:
 - A watchdog that was itself killed leaves no end record. The launcher then kills its CLI's
   process group if the CLI is still running. If the CLI has gone and a group of its id still
   has processes, the launcher cannot prove they are the run's: it leaves them alone, names
-  them, and "status" keeps naming them until the run next starts. Either way the attempt is
-  charged from its start to now, and no further than the time it was allowed: the most it can
+  them, and "status" keeps naming them until the run next starts. Where no list of processes
+  can be had, from /proc or from ps, it says that it could not check the group: it never
+  takes "cannot tell" for "nothing left". Either way the attempt is charged from its start to
+  now, and no further than the time it was allowed: the most it can
   have used, so the run gets no time past its limit. A watchdog that was killed while it was
   still starting the attempt's browser session left that command on record in the pid file
   (run_watchdog.py, "Hooks"). The launcher ends it first, by the same rule, and only then stops
@@ -122,6 +205,10 @@ How it behaves:
   which stops its CLI as at a time limit. With no launcher alive, "stop" asks the watchdogs
   itself. SIGINT, SIGTERM and SIGHUP to the launcher do the same, and a second one skips the
   grace. A launcher started with SIGHUP ignored (under nohup) leaves it ignored and carries on.
+  In a usability study "stop" stops the runs even when a command of the study that an earlier
+  launcher left cannot be proved gone, where every other command exits at once (below): it
+  stops them first, starts no command of the study, then says what holds the study up, on
+  stderr, and exits with 1.
 
 Usability studies ("type": "usability", panel_lib.py). Every run browses, nothing is captured,
 and a run is done when its persona file has a scored section for every task and the final
@@ -136,12 +223,21 @@ sections. What is added for them:
   allows (panel_lib.steps_begun). The attempt number an entry carries decides nothing: it is
   the launcher's to issue, so an entry under a number of the panellist's own is one more step
   of the task and starts no count again, and a line that is no entry of a step hides none. The
-  log is never read through a symbolic link: one that cannot be read as the run's stops
-  nothing, and check_runs.py fails the run for it. The launcher notes the decision in the
-  attempt ("stop": the task, the step and the limit) and only then asks the attempt's
-  watchdog, which stops the CLI as at a time limit, with the grace. The run becomes limited
-  with the reason "step limit: task T2, step 26 of 25" and "limited_by": "steps", keeps
-  everything it wrote, is not restarted by "run", and
+  count is the launcher's own, on record in the attempt ("steps") and never under panel/, and
+  it only goes up: a log that is emptied, cut short or changed where the launcher had read it
+  is noted there and said once, and what it holds from the first changed line on is counted on
+  top of what was counted (Supervisor.over_steps()). The log is never read through a symbolic
+  link. A run with no log yet has begun no step, but a log that is there and cannot be read as
+  the run's own (a link, a FIFO, a file or folder that may not be read) would leave the run
+  with no backstop, so it stops the run too, as limited with "limited_by": "steps" and the
+  reason "step limit: its step log cannot be read as the run's own (<why>), so its steps
+  cannot be counted". It is a backstop and no more: it counts the steps a log shows while a
+  launcher is running, and a panellist that logs none is bounded by the time limit alone. The
+  launcher notes the decision in the attempt ("stop": the task, the step and the limit, or
+  why the log could not be read) and only then asks the attempt's watchdog, which stops the
+  CLI as at a time limit, with the grace. The run becomes limited with the reason "step
+  limit: task T2, step 26 of 25" and "limited_by": "steps", keeps everything it wrote, is not
+  restarted by "run", and
   is continued with "resume --runs <id> --extend" like any limited run: the task that was under
   way starts again as a new attempt in the step log, counted from 1. The end record of a watchdog
   says only that it was asked to stop, so the reason is the decision on record: a launcher
@@ -153,6 +249,22 @@ sections. What is added for them:
   the attempt ends, and are extract_scores.py's to record. What such a line repeats of the
   panellist's own text, a task id the study does not have, is shown as panel_lib.shown()
   allows: a value that holds a known secret is described, never printed.
+- A run that is started afresh begins with evidence that is only its own. Every start that is
+  not a resume is a new session ("run" on a failed run or on one that "stop" left pending, the
+  retry of a failed run, the restart of a run whose session is gone), which logs each task as
+  attempt 1 and names its screenshots as an earlier session did. So the launcher first moves
+  what the run's evidence folder held to logs/<run id>.<attempt>.evidence, named for the last
+  attempt the run had, makes the folder anew, says so, and takes the run's "task_attempts"
+  off its entry. Nothing is deleted: what is set aside is the lead's, is never read as
+  evidence, scanned or archived, and is put back when the attempt never runs as the CLI
+  (Supervisor.set_aside()). A resumed run keeps its evidence folder as it is.
+- A harness's own message, which the launcher prints when a CLI fails and keeps as the run's
+  reason, can hold a secret of a test account that the panellist read or typed. One that
+  holds a secret a scan knows (panel_lib.secrets_in()) is neither printed nor kept, in
+  runs.json or followups.json: the reason says that the harness's message is withheld
+  because it holds a secret of a test account, and names logs/<run id>.<attempt>.err and
+  .out, which have it. A message with no known secret is repeated as it is, as is every
+  message of a review study (Supervisor.repeated()).
 - Success checks (accounts.py). When a run reaches a final state, done, limited or failed, the
   "success_check" of each task that has one is run for it, before its account is torn down:
   without a shell, from the study directory, with the run id as its last argument. Exit code 0
@@ -204,7 +316,19 @@ sections. What is added for them:
   it is ended with its process group (SIGTERM, --grace seconds, SIGKILL) and waited for, and
   either way it is taken as unfinished. A provision is then cleared up with accounts.teardown
   before the run is provisioned again, a teardown is done again, and a reset or a check runs
-  again when next due. No two commands of a study ever run side by side.
+  again when next due. No two commands of a study ever run side by side. A command that left
+  a process which nothing proves gone, or one on a system with no list of processes to prove
+  it by, stops every launcher command with what to do (accounts.py): only "stop" does its
+  work first, and it starts no command of the study while that holds, so the success checks
+  and teardowns of the runs it settles stay due for the next launcher command. A command
+  holds a lock of its own while it or anything it started lives, on accounts/command.lock,
+  and its record names the process namespace it was started in. Of a command recorded in
+  another namespace than the shell's no id is looked up or signalled, as of a run's, and the
+  record is never cleared from there, whatever the lock shows: a lock that is free is no
+  proof that a command which may have closed its descriptor has ended. Every launcher command
+  stops and says to run it from the shell that started the command, and, with the lock free,
+  what to delete when that shell was in a sandbox that has ended (accounts.py, "The lock of
+  a command"). That is the one place where a study waits for the lead after a sandbox ended.
 - Teardown. When a run reaches a final state, done, limited or failed, its account is let go,
   after its success checks:
   accounts.teardown is run with the run id, the secrets are taken out of the record and of the
@@ -256,6 +380,8 @@ sections. What is added for them:
 
 The plan. "plan" starts no run, makes no model call and changes no file of the study. It asks
 each runner whether its CLI is signed in, and a harness may refresh its own login when asked.
+It also asks whether this shell can run each CLI, and tests the study directory with a write
+that leaves nothing behind.
 It works before init_study.py and capture.py have run, and says what is missing. It prints:
 - every run with its persona, model key, runner, model, effort, limits in force and prompt file
 - what each run can read under panel/materials (pages, images, bytes), and which provider
@@ -279,10 +405,15 @@ It works before init_study.py and capture.py have run, and says what is missing.
   cap, what the runner could not switch off (with what browsing opens only where the study's
   runs can browse on it), and any variable set in your environment that can change who is
   billed (names only)
-- whether each runner's CLI is installed and signed in, and what a runner can tell of each
-  model entry without a model call (model_status): a model its harness does not have, one
-  whose provider is not signed in and, in a full-materials study, one that reads no images
-  each stop the plan and "run"
+- whether each runner's CLI is installed and signed in, and whether it can do a run from the
+  shell the plan was made in: one that cannot is shown as "CANNOT BE USED" in place of
+  "ready", with what it cannot do here and the two ways out, and stops the plan as it stops
+  "run". A plan made in another shell than the one that will run the panel says nothing of
+  that one
+- a problem when this shell cannot write to the study directory: no run can start from it
+- what a runner can tell of each model entry without a model call (model_status): a model
+  its harness does not have, one whose provider is not signed in and, in a full-materials
+  study, one that reads no images each stop the plan and "run"
 - for a usability study, in place of the materials: the target, each task with its step limit
   and success check, that the launcher is the backstop of a step limit, when the success checks
   run and what their exit codes say, the time rule and the accounts
@@ -310,10 +441,11 @@ It works before init_study.py and capture.py have run, and says what is missing.
   "guaranteed maximum" or "estimate" and "ceiling.caveats" lists them. After "resume --extend"
   the ceiling no longer holds, and the plan says so
 - dollar figures are list-price equivalents under a subscription login
-Exit code 1 when a runner cannot be used, or when study.json asks a runner for something it
-cannot do: an effort it does not have, or a study with "materials": "full" on a runner that
-cannot open images. "run" refuses to start those runs for the same reasons. On a native-mode
-study it lists the runs and says that native mode has no limits, usage record or isolation.
+Exit code 1 when a runner cannot be used, when this shell cannot run it or write to the study
+directory, or when study.json asks a runner for something it cannot do: an effort it does not
+have, or a study with "materials": "full" on a runner that cannot open images. "run" refuses to
+start those runs for the same reasons. On a native-mode study it lists the runs and says that
+native mode has no limits, usage record or isolation.
 
 A text-only study ("materials": "text"). Its runs get no browser access, whatever "browse" says,
 and a runner that cannot open images is welcome. The plan says that panellists receive the page
@@ -385,8 +517,12 @@ lock and a watchdog, within its runner's concurrency.
   logs/<run id>.<attempt>.before. When it has ended, the file must be that copy plus one
   appended "## Follow-up <n>" section (panel_lib.followup_change). Anything else is rejected:
   the file is put back from the copy, and what the panellist wrote is kept in
-  logs/<run id>.<attempt>.rejected.md. A process that replied without writing has its section
-  written from the reply. The outcome goes to followups.json (format in panel_lib.py).
+  logs/<run id>.<attempt>.rejected.md. A file that can no longer be read as the run's own is
+  rejected too, with nothing kept of what a link points at. A process that replied without
+  writing has its section written from the reply. The file is written through no symbolic link
+  (panel_lib.write_persona): where it cannot be put, the launcher stops and says so, with the
+  decision on record for the next command. The outcome goes to followups.json (format in
+  panel_lib.py).
 - Settling is in steps, each on record before the next: the decision, then what it does to the
   file, then the outcome, then the attempt's end in runs.json, then the copy is deleted
   (panel_lib.py, "Settling"). A launcher killed between two of them leaves a state that the next
@@ -400,7 +536,9 @@ lock and a watchdog, within its runner's concurrency.
   command, the same way, and by "followup.py list" when no launcher has the study. A run that
   was still queued when its launcher was killed is then recorded as "not asked". "stop" stops a
   follow-up as it stops a run. A harness that turns the request away closes its runner for the
-  command, and a CLI that cannot be started, or a session that is gone, is no attempt.
+  command, as does a CLI that shows it cannot do a run from this shell, and a CLI that cannot be
+  started, or a session that is gone, is no attempt. A run whose session was not saved is
+  refused before anything starts.
 - An analyst's brief names the follow-ups answered by its personas, and the writer's names them
   all, each saying that the answers are qualitative only and are cited as prompted
   (assets/qual-brief-followups.md and assets/synthesis-brief-followups.md, in place of
@@ -412,6 +550,7 @@ from __future__ import annotations
 import argparse
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import shlex
@@ -431,11 +570,20 @@ import runners  # noqa: E402
 import runs as tracker  # noqa: E402
 
 LOCK = ".launch.lock"
+NAMING = 0.05  # seconds a launcher that has just taken the lock gets to write its name over the one it found there
+ASKING = 5.0   # seconds a launcher keeps asking for a lock that only a command which asks is holding (taken())
+# What a command says when a launcher has the study and its processes are not to be seen (Lock.holder()), and
+# what "status" says when runs that no launcher has are alive and not to be seen (unseen()).
+UNSEEN = "This shell cannot see the launcher's processes, as inside a sandbox"
 STATES = ("done", "running", "pending", "partial", "limited", "blocked", "failed")
 STARTS = {"run": ("pending", "failed"), "pilot": ("pending", "failed"), "resume": ("partial", "blocked")}
 MIN_BUDGET = 0.000001  # in dollars: less than this left is nothing left, and no harness takes a smaller cap
 TURNED_AWAY = "the harness is turning requests away"  # a usage limit, a rate limit or a capacity refusal
 LOST = "its session no longer exists"  # a resume found it gone from the harness
+NOT_SAVED = "its session was not saved"  # its runner found that the harness had kept none when its process ended
+UNSAVED = "session not saved: this run cannot be resumed or asked a follow-up"  # what "status" shows of such a run
+# Why a runner starts nothing more in a command: a process of it showed that no run of its CLI can work here.
+NO_RUN_HERE = "its CLI cannot do a run from this shell"
 ENDINGS = {"usage_limit": "its harness turned its request away", "budget": "its process reached its budget",
            "error": "its process ended with an error"}
 # Added to the resume message of a run that may browse: each attempt has a browser session of its own.
@@ -465,8 +613,20 @@ def duration(seconds: float) -> str:
 
 def step_reason(stop: dict) -> str:
     """Why a run was stopped at a task's step limit, from the decision on record in its attempt
-    (Supervisor.step_limit()): the task, and the step it began beyond the limit."""
+    (Supervisor.step_limit()): the task, and the step it began beyond the limit. With "unread",
+    why its step log could not be read as the run's own: its steps could then not be counted."""
+    if stop.get("unread"):
+        return (f"step limit: its step log cannot be read as the run's own ({stop['unread']}), so its steps cannot "
+                "be counted")
     return f"step limit: task {stop['task']}, step {stop['step']} of {stop['of']}"
+
+
+MARK = 16  # hex digits in the mark of a line of a step log: what the backstop knows a line it has read by
+
+
+def marks(lines: list[str]) -> list[str]:
+    """The mark of each line of a step log, which tells whether the line is still as it was read."""
+    return [hashlib.blake2b(line.encode("utf-8", "replace"), digest_size=MARK // 2).hexdigest() for line in lines]
 
 
 # ---------------------------------------------------------------- processes
@@ -489,7 +649,11 @@ def recorded(pid_file: Path) -> dict | None:
     (pid, start identity) pair. None when no watchdog got as far as recording itself, and then
     no CLI ran either: the process that becomes the CLI waits for that record. With "hook", the
     same of its "before" command, when the watchdog was killed while that ran: the CLI was then
-    never executed, and the command may still be running (run_watchdog.py, "Hooks").
+    never executed, and the command may still be running (run_watchdog.py, "Hooks"). With
+    "namespace", the process namespace the watchdog said the attempt runs in, where the system
+    names one: the ids mean these processes only to a shell in it (elsewhere()). And "lock",
+    the path of the attempt's lock file, which that watchdog holds a lock on for as long as it
+    lives (unseen()): the file beside this one, whether or not it is there.
 
     Waits for the lock on the file. The launcher that starts a watchdog holds it from before
     the watchdog exists, and the watchdog and its child hold it until the child is the CLI or
@@ -512,7 +676,74 @@ def recorded(pid_file: Path) -> dict | None:
     pairs = [(int(pid), started or None) for pid, _, started in lines if pid.isdigit()]
     if len(pairs) not in (2, 3):
         return None
-    return {"watchdog": pairs[0], "cli": pairs[1], **({"hook": pairs[2]} if len(pairs) == 3 else {})}
+    within = next((named for word, _, named in lines if word == "namespace" and named), None)
+    return {"watchdog": pairs[0], "cli": pairs[1], **({"hook": pairs[2]} if len(pairs) == 3 else {}),
+            **({"namespace": within} if within else {}), "lock": Path(pid_file).with_suffix(".lock")}
+
+
+def taken(fd: int) -> bool | None:
+    """Whether a process holds an exclusive lock on the file this descriptor has open: a
+    launcher on the study's lock file (Lock), a watchdog on its attempt's (unseen()). None
+    where flock cannot tell. Asked with a shared lock that is not waited for, which an
+    exclusive one refuses, and which is let go at once. A descriptor that only reads will do,
+    and nothing is written: this works where the study cannot be written."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except OSError as e:
+        return True if e.errno in (errno.EWOULDBLOCK, errno.EACCES) else None
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    return False
+
+
+def elsewhere(pids: dict | None) -> bool:
+    """Whether the processes on record in an attempt's pid file (recorded()) were recorded in
+    another process namespace than this shell's, as they are to a shell inside a harness's
+    sandbox and to one outside a sandbox they were started in. Their ids then name no process
+    here, or someone else's, so none of them is looked up or signalled from this shell. It says
+    nothing of whether the attempt is alive, which the lock of its watchdog does (unseen()),
+    and keeps no command from a study: it is why the CLI of a watchdog that has gone without an
+    end record is not looked for here, and said not to have been (Supervisor.outcome()).
+    Decided from what is on record and never from a process that is missing: the watchdog named
+    its namespace, this shell has one (run_watchdog.py namespace()), and the two differ. False
+    when either is not known, and the ids are then gone by as before.
+
+    The same is asked of the launcher that the study's lock file names, which records its
+    namespace as a watchdog does (Lock.holder())."""
+    there, here = (pids or {}).get("namespace"), watchdog.namespace()
+    return bool(there and here and there != here)
+
+
+def living(pids: dict, *who: str) -> bool:
+    """Whether a process on record in an attempt's pid file (recorded()) is to be seen running:
+    any of them, or of the ones named. Ids recorded in another process namespace are not looked
+    up (elsewhere()): a process found under one of them here is not the attempt's."""
+    return not elsewhere(pids) and any(alive(*pids[x]) for x in who or ("watchdog", "cli", "hook") if x in pids)
+
+
+def unseen(pids: dict | None) -> bool:
+    """Whether an attempt is alive where this shell cannot look: its watchdog holds the lock of
+    the attempt (run_watchdog.py, "The lock of an attempt"), which every shell sees, and is not
+    to be seen under the id it recorded. That is a run started outside the sandbox this shell
+    is in, or inside one this shell is outside of. Nothing here may be made of its processes
+    being missing: it is not gone, not to be settled, and not to be started again.
+
+    The lock alone says so, and never the namespace on record: a lock that is free is a
+    watchdog that has ended, wherever it ran, and its run is this shell's to settle like any
+    other. So is an attempt with no lock file, from before watchdogs held one, and one whose
+    lock cannot be asked: False for each, and the ids on record are gone by, as they always
+    were. The watchdog is looked for first and the lock asked second: a watchdog never takes
+    its lock twice, so one that holds it after it was not to be seen was alive and out of
+    sight all along, and one that ended in between has let go of it."""
+    if not pids or living(pids, "watchdog"):
+        return False
+    try:
+        fd = watchdog.opened(pids["lock"])
+    except OSError:
+        return False
+    try:
+        return taken(fd) is True
+    finally:
+        os.close(fd)
 
 
 def end_record(path: Path) -> dict | None:
@@ -539,10 +770,12 @@ def printed(path: Path) -> str:
         return ""
 
 
-def kill_group(pid: int, started: str | None) -> tuple[bool, list[int]]:
+def kill_group(pid: int, started: str | None) -> tuple[bool, list[int] | None]:
     """Kill the process group of a CLI whose watchdog was killed, where the group is certain to
     be the CLI's. Returns (whether a group was killed, the processes left untouched). The same
     for the group of a "before" command that such a watchdog left running: read "CLI" as it.
+    The second is None when no list of processes could be had, from /proc or from ps: nothing
+    then says whether the group is empty, and "cannot tell" is never given as "none left".
 
     The group is the CLI's for certain only while the CLI itself, its leader, is still there:
     a process that holds the recorded id under the recorded start identity. It holds the id, so
@@ -568,7 +801,30 @@ def kill_group(pid: int, started: str | None) -> tuple[bool, list[int]]:
     try:
         return False, sorted([*([pid] if found else []), *watchdog.others(pid)])
     except (OSError, subprocess.SubprocessError):
-        return False, []  # no list of processes to be had: nothing to name
+        return False, None  # no list of processes to be had: whether anything is left is not known
+
+
+def unchecked(groups: list[int]) -> str:
+    """What to say when nothing could tell whether the attempt of a killed watchdog left a process
+    behind (kill_group())."""
+    ids = ", ".join(map(str, groups))
+    return (f"no list of processes can be had on this system (neither /proc nor ps), so the launcher could not check "
+            f"whether process group {ids} still holds anything left over from this run. That is not known to be "
+            "empty: look for yourself, and stop what is the run's.")
+
+
+# What a launcher says of the CLI of a watchdog that was killed, when its ids were recorded in another
+# process namespace than the shell's (elsewhere()): in the run's reason, and at the head of a line of its own.
+APART = "its CLI could not be checked from this shell because it ran in another process namespace"
+
+
+def unlooked(pids: list[int]) -> str:
+    """What to say when the attempt of a killed watchdog ran in another process namespace than this
+    shell's, so that nothing here could look for what it left (Supervisor.outcome())."""
+    ids = ", ".join(map(str, pids))
+    return (f"{APART}. Nothing was looked up or signalled under pid {ids}, which is of that namespace and not of "
+            "this one. If that namespace is still there, as a sandbox that is still open is, look in it for "
+            "yourself, and stop what is the run's.")
 
 
 def leftover(left: dict) -> str:
@@ -622,8 +878,35 @@ class Lock:
     """One launcher per study. <study>/.launch.lock is held with flock for as long as the
     launcher lives, so the system releases it when the launcher dies, however it dies. The file
     holds {"pid", "identity", "command", "grace", "since"}, which is how "stop" and "status"
-    find the launcher, and how a second launcher is refused where flock does not work. A file
-    left by a dead launcher names no live process: it is reported and replaced.
+    name the launcher, and how a second launcher is refused where flock does not work, and
+    "namespace", the process namespace the launcher runs in, where the system names one
+    (run_watchdog.py namespace()): the id means the launcher only to a shell in it. A file
+    left by a dead launcher names no live process: it is reported and written over.
+
+    The file stays. The scaffold makes it, empty (make()), a command that takes a study
+    without one makes it, and no command removes it: a launcher that ends empties the record
+    it wrote, under its lock, and leaves the file (release()). So every launcher and every
+    reader locks the one file, and a shell that cannot write the study has it to lock in a
+    study at rest (share()). A file that is empty names no launcher, and is not one that a
+    launcher left behind.
+
+    Whether a launcher has the study is what the lock says, and not whether the process the
+    file names is to be seen (holder()): a shell in another process namespace, as inside a
+    harness's sandbox, sees the lock and no process of the study. A command that only asks,
+    "status" and "plan" among them, holds no lock: it asks with a shared one that is not
+    waited for and is let go at once (taken()). A launcher's lock is exclusive, so it refuses
+    that, and a launcher that finds only a shared one in its way asks again (acquire()): no
+    command that asks can turn a launcher away. One command keeps a shared lock: archive.py,
+    for as long as it copies a study that it cannot write (share()). A launcher that finds
+    that one still in its way after ASKING seconds says that the study is being read, and to
+    try again.
+
+    The lock is not given for a study with a run that is alive where this shell cannot look
+    (out_of_sight()): one a killed launcher left under its watchdog, in another process
+    namespace. Every command that takes the study comes through acquire(), so that is where
+    each of them is refused, with the lock file as it was found and nothing of the study
+    changed or signalled. That is looked for also where the lock file cannot be opened to
+    write, for a caller that would go on without the study (blind(), share()).
 
     The file is opened as every file of an attempt is (run_watchdog.py opened()): never through
     a symbolic link, which would put the lock on a file somewhere else, and never waiting, as a
@@ -634,56 +917,174 @@ class Lock:
 
     def __init__(self, study_dir: Path):
         self.sd, self.path, self.fd = study_dir, study_dir / LOCK, None
+        self.hidden = None  # what acquire() said of runs it could not see: why it left the study, or may not go on
+        self.reading = None  # what acquire() said when all that was in its way was a lock that a reader keeps
+        self.shared = False  # whether the lock held is a reader's (share()): the file is then not this command's
 
     @staticmethod
-    def holder(study_dir: Path) -> dict | None:
-        """What the lock file says, when the launcher it names is alive. None otherwise."""
+    def holder(study_dir: Path, ask: bool = True) -> dict | None:
+        """The launcher that has the study, as the lock file names it, with "seen": whether its
+        process is to be seen from this shell. None when no launcher has the study.
+
+        The lock decides (taken()): while it is held a launcher is running, whatever the process
+        id on record looks like from here. In another process namespace, as inside a harness's
+        sandbox, the lock is seen and the process is not: "seen" is then false, and nothing a
+        command says may rest on seeing a process of the study. That is believed only of a lock
+        still held after NAMING seconds, with the file read again: a launcher that has just
+        taken the lock writes its name over the one it found, and one that has just ended lets
+        go of the lock with the file emptied, or, killed, while the file still names it. A lock
+        that is held is not always named: "pid" and "command" are then None. A file that names
+        no one, as a launcher that ended leaves it, is no launcher once its lock is free.
+
+        The process is seen when one holds the id on record under the start identity on record,
+        and the namespace on record is not known to be another than this shell's (elsewhere()).
+        An id recorded in another namespace names no process here, or someone else's: whatever
+        holds it is not the launcher, "seen" is false, and no command signals it. A file with no
+        namespace, from a system that names none or a launcher from before one was recorded, is
+        gone by its id and start identity alone.
+
+        Where the lock is not held, or flock cannot tell, a launcher has the study when the
+        process the file names is seen alive. ask false is for the launcher that has asked the
+        lock itself (acquire()), which a lock of its own would answer."""
         try:
-            with os.fdopen(watchdog.opened(study_dir / LOCK)) as f:
-                info = json.loads(f.read())
-        except (OSError, ValueError):
+            fd = watchdog.opened(study_dir / LOCK)
+        except OSError:
             return None
-        return info if isinstance(info, dict) and alive(info.get("pid"), info.get("identity")) else None
+
+        def named() -> tuple[dict, bool]:
+            try:
+                info = json.loads(os.pread(fd, watchdog.RECORD, 0))
+            except (OSError, ValueError):
+                info = None
+            info = info if isinstance(info, dict) else {}
+            return info, not elsewhere(info) and alive(info.get("pid"), info.get("identity"))
+
+        try:
+            held = ask and taken(fd)
+            info, seen = named()
+            if held and not seen:
+                time.sleep(NAMING)
+                held = taken(fd)
+                info, seen = named()
+        finally:
+            os.close(fd)
+        if held:
+            return {"pid": None, "command": None, **info, "seen": seen}
+        return {**info, "seen": True} if seen else None
+
+    @staticmethod
+    def make(study_dir: Path):
+        """Make the study's lock file where there is none, empty, as the scaffold does
+        (init_study.py): a shell that cannot write the study can then keep a launcher away
+        before the study has had one (share()). Whatever is at its name already is left as it
+        is: a lock file is not emptied, as a launcher may hold it, and one that this shell may
+        only read is a lock file all the same, opened as share() opens it. Where there is none
+        and none can be made, this raises what the system said, or Unsafe for what is at its
+        name and is no lock, as acquire() tells them apart, for the scaffold to say and fail
+        on."""
+        path = study_dir / LOCK
+        try:
+            os.close(watchdog.opened(path, os.O_RDWR | os.O_CREAT))
+        except watchdog.Unsafe:
+            raise
+        except OSError as err:
+            try:
+                os.close(watchdog.opened(path))
+            except OSError:
+                raise err from None
+
+    @staticmethod
+    def who(held: dict | None) -> str:
+        """The launcher that has the study, in brackets, for a sentence that refuses for it."""
+        if not (held and held.get("pid")):
+            return ""
+        return f' (pid {held["pid"]}, running "{held.get("command")}" since {clock(held.get("since"))})'
 
     def refuse(self):
-        held = self.holder(self.sd) or {}
-        who = f' (pid {held["pid"]}, running "{held.get("command")}" since {clock(held.get("since"))})' if held else ""
-        raise SystemExit(f"Another launcher has this study{who}. Wait for it to finish, or stop it with: "
-                         f"launch.py {self.sd} stop")
+        """Exit, saying why the study is not this command's: for the launcher that has it, or,
+        with none, for the runs acquire() found out of sight, or for the reader whose lock
+        acquire() could not wait out. A launcher is looked for first: runs that are out of
+        sight under one are its own, and it is what there is to wait for."""
+        held = self.holder(self.sd)
+        if (self.hidden or self.reading) and not held:
+            raise SystemExit(self.hidden or self.reading)
+        raise SystemExit(f"Another launcher has this study{self.who(held)}. Wait for it to finish, or stop it with: "
+                         f"launch.py {self.sd} stop"
+                         + (f". {UNSEEN}, so stop it from a shell that can." if held and not held["seen"] else ""))
 
     def acquire(self, command: str, grace: float, must: bool = True) -> bool:
         """Take the study for command. When it cannot be taken, exit saying why, or with must
-        false return False: for a command that carries on without the study."""
+        false return False: for a command that carries on without the study.
+
+        It is not taken while a run of it is out of sight (blind()), looked for under the
+        lock, where no launcher can start one or settle one meanwhile, and before anything is
+        written: the lock is let go and its file left as it was found, or empty where there
+        was none, so the command has changed nothing else. refuse() then says which runs, also
+        for a caller that passed must false and has to stop after all.
+
+        A lock that only a shared one keeps it from is asked for again, for ASKING seconds: a
+        command that asks has let go by then (taken()). One still in the way after that is
+        kept by a command that reads the study, as archive.py does while it copies one it
+        cannot write (share()). The study is not taken, and refuse() says that it is being
+        read and to try again (self.reading), which is no launcher to wait for or to stop.
+
+        A lock file that cannot be opened to write gives no lock to look under: a study that a
+        sandbox shows read-only, or something at its name that no launcher made. Nor does one
+        in a study directory that cannot be written: the file is there from the scaffold on,
+        so that it opens no longer says that a run can be recorded beside it. With must
+        false the runs out of sight are looked for all the same before False is returned,
+        which needs no more than to read, and are kept for refuse() in self.hidden. A caller
+        that would go on without the study, as archive.py does, has more to ask first, under
+        a lock of its own where it can have one (share()).
+
+        The file is made where there is none and never removed or put aside (release()), so
+        the one that is opened here is the one every other command locks."""
+        give_up = time.time() + ASKING
         while True:
             try:
                 fd = watchdog.opened(self.path, os.O_RDWR | os.O_CREAT)
+                if not os.access(self.sd, os.W_OK):  # the file was there to open, and no other can be made beside it
+                    os.close(fd)
+                    raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
             except watchdog.Unsafe as err:  # a link or a FIFO at its name, or another user's file: no lock of ours
                 if not must:
+                    self.blind(command)
                     return False
                 raise SystemExit(f"{err}, so it is no lock a launcher made, and \"{command}\" did nothing. Look at "
                                  "what is there, then delete it.")
             except OSError as err:  # a sandboxed shell, or a study directory that is not ours to write
                 if not must:
+                    self.blind(command)
                     return False
                 raise SystemExit(
                     f"The system refused to write {self.path} ({err.strerror}). The launcher records every run in "
-                    f'the study directory, so "{command}" did nothing. Run launch.py from a terminal if your '
-                    "shell tool is sandboxed.")
+                    f'the study directory, so "{command}" did nothing. {pl.SANDBOX_HINT}')
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as e:
                 if e.errno in (errno.EWOULDBLOCK, errno.EACCES):
+                    # A launcher's lock refuses a shared one as well. Where a shared one is given, what was in
+                    # the way was a command that only asks (taken()), which has let go by now: ask again.
+                    shared = taken(fd) is False
                     os.close(fd)
+                    if shared and time.time() < give_up:
+                        time.sleep(0.01)
+                        continue
+                    if shared:  # still there: no question takes that long, so a command that reads keeps it
+                        self.reading = (
+                            f"Something is reading this study and keeps a shared lock on {self.path} meanwhile, as "
+                            f"archive.py does while it copies a study from a shell that cannot write it, so "
+                            f'"{command}" did nothing. Try again once it has finished.')
                     if not must:
                         return False
                     self.refuse()
-            try:  # a launcher that just finished may have removed the file we opened: take the new one
-                if os.fstat(fd).st_ino == os.stat(self.path, follow_symlinks=False).st_ino:
-                    break
-            except FileNotFoundError:
-                pass
+            break
+        if self.holder(self.sd, ask=False):  # where flock does not work: the process the file names is alive
             os.close(fd)
-        if self.holder(self.sd):
+            if not must:
+                return False
+            self.refuse()
+        if self.blind(command):
             os.close(fd)
             if not must:
                 return False
@@ -692,18 +1093,93 @@ class Lock:
             left_by = json.loads(os.pread(fd, watchdog.RECORD, 0)).get("pid")
             say(f"Cleared a stale lock left by a launcher that is gone (pid {left_by}).")
         except (OSError, ValueError, AttributeError):
-            pass
+            pass  # an empty file among them: the last launcher ended by itself, and left nothing behind
+        within = watchdog.namespace()  # where the system names one: the id below means this process only there
         os.ftruncate(fd, 0)
         os.write(fd, json.dumps({"pid": os.getpid(), "identity": identity(os.getpid()), "command": command,
-                                 "grace": grace, "since": round(time.time())}).encode())
+                                 "grace": grace, "since": round(time.time()),
+                                 **({"namespace": within} if within else {})}).encode())
         self.fd = fd
         return True
 
+    def blind(self, command: str) -> bool:
+        """Whether a run of the study is alive where this shell cannot look (out_of_sight()),
+        with what command is to say of it kept in self.hidden, for refuse(). Nothing is written
+        and no lock is kept: the pid file and the lock of each attempt in flight are opened to
+        read and asked with a shared lock, so this answers in a study that cannot be written."""
+        try:
+            hidden = out_of_sight(self.sd, pl.read_runs(self.sd)) if (self.sd / "runs.json").exists() else []
+        except ValueError:  # not valid JSON: it names no run to look for
+            hidden = []
+        if hidden:
+            self.hidden = (
+                f"This shell cannot see the processes of {', '.join(hidden)}, as inside a sandbox: "
+                + agree(len(hidden), "its watchdog holds its lock, so that run is",
+                        "their watchdogs hold their locks, so those runs are")
+                + f" still at work where this shell cannot look. \"{command}\" changed nothing and signalled "
+                f"nothing. {pl.SANDBOX_HINT} Runs that were started inside a sandbox end when it does, and any "
+                "shell settles them then.")
+        return bool(hidden)
+
+    def share(self, command: str) -> bool:
+        """Hold the study for a command that only reads it and cannot take it: archive.py, of a
+        study that cannot be written, where acquire() gives no lock. A shared lock on the lock
+        file, through a descriptor that only reads, kept until release(). A launcher's lock is
+        exclusive and is not given while this one is held, so no launcher can start a run, or
+        settle one, from before this looks at the study until the caller lets go: what is
+        found here stays so. Nothing is written, and the file is left where it is, as it is
+        not this command's. Returns whether the lock is held.
+
+        Under the lock, or with none, the same is asked: whether a run is alive where this
+        shell cannot look (blind()), and then whether the file names a launcher that is seen
+        alive (holder(), which is how a launcher is found where flock does not work). Exits
+        as refuse() does for either, with nothing held, and when the shared lock is refused
+        and goes on being refused, which is a launcher at work.
+
+        False when no lock can be had: there is no lock file to open, as in a study from
+        before the scaffold made one and launchers left theirs (make(), release()), what is
+        at its name is no lock of this user's, or flock cannot tell. Nothing then keeps a
+        launcher from starting after the two looks above. The runs are looked for before the
+        launcher, so one that started a run and was killed in between leaves that run on
+        record in runs.json, which the caller reads last and decides by."""
+        while True:
+            try:
+                fd = watchdog.opened(self.path)
+            except OSError:  # no file, or nothing a launcher made: no lock to hold
+                fd = None
+                break
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except OSError as e:
+                os.close(fd)
+                fd = None
+                if e.errno not in (errno.EWOULDBLOCK, errno.EACCES):
+                    break  # flock cannot tell
+                if self.holder(self.sd):  # only an exclusive lock refuses this one: a launcher, when it is still held
+                    self.refuse()
+                continue  # let go since, by a command that was itself not given the study: ask again
+            break  # on the one file every launcher locks: none removes it or puts another in its place
+        self.fd, self.shared = fd, fd is not None
+        try:
+            if self.blind(command) or self.holder(self.sd):
+                self.refuse()
+        except BaseException:
+            self.release()
+            raise
+        return self.shared
+
     def release(self):
+        """Let go of the study. A launcher empties the record it wrote, while it still has the
+        lock, and leaves the file where it is: the next launcher and every reader lock the
+        same one, and one that names no launcher is no stale lock. A reader wrote nothing."""
         if self.fd is not None:
-            self.path.unlink(missing_ok=True)
+            if not self.shared:
+                try:
+                    os.ftruncate(self.fd, 0)
+                except OSError:
+                    pass  # it goes on naming this launcher, as one that was killed: the next says so and writes over it
             os.close(self.fd)
-            self.fd = None
+            self.fd, self.shared = None, False
 
 
 # ---------------------------------------------------------------- roles
@@ -858,7 +1334,8 @@ def left(cfg: dict, entry: dict) -> dict:
 # ---------------------------------------------------------------- the supervisor
 
 # What starting an attempt overwrites, or takes out of the entry.
-UNDONE = ("state", "pid", "pid_identity", "session", "reason", "reset_at", "limited_by", "checks", "released")
+UNDONE = ("state", "pid", "pid_identity", "session", "reason", "reset_at", "limited_by", "checks", "released",
+          "task_attempts")
 
 
 asking = pl.asking  # the follow-up attempt of a run that is not settled yet
@@ -871,16 +1348,32 @@ def in_flight(e: dict) -> bool:
 
 
 def at_work(study_dir: Path, runs: list[dict]) -> list[str]:
-    """The runs and jobs that have a process alive now: the watchdog or the CLI of an attempt in
-    flight, found through the attempt's own pid file, as "status" finds them."""
+    """The runs and jobs that have a process to be seen alive now: the watchdog or the CLI of an
+    attempt in flight, found through the attempt's own pid file, as "status" finds them. One
+    that is alive where this shell cannot look is not among them (out_of_sight())."""
     busy = []
     for e in runs:
         attempts = e.get("attempts") or []
         pids = recorded(Path(study_dir) / "logs" / f"{e['run']}.{attempts[-1]['n']}.pid") if (
             in_flight(e) and attempts) else None
-        if pids and any(alive(*pair) for pair in pids.values()):
+        if pids and living(pids):
             busy.append(e["run"])
     return busy
+
+
+def out_of_sight(study_dir: Path, runs: list[dict]) -> list[str]:
+    """The runs and jobs in flight that are alive where this shell cannot look: the watchdog of
+    the last attempt holds its lock and is not to be seen (unseen()). Such a run is for a
+    launcher in a shell that sees its processes, and what they leave. One whose watchdog has
+    ended is not among them, wherever it ran: its lock is free, and any launcher settles it."""
+    hidden = []
+    for e in runs:
+        attempts = e.get("attempts") or []
+        pids = recorded(Path(study_dir) / "logs" / f"{e['run']}.{attempts[-1]['n']}.pid") if (
+            in_flight(e) and attempts) else None
+        if unseen(pids):
+            hidden.append(e["run"])
+    return hidden
 
 
 def undo(e: dict):
@@ -901,11 +1394,12 @@ class Child:
     def __init__(self, entry: dict, pids: dict, end: Path, proc=None):
         self.entry, self.pids, self.end, self.proc = entry, pids, end, proc
         self.asked = 0  # requests to stop sent to its watchdog
-        self.log_seen = None  # the size and change time of its step log when over_steps() last read it
+        self.log_seen = None  # what its step log was known by when over_steps() last read it (pl.step_log_stamp())
+        self.cut = False  # that read found the log shorter than what had been read of it: looked at once more
 
     def watched(self) -> bool:
         """Whether its watchdog is still running."""
-        return self.proc.poll() is None if self.proc else alive(*self.pids["watchdog"])
+        return self.proc.poll() is None if self.proc else living(self.pids, "watchdog")
 
 
 class Supervisor:
@@ -934,6 +1428,7 @@ class Supervisor:
         self.let_go = set()     # runs whose account this launcher has tried to tear down: once for each command
         self.left_alone = False  # a run this command was asked to continue cannot be
         self.distrusted = set()  # the browser session records this command has refused, and said so
+        self.held = None        # why no command of the study may be started: what accounts.recover() stopped for
         self.modules = {}
 
     def runner(self, name: str):
@@ -953,7 +1448,7 @@ class Supervisor:
         for e in self.runs:
             if e["role"] != "panellist":
                 continue
-            digest = pl.file_hash(self.sd / e["file"])
+            digest = pl.file_hash(self.sd, self.sd / e["file"])
             if e["file"] in record["hashes"] and digest == record["hashes"][e["file"]]:
                 continue
             if e["file"] in record["hashes"] and during and e["run"] not in during:
@@ -974,7 +1469,7 @@ class Supervisor:
 
     # ---- runs an earlier launcher left as running
 
-    def reconcile(self, adopt: bool = True, final: bool = True):
+    def reconcile(self, adopt: bool = True, final: bool = True, commands: bool = True):
         """Settle every entry recorded as running. An attempt that has ended is settled from its
         end record, as it would have been by the launcher that started it. One whose watchdog is
         still alive is adopted: it counts against its runner's concurrency, and is settled when
@@ -984,8 +1479,10 @@ class Supervisor:
 
         adopt false is for a command that supervises nothing: an attempt still alive is left
         for the next launcher. final false leaves settle_final() to the caller, which has
-        something to do first with the runs it would finish."""
-        self.recover()  # before anything else: a command of the study left running, a teardown left half done
+        something to do first with the runs it would finish. commands false is for "stop", which
+        has runs to stop whatever became of a command of the study: where recover() would exit,
+        it keeps the reason (self.held) and this launcher starts no command of the study."""
+        self.recover(must=commands)  # before anything else: a command left running, a teardown left half done
         if (self.sd / pl.MODIFICATIONS).exists():  # what changed while no launcher was watching
             self.snapshot([e["run"] for e in self.runs if in_flight(e)])
         for e in self.runs:
@@ -1129,14 +1626,30 @@ class Supervisor:
                                                      state, delete_state=True),
                      "after": browser.stop_command(session), "log": str(self.log(e, n, "hooks").resolve()),
                      "seconds": {"before": browser.START, "after": browser.STOP}}
+        aside = None
+        if usability and not number and kind != "resume":  # a new session: no step or screenshot of an earlier one
+            try:
+                aside = self.set_aside(e)
+            except OSError as err:
+                self.hold(e, f"its evidence folder could not be made its own ({pl.unread(err)})")
+                return
         self.log(e, n, "hooks").unlink(missing_ok=True)  # as with the end record below
         # The order readers rely on (the snapshot rule, panel_lib.py): the copy, then the attempt in
         # runs.json, and only then the process that may change the file.
         if number:  # the file as it is: all the follow-up may do is append one section to it. In one
-            pl.copy_atomic(self.sd / e["file"], self.log(e, n, "before"))  # step: a copy on disk is whole
+            try:    # step: a copy on disk is whole
+                pl.keep_copy(self.log(e, n, "before"), pl.persona_bytes(self.sd, self.sd / e["file"]))
+            except OSError as err:  # no longer a file that can be read as the run's own: nothing to ask about
+                why = f"its persona file could not be copied before the question ({pl.unread(err)})"
+                say(f"{e['run']}: follow-up {number} could not be asked: {why}.")
+                pl.record_followup(self.sd, number, e["run"], outcome="could not start", reason=why)
+                return
         end.unlink(missing_ok=True)  # left by a process that never ran as the CLI: this attempt has its number
-        # The pid file, locked until the watchdog has recorded itself and the CLI in it, and the
-        # CLI is running or has been refused. Made anew: a link left at its name is not written through.
+        # The attempt's lock file, which its watchdog locks for as long as it lives and nothing ever
+        # writes (unseen()). Then the pid file, locked until the watchdog has recorded itself and the
+        # CLI in it, and the CLI is running or has been refused. Each is made anew: a link left at
+        # its name is not written through, and a lock file an earlier use of this number left is not this one.
+        watch = watchdog.fresh(self.log(e, n, "lock"))
         handle = watchdog.fresh(pid_file, os.O_RDWR)
         try:
             fcntl.flock(handle, fcntl.LOCK_EX)
@@ -1148,8 +1661,10 @@ class Supervisor:
             "ended": None, "seconds": None, "exit_code": None, "outcome": None, "state": None,
             "session": command["session_id"], "was": {k: e[k] for k in UNDONE if k in e},
             **({"followup": number} if number else {}),
+            **({"evidence_aside": aside} if aside else {}),
             # What its step log held already: the step limit is watched in what this attempt adds (over_steps()).
-            **({"step_entries": len(pl.read_steps(self.sd, e["run"])[0])} if usability and not number else {})}]
+            **({"steps": {"seen": "".join(marks(self.log_lines(e))), "begun": {}}} if usability and not number
+               else {})}]
         e.update(pid=None, pid_identity=None)
         if number:  # the run stays as it is: asking() is what says a process is at work on it
             pl.record_followup(self.sd, number, e["run"], attempt=n, session=command["session_id"])
@@ -1164,6 +1679,8 @@ class Supervisor:
                     if task in written and (keep or record.get("kept"))}
             for was in ("limited_by", "checks", "released"):  # of the state this attempt takes the run out of
                 e.pop(was, None)
+            if kind != "resume":  # a new session logs every task as attempt 1, in a step log that holds no other
+                e.pop("task_attempts", None)
             if kept:
                 e["checks"] = kept
         self.save()  # before the process exists, so a launcher killed from here on leaves the attempt on record
@@ -1179,14 +1696,15 @@ class Supervisor:
                 stdin.flush()
                 stdin.seek(0)
                 proc = subprocess.Popen(
-                    [*WATCHDOG, *(["--hooks", json.dumps(hooks)] if hooks else []), str(handle), str(end),
-                     f"{remaining['seconds']:.3f}", f"{self.grace:.3f}", *command["argv"]],
+                    [*WATCHDOG, *(["--hooks", json.dumps(hooks)] if hooks else []), str(handle), str(watch),
+                     str(end), f"{remaining['seconds']:.3f}", f"{self.grace:.3f}", *command["argv"]],
                     stdin=stdin, stdout=out, stderr=err, cwd=workdir, env=command["env"],
-                    start_new_session=True, pass_fds=(handle,))
+                    start_new_session=True, pass_fds=(handle, watch))
         except OSError as err:
             refused = str(err)
         finally:
             os.close(handle)
+            os.close(watch)  # the watchdog's alone from here on: only its own end lets go of the lock
         if proc:
             pids = recorded(pid_file)  # returns once the CLI is running, or will never be
             while not pids and proc.poll() is None:  # only where the file system has no locks to wait on
@@ -1220,7 +1738,7 @@ class Supervisor:
         launcher has not tried it."""
         self.take_back(e, f"{how} ({said})")
         say(f"{e['run']}: could not be started. {how}: {shlex.join(argv[:4])} ... ({said}). Nothing was marked as "
-            "failed. Run launch.py from a terminal if your shell tool is sandboxed.")
+            f"failed. {pl.SANDBOX_HINT}")
         if not settling:
             self.refused = True
             self.close(e["runner"], closing, "in this command")
@@ -1243,7 +1761,12 @@ class Supervisor:
         in place, each with its reason (browser_session.py). With "refused", the reason, when the
         session's record cannot be trusted: nothing of it was then touched. With "by":
         "watchdog", what a session that its watchdog did stop has left. None when the attempt
-        has no session on record, or it was stopped with nothing left."""
+        has no session on record, or it was stopped with nothing left.
+
+        The daemon and the browser on the session's record are processes of the attempt, in the
+        namespace its watchdog recorded. Where that is another than this shell's (elsewhere()),
+        neither id is looked up or signalled here, as the CLI's is not (outcome()): the session
+        is stopped by its socket alone, if it answers there (browser_session.py stop() apart)."""
         log = self.base(e, n)
         self.log(e, n, "state").unlink(missing_ok=True)  # the copy of a saved state that no session loaded
         if not browser.unstopped(log):
@@ -1253,7 +1776,7 @@ class Supervisor:
             return {**rest, "by": "watchdog"} if rest else None
         record = browser.record_of(log)
         try:
-            result = browser.stop(log)
+            result = browser.stop(log, apart=elsewhere(recorded(self.log(e, n, "pid"))))
         except browser.Refused as err:
             if str(record) not in self.distrusted:
                 say(f"{e['run']}: the record of its browser session cannot be trusted ({err}), so nothing of the "
@@ -1282,7 +1805,7 @@ class Supervisor:
             if not (e and in_flight(e) and e["attempts"][-1]["n"] == int(n)):
                 return False
             pids = recorded(self.log(e, int(n), "pid"))
-            return bool(pids) and any(alive(*pair) for pair in pids.values())
+            return bool(pids) and living(pids)
 
         for record in sorted((self.sd / "logs").glob("*.browser")):
             name, _, n = record.name[:-len(".browser")].rpartition(".")
@@ -1295,17 +1818,30 @@ class Supervisor:
 
     # ---- the test accounts of a usability study (accounts.py)
 
-    def recover(self):
+    def recover(self, must: bool = True):
         """What a usability study's launcher does before anything else (accounts.py): end a
         command of the study that an earlier launcher left running, and wait for it, so that
         none is ever started beside it. Then finish every teardown that was cut short, whatever
         state its run is in: its command may have removed the account already, so the account
         is not one to carry on with. A teardown that fails here is said like any other, and
-        leaves the account owed one (accounts.owed())."""
+        leaves the account owed one (accounts.owed()).
+
+        accounts.recover() exits when it cannot prove that command gone, and so does every
+        launcher command but one. must false is for "stop": the reason is kept in self.held, and
+        while it is there this launcher starts no command of the study (check(), release()).
+        The runs it settles keep their accounts in force, and the success checks and teardowns
+        that are due stay due: the next launcher command sees to them, as after a launcher
+        that was killed (settle_final())."""
         if self.cfg["type"] != "usability":
             return
-        for line in accounts.recover(self.cfg, self.grace):
-            say(line)
+        try:
+            for line in accounts.recover(self.cfg, self.grace):
+                say(line)
+        except accounts.Held as held:
+            if must:
+                raise
+            self.held = str(held)
+            return
         entries = {e["run"]: e for e in self.runs}
         for record in accounts.records(self.sd):
             e = entries.get(record["run"]) or {"run": record["run"], "role": "panellist"}
@@ -1321,6 +1857,29 @@ class Supervisor:
             return accounts.known(self.cfg)
         except (SystemExit, OSError):
             return None
+
+    def repeated(self, e: dict, n: int, said: str) -> str:
+        """A harness's own message about attempt n of a run, as the launcher prints it and keeps
+        it: in a reason in runs.json and followups.json, and so in "status". Every such message
+        comes from the runner's parse_result() and passes through here first (ended()).
+
+        In a usability study it can hold a secret of a test account, which the panellist read
+        or typed and the harness repeats as it fails. So a message that holds a secret a scan
+        knows (pl.secrets_in(), the search check_runs.py makes) is withheld: what is printed
+        and kept says so, and names the lead-only files of the attempt that have the harness's
+        words. So is every message when the fingerprint record cannot be used, as nothing can
+        then be looked for. A message with no known secret, and any message of a review
+        study, is repeated as it is."""
+        if self.cfg["type"] != "usability" or not said.strip():
+            return said
+        known = self.known()
+        if known is not None and not pl.secrets_in(known, said):
+            return said
+        files = " or ".join(f"logs/{e['run']}.{n}.{ext}" for ext in ("err", "out"))
+        return ("the harness's message is withheld because "
+                + ("it holds a secret of a test account" if known is not None else
+                   "it could not be checked for the secrets of the test accounts")
+                + f": it is in {files}, which are yours alone to read")
 
     def prepare(self, e: dict, kind: str):
         """What a usability run needs before an attempt of it starts: accounts.reset, when the
@@ -1396,6 +1955,16 @@ class Supervisor:
         next launcher that settles the run tries again."""
         if self.cfg["type"] != "usability" or e["role"] != "panellist":
             return
+        if self.held:  # no command of the study is started beside what an earlier one may have left (recover())
+            due = [what for what, there in (
+                ("its success checks were not run", any("success_check" in t and t["id"] not in (e.get("checks") or {})
+                                                        for t in self.cfg["tasks"])),
+                ("its test account stays in force", accounts.in_force(accounts.read(self.sd, e["run"])))) if there]
+            if due and e["run"] not in self.let_go:
+                say(f"{e['run']}: {' and '.join(due)}, because no command of the study is started beside a process "
+                    "that an earlier one may have left. The next launcher command sees to it.")
+            self.let_go.add(e["run"])
+            return
         self.let_go.add(e["run"])
         record = accounts.teardown(self.cfg, e["run"])
         if not record:
@@ -1419,9 +1988,10 @@ class Supervisor:
         or replaced by a new one when the run was continued): a check run now cannot see what
         the run did. force runs it all the same, and says that the verdict was replaced. A task
         with no verdict on record is tried either way. Returns the records made: {task id:
-        record}."""
+        record}. None is run while a command an earlier launcher left is unaccounted for
+        (recover(), self.held): release() says so."""
         made, kept = {}, 0
-        if self.cfg["type"] != "usability" or e["role"] != "panellist":
+        if self.cfg["type"] != "usability" or e["role"] != "panellist" or self.held:
             return made
         torn_down = accounts.gone(accounts.read(self.sd, e["run"]))
         for t in self.cfg["tasks"]:
@@ -1476,7 +2046,83 @@ class Supervisor:
                     self.check(e)
                 self.release(e)
 
+    # ---- the evidence of a usability run that is started afresh
+
+    def set_aside(self, e: dict) -> str | None:
+        """Give a usability run that is about to be started afresh an evidence folder that holds
+        nothing: a new session logs every task as attempt 1 and names its screenshots as the
+        earlier one did, so what an earlier session left would mix with its steps and be
+        written over. Whatever is at the folder's name is moved, as it is, to
+        logs/<run id>.<attempt>.evidence, named for the last attempt the run has had, with a
+        number after it when an earlier scaffold left that name taken, and the folder is made
+        anew. Returns that name, relative to the study directory, or None when the folder held
+        nothing.
+
+        As with a persona file, nothing a run left is deleted by the launcher: what is set
+        aside is the lead's to look at, is never read as evidence, and is never archived or
+        scanned, like everything in logs/. The evidence root is opened without following a
+        link and the folder is moved by its name in it, so a link put where the folder was is
+        moved as a link and nothing is reached through it. Raises OSError when the root cannot
+        be read as the study's or the folder cannot be moved: the caller then starts nothing.
+
+        The attempt notes the name ("evidence_aside") and take_back() puts the folder back, so a
+        run whose attempt never ran as the CLI is as it was. A launcher killed between this and
+        that note leaves the earlier evidence in logs/ and loses none of it."""
+        run, last = e["run"], len(e.get("attempts") or [])
+        root = pl.evidence_fd(self.sd, None)
+        try:
+            try:
+                held = bool(pl.evidence_names(self.sd, run))
+            except OSError:  # a link or a file where its folder was, or a folder that may not be listed: as it is
+                held = True
+            kept = None
+            if held:
+                (self.sd / "logs").mkdir(exist_ok=True)
+                taken = (f"logs/{run}.{last}.evidence" + (f".{i}" if i else "") for i in range(1 << 16))
+                kept = next(name for name in taken if not os.path.lexists(self.sd / name))
+                os.rename(run, self.sd / kept, src_dir_fd=root)
+            try:
+                os.mkdir(run, dir_fd=root)
+            except FileExistsError:
+                pass
+        finally:
+            os.close(root)
+        if kept:
+            say(f"{run}: it starts afresh, so what its evidence folder held was set aside in {kept}, which is yours "
+                "alone to read. Its step log and screenshots begin again, and nothing set aside is read as evidence "
+                "or archived.")
+        return kept
+
+    def put_back(self, e: dict, kept: str):
+        """Undo set_aside() for an attempt that never ran as the CLI: the folder made for it,
+        which then holds nothing, goes, and what was set aside is the run's evidence again."""
+        if not os.path.lexists(self.sd / kept):
+            return  # put back already, by a launcher that was killed before it could note it
+        try:
+            root = pl.evidence_fd(self.sd, None)
+            try:
+                try:
+                    os.rmdir(e["run"], dir_fd=root)
+                except FileNotFoundError:
+                    pass
+                os.rename(self.sd / kept, e["run"], dst_dir_fd=root)
+            finally:
+                os.close(root)
+            say(f"{e['run']}: it was not started after all, so what was set aside in {kept} is its evidence again.")
+        except OSError as err:
+            say(f"{e['run']}: what its evidence folder held before this attempt could not be put back "
+                f"({pl.unread(err)}). It stays in {kept}.")
+
     # ---- the step limit of a usability task
+
+    def log_lines(self, e: dict) -> list[str]:
+        """The whole lines of a run's step log as an attempt of it starts, which the backstop then
+        takes as read. Empty when there is no log, and when there is one that cannot be read as
+        the run's: the backstop stops the run for that as soon as it looks (over_steps())."""
+        try:
+            return pl.step_lines(self.sd, e["run"])[0]
+        except OSError:
+            return []
 
     def over_steps(self, child: Child) -> dict | None:
         """The backstop of a task's step limit. A panellist keeps to the limit itself. When the
@@ -1491,41 +2137,85 @@ class Supervisor:
         is no entry, and an entry with no whole step number or with a phase that is neither,
         begin no step and hide none.
 
+        The count is the launcher's own and only goes up. It is on record in the attempt
+        ("steps": the marks of the log's lines as last read, and the steps of each task begun
+        so far), never in panel/, so whichever launcher watches the run goes on from it. Each
+        look sets the log's whole lines against the marks: lines after the ones read are new,
+        and are counted. A log that no longer holds what was read of it, cut short or changed
+        at an earlier line, is noted on the attempt ("rewritten"), said the first time, and
+        read again from the first line that differs: what it holds from there on is counted on
+        top of what was counted, so a log that is emptied or written again starts no count
+        again. A log found shorter and otherwise the same is looked at once more at the next
+        poll before that: a file that a tool is writing again reads so for an instant. What
+        stands after the last line feed, an entry still being written, counts towards the
+        decision at once, and for good when its line is whole.
+
         The log is read only when it has changed, and never through a symbolic link, at its own
-        name or at its folder's (pl.step_log()): a log that cannot be read as the run's stops
-        nothing, and check_runs.py fails the run for it. Nothing else in it stops a run: a line
+        name or at its folder's (pl.step_log()). A run with no log yet has begun no step. A log
+        that is there and cannot be read as the run's own (a link, a FIFO, a file that may not
+        be read, or its folder one) would leave the run with no backstop, so it stops the run
+        as well: {"limit": "steps", "unread": why}. Nothing else in a log stops a run: a line
         that is no entry, an entry for a task the study does not have and a step number that
-        goes backwards are for the analysis (pl.step_notes), and ended() says them once."""
+        goes backwards are for the analysis (pl.step_notes), and ended() says them once.
+
+        It counts what the log shows and nothing more: a panellist that logs no step at all is
+        bounded by the run's time limit alone."""
         e = child.entry
-        stamp = pl.step_log_stamp(self.sd, e["run"])
-        if stamp is None or child.log_seen == stamp:
+        attempt = e["attempts"][-1]
+        try:
+            stamp = pl.step_log_stamp(self.sd, e["run"])
+            if stamp == child.log_seen and not child.cut:
+                return None
+            lines, rest = pl.step_lines(self.sd, e["run"])
+        except OSError as err:
+            return {"limit": "steps", "unread": pl.unread(err)}
+        settled, child.log_seen = stamp == child.log_seen, stamp
+        watch = {"seen": "", "begun": {}, **(attempt.get("steps") or {})}
+        seen, now = [watch["seen"][i:i + MARK] for i in range(0, len(watch["seen"]), MARK)], marks(lines)
+        same = next((i for i, (was, held) in enumerate(zip(seen, now)) if was != held), min(len(seen), len(now)))
+        child.cut = same == len(now) < len(seen) and not settled
+        if child.cut:  # shorter, and the same as far as it goes: perhaps caught while it was being written
             return None
-        child.log_seen = stamp
-        entries, before = pl.read_steps(self.sd, e["run"])[0], e["attempts"][-1].get("step_entries") or 0
-        over = pl.steps_begun(self.cfg, entries[before:] if len(entries) >= before else entries)  # made shorter: whole
+        begun, changed = dict(watch["begun"]), same < len(seen)
+        over = pl.steps_begun(self.cfg, pl.steps_of(lines[same:])[0], begun)
+        if changed or same < len(now):
+            attempt["steps"] = {**watch, "seen": "".join(now), "begun": begun,
+                                **({"rewritten": watch.get("rewritten", 0) + 1} if changed else {})}
+        if changed and not watch.get("rewritten"):
+            say(f"{e['run']}: its step log was "
+                + (f"cut short, to {same} of" if same == len(now) else f"changed at line {same + 1}, among")
+                + f" the {plural(len(seen), 'line')} the launcher had read. The steps it had begun stay counted, and "
+                "what the log holds from there on is counted on top.")
+        if not over and rest.strip():
+            over = pl.steps_begun(self.cfg, pl.steps_of([rest])[0], dict(begun))
         return over and {"limit": "steps", "task": over["task"],
                          "attempt": pl.issued_attempts(e).get(over["task"], 1), "step": over["step"], "of": over["of"]}
 
     def step_limit(self, child: Child):
-        """Stop a usability run that has gone past a task's step limit (over_steps()), through
-        its watchdog, as a time limit stops one: SIGTERM, the grace, SIGKILL.
+        """Stop a usability run that has gone past a task's step limit, or whose step log cannot
+        be read as its own (over_steps()), through its watchdog, as a time limit stops one:
+        SIGTERM, the grace, SIGKILL.
 
         The decision is on record in the attempt, under "stop", before the watchdog is asked,
         because the end record a watchdog writes says only that it was asked to stop: ended()
-        goes by the decision, whichever launcher settles the attempt. A launcher that finds a
-        decision it did not make, with the process still alive once the grace has passed, asks
-        again: had the first request arrived, the process would be gone."""
+        goes by the decision, whichever launcher settles the attempt. It is written with the
+        count that led to it, in one step. A launcher that finds a decision it did not make,
+        with the process still alive once the grace has passed, asks again: had the first
+        request arrived, the process would be gone."""
         e = child.entry
         if self.cfg["type"] != "usability" or e["role"] != "panellist" or asking(e) or child.asked:
             return
         attempt = e["attempts"][-1]
         decision = attempt.get("stop")
         if not decision:
+            counted = attempt.get("steps")
             decision = self.over_steps(child)
+            if decision:
+                attempt["stop"] = decision = {**decision, "at": round(time.time(), 3), "grace": self.grace}
+            if decision or attempt.get("steps") is not counted:
+                self.save()
             if not decision:
                 return
-            attempt["stop"] = decision = {**decision, "at": round(time.time(), 3), "grace": self.grace}
-            self.save()
             say(f"{e['run']}: stopping, {step_reason(decision)}")
         elif time.time() < decision["at"] + decision["grace"] + REPLAY:
             return
@@ -1539,9 +2229,13 @@ class Supervisor:
         """undo() the run's last attempt, whose process never did anything as the CLI, and write
         runs.json. One that was to put a follow-up question is recorded as not having started,
         with why, and the copy it made of the persona file goes: last, once runs.json no longer
-        has the attempt, because until then the copy is what readers read (pl.read_persona)."""
+        has the attempt, because until then the copy is what readers read (pl.read_persona).
+        One that was to start a usability run afresh gives the run back the evidence that was
+        set aside for it (put_back())."""
         attempt = e["attempts"][-1]
         undo(e)
+        if attempt.get("evidence_aside"):  # it was to start the run afresh: the run has its evidence again
+            self.put_back(e, attempt["evidence_aside"])
         if attempt["kind"] == "followup":
             pl.record_followup(self.sd, attempt["followup"], e["run"], outcome="could not start", reason=why,
                                attempt=None)
@@ -1573,8 +2267,9 @@ class Supervisor:
             say(f"{e['run']}: {LOST} and it has written nothing, so it is started afresh.")
             self.queue.insert(0, (e, "restart"))
 
-    def close(self, name: str, why: str, how_long: str):
-        """Start nothing more on a runner in this command. Its queued runs keep their state."""
+    def close(self, name: str, why: str, how_long: str, then: str = ""):
+        """Start nothing more on a runner in this command. Its queued runs keep their state.
+        then is what the user can do about it, said after the rest, once."""
         if name in self.closed:
             return
         self.closed[name] = why
@@ -1583,7 +2278,7 @@ class Supervisor:
         stay = agree(len(held), "stays as it is", "stay as they are")
         say(f"{name}: {why}. No more launches on this runner {how_long}"
             + (f", and {plural(len(held), 'queued run')} {stay} ({', '.join(held)})" if held else "")
-            + ". Other runners carry on.")
+            + ". Other runners carry on." + (f" {then}" if then else ""))
 
     # ---- watching
 
@@ -1617,26 +2312,41 @@ class Supervisor:
         A watchdog that has gone without a record was killed. The CLI's process group is then
         killed here if it is certain to be the CLI's (kill_group()), and the record is made up:
         no exit code, no reason, "lost", and under "leftover" the processes that were left
-        untouched. Nothing says when the CLI ended, so the attempt is charged from its start to
-        now, and no further than the allowance its watchdog was given. That is the most it can
-        have used within its limit, so a run is never granted more time than its limit.
+        untouched, and under "unchecked" the groups of which nothing could be told, where no
+        list of processes was to be had. Nothing says when the CLI ended, so the attempt is
+        charged from its start to now, and no further than the allowance its watchdog was
+        given. That is the most it can have used within its limit, so a run is never granted
+        more time than its limit.
 
         A "before" command still on record (recorded()) was running when the watchdog was
         killed. Its group goes first, by the same rule, so that nothing is left to start a
         browser session once ended() has stopped what there is of one. The CLI was never
-        executed: the record says so as a watchdog's own does, under "refused" and "hooks"."""
+        executed: the record says so as a watchdog's own does, under "refused" and "hooks".
+
+        A watchdog that recorded another process namespace than this shell's (elsewhere()) has
+        gone like any other: its lock is free, or this launcher would not have the study
+        (Lock.acquire()). What it left cannot be looked for here, where its ids name no process
+        or someone else's. So no group is looked up or signalled, and the record names the ids
+        under "elsewhere", as they were in that namespace: the CLI, and a "before" command still
+        on record. ended() says so, and stops its browser session without the ids on that
+        session's record (browser_left())."""
         watched = child.watched()
         record = end_record(child.end)  # read second: a watchdog writes it before it goes
         if record or watched:
             return record
         attempt, hook = child.entry["attempts"][-1], child.pids.get("hook")
-        behind = kill_group(*hook)[1] if hook else []
-        killed, left = kill_group(*child.pids["cli"])
+        apart = elsewhere(child.pids)
+        behind = kill_group(*hook)[1] if hook and not apart else []
+        killed, left = (False, []) if apart else kill_group(*child.pids["cli"])
         group = (child.pids["cli"][0], left) if left else (hook[0], behind) if behind else None
         cut_short = "its watchdog was killed while the session was being started"
         return {"ended": min(time.time(), attempt["started"] + attempt["allowed"]), "exit_code": None,
                 "stopped": None, "lost": True, "killed": killed,
                 "leftover": {"group": group[0], "pids": group[1]} if group else None,
+                # The groups nothing could be told of: no list of processes was to be had (kill_group()).
+                "unchecked": [pid for pid, rest in ((child.pids["cli"][0], left), ((hook or [None])[0], behind))
+                              if rest is None],
+                "elsewhere": [pid for pid in (child.pids["cli"][0], (hook or [None])[0]) if pid] if apart else [],
                 **({"refused": cut_short, "hooks": {"before": cut_short, "after": None}} if hook else {})}
 
     def ended(self, child: Child, record: dict, settling: bool = False):
@@ -1646,6 +2356,10 @@ class Supervisor:
         attempt, code, why = e["attempts"][-1], record.get("exit_code"), record.get("stopped")
         if record.get("leftover"):
             say(f"{e['run']}: its watchdog was killed, and {leftover(record['leftover'])}")
+        if record.get("unchecked"):
+            say(f"{e['run']}: its watchdog was killed, and {unchecked(record['unchecked'])}")
+        if record.get("elsewhere"):
+            say(f"{e['run']}: its watchdog was killed, and {unlooked(record['elsewhere'])}")
         # After the CLI has gone, as its watchdog would, and after a "before" command it left (outcome()).
         left_browser = self.browser_left(e, attempt["n"])
         if record.get("refused"):  # the launcher that started it died before it could say so
@@ -1653,6 +2367,9 @@ class Supervisor:
             return
         wrote, complained = (printed(self.log(e, attempt["n"], ext)) for ext in ("out", "err"))
         res = runner.parse_result(wrote, complained, code, attempt.get("session"))
+        res["message"] = self.repeated(e, attempt["n"], res["message"])  # before it is printed or kept anywhere
+        # The same of what shows that no run of this CLI can work from this shell (parse_result() "cannot_run").
+        cause = self.repeated(e, attempt["n"], res["cannot_run"]).strip()
         number = attempt.get("followup")
         if attempt["kind"] in ("resume", "followup") and res["session_lost"]:
             self.session_lost(e, settling)
@@ -1676,8 +2393,9 @@ class Supervisor:
                   else "it was stopped by the stop command" if why == "stop"
                   else None if res["outcome"] == "ok" else ENDINGS[res["outcome"]])
         said = res["message"].strip() if res["outcome"] != "ok" else ""
-        detail = ((f": {said}" if said else "") + (f" (exit code {code})" if code else "")
-                  + (" (its watchdog was killed, so how it ended is not on record)" if record.get("lost") else ""))
+        detail = ((f": {cause or said}" if cause or said else "") + (f" (exit code {code})" if code else "")
+                  + (" (its watchdog was killed, so how it ended is not on record"
+                     + (f", and {APART}" if record.get("elsewhere") else "") + ")" if record.get("lost") else ""))
         if number:  # the run is as it was, whatever the process did: what is settled is the answer
             answer, about = self.answered(e, attempt, res, ending, said)
             note, state, reason = e.get("note"), state_of(self.cfg, e), e.get("reason")
@@ -1718,6 +2436,7 @@ class Supervisor:
                       else f"the process ended before the run was complete{detail}" if state == "partial"
                       else f"the process ended with nothing written{detail}")
         attempt.pop("was", None)
+        (attempt.get("steps") or {}).pop("seen", None)  # the backstop's place in the step log: no use from here on
         attempt.update(ended=round(record["ended"], 3),
                        seconds=round(max(0.0, record["ended"] - attempt["started"]), 3), exit_code=code,
                        outcome=res["outcome"], state=state, session=session)
@@ -1735,6 +2454,11 @@ class Supervisor:
             attempt["usage_reported"] = False  # stopped before it reported: unknown, and not none
         e.update(pid=None, pid_identity=None, session=session, seconds_used=round(
             sum(a["seconds"] or 0 for a in e["attempts"] if a["kind"] != "followup"), 3))
+        # Its process did its work in a session that its harness did not keep: nothing can continue it.
+        # Not noted for a failed run, which "run" starts afresh in a session of its own.
+        unsaved = res["session_saved"] is False and bool(session) and (bool(number) or state != "failed")
+        if unsaved:
+            e.setdefault("unsaved", {})[session] = round(time.time())
         if number:  # the file is as the outcome says (answered()): the outcome, then the attempt's end
             pl.record_followup(self.sd, number, e["run"], outcome=answer, reason=about, attempt=attempt["n"],
                                session=session, settling=None)
@@ -1749,8 +2473,11 @@ class Supervisor:
             self.log(e, attempt["n"], "before").unlink(missing_ok=True)
         self.snapshot([*(c.entry["run"] for c in self.children), e["run"]])
         record_usage(self.cfg, self.runs)
+        # No run of this CLI can work from this shell, and this one did not: a retry would end the same way.
+        shut = bool(cause) and not settling and (answer not in pl.FOLLOWUP_ANSWERED if number else state != "done")
         retry = (state == "failed" and self.retry and not settling and e["run"] not in self.retried and not number
-                 and not self.stop.asked and res["outcome"] != "usage_limit" and e["runner"] not in self.closed)
+                 and not self.stop.asked and res["outcome"] != "usage_limit" and e["runner"] not in self.closed
+                 and not cause)
         usability = self.cfg["type"] == "usability" and e["role"] == "panellist"
         owes = usability and bool(self.cfg["accounts"])  # a retry waits for the teardown of the account it had
         if number:
@@ -1758,7 +2485,7 @@ class Supervisor:
                                    else f"follow-up {number} {answer}") + (f": {about}" if about else ""))
         else:
             say(f"{e['run']}: {state}" + (f": {reason}" if reason else "") + (f" ({note})" if note else "")
-                + ("; retrying once" if retry and not owes else ""))
+                + ("; retrying once" if retry and not owes else "; not retried" if shut and state == "failed" else ""))
             if usability:
                 for wrong in pl.step_notes(self.cfg, *pl.read_steps(self.sd, e["run"]), pl.issued_attempts(e),
                                            self.known()):
@@ -1775,10 +2502,15 @@ class Supervisor:
                     say(f"{e['run']}: retrying once, with a new test account")
             elif state in accounts.FINAL:  # the state is on record: a launcher killed before this leaves it to the next
                 self.finish(e)
+        if unsaved:
+            say(f"{e['run']}: {UNSAVED}. {e['runner']} kept no session for it, so purge-sessions has nothing of "
+                "it to delete either.")
         if res["outcome"] == "usage_limit" and not settling:
             self.close(e["runner"], TURNED_AWAY
                        + (f", and said its limit lifts at {clock(res['reset_at'])}" if res["reset_at"] else ""),
                        "for now")
+        elif shut:
+            self.close(e["runner"], NO_RUN_HERE, "in this command", pl.SANDBOX_HINT)
         elif retry:
             self.retried.add(e["run"])
             self.queue.insert(0, (e, "retry"))
@@ -1812,13 +2544,15 @@ class Supervisor:
         """What a follow-up attempt comes to, from the copy made before the question, the persona
         file as its process left it and the process's result: {"outcome", "reason", "action",
         "section"}, as in the "settling" of panel_lib.py. Changes nothing."""
-        number, file, copy = attempt["followup"], self.sd / e["file"], self.log(e, attempt["n"], "before")
+        number, file = attempt["followup"], self.sd / e["file"]
+        copy, left = pl.read_copy(self.log(e, attempt["n"], "before")), self.left(e)
 
         def decision(outcome, reason, action="keep", section=None):
             return {"outcome": outcome, "reason": reason, "action": action, "section": section}
 
-        if not copy.exists():  # nothing to compare with or to put back
-            there = file.exists() and any(f["n"] == number for f in pl.parse_persona_file(file, self.cfg)["followups"])
+        if copy is None:  # nothing to compare with or to put back
+            there = left is not None and any(
+                f["n"] == number for f in pl.parse_persona_file(file, self.cfg, pl.as_text(left))["followups"])
             return decision("answered" if there else "unanswered", "the copy made of its persona file before the "
                             "question is gone, so the file was not checked")
         usability, known = self.cfg["type"] == "usability", None
@@ -1832,7 +2566,7 @@ class Supervisor:
             kept = self.log(e, attempt["n"], "rejected.md")
             return decision("rejected", f"{how}, and a follow-up may only append its one section. Its persona file "
                             "was put back as it was before the question"
-                            + (f", and what the panellist left is in logs/{kept.name}" if file.exists() else ""),
+                            + (f", and what the panellist left is in logs/{kept.name}" if left is not None else ""),
                             "restore")
         back = "restore" if change == "blank" else "keep"  # a heading with nothing under it goes
         if res["outcome"] == "usage_limit":
@@ -1851,15 +2585,29 @@ class Supervisor:
         file is made from the copy and never from what is in it now, and what a rejected
         follow-up left is kept only while the file still differs from the copy, so a file
         already put back never replaces it."""
-        file, copy = self.sd / e["file"], self.log(e, decision["attempt"], "before")
-        if decision["action"] == "keep" or not copy.exists():
+        copy, left = pl.read_copy(self.log(e, decision["attempt"], "before")), self.left(e)
+        if decision["action"] == "keep" or copy is None:
             return
-        if decision["outcome"] == "rejected" and file.exists() and file.read_bytes() != copy.read_bytes():
-            pl.copy_atomic(file, self.log(e, decision["attempt"], "rejected.md"))
-        if decision["action"] == "restore":
-            pl.copy_atomic(copy, file)
-        else:
-            pl.write_atomic(file, copy.read_text().rstrip("\n") + "\n\n" + decision["section"])
+        if decision["outcome"] == "rejected" and left is not None and left != copy:
+            pl.keep_copy(self.log(e, decision["attempt"], "rejected.md"), left)
+        try:
+            pl.write_persona(self.sd, self.sd / e["file"], copy if decision["action"] == "restore"
+                             else pl.as_text(copy).rstrip("\n") + "\n\n" + decision["section"])
+        except OSError as err:  # the decision stays on record, and readers read the copy until it is carried out
+            raise SystemExit(
+                f"{e['run']}: its persona file {e['file']} could not be written to settle its follow-up "
+                f"({pl.unread(err)}). Nothing is written through a symbolic link. The follow-up is not settled, and "
+                "until it is the run is read as it stood before the question. Make every folder above the file a "
+                "plain folder that can be written, with no folder at the file's own name, then settle it with: "
+                f"followup.py {self.sd} list")
+
+    def left(self, e: dict) -> bytes | None:
+        """What a run's persona file holds now, None when the run has no file, or none that can be
+        read as its own (pl.persona_bytes())."""
+        try:
+            return pl.persona_bytes(self.sd, self.sd / e["file"])
+        except OSError:
+            return None
 
     def supervise(self):
         """Run until nothing is queued and no process is alive."""
@@ -2102,7 +2850,9 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
 def fitness(cfg: dict, entries: list[dict]) -> tuple[dict, dict, list[str]]:
     """Whether each of entries can be started on its runner as study.json has it, asked of the
     runners before any process starts: (unusable, errors, notes). unusable maps a runner whose
-    CLI cannot be used (its check()) to the CLI's words. errors maps the id of each entry on a
+    CLI cannot be used to why (planning.usable()): the CLI's words when its check() fails, and
+    when this shell does not let it do a run at all (its shell_check()), what it cannot do here
+    with the two ways out of a sandboxed shell tool. errors maps the id of each entry on a
     runner that can be used to what refuses its model entry (planning.unfit, which asks the
     runner's model_status()): an empty list when nothing does. notes are what an entry asks for
     that its runner leaves out. Each runner is checked once and each model entry judged once.
@@ -2111,7 +2861,7 @@ def fitness(cfg: dict, entries: list[dict]) -> tuple[dict, dict, list[str]]:
     of them starts."""
     unusable = {}
     for name in dict.fromkeys(e["runner"] for e in entries):
-        checked = runners.get(name).check()
+        checked = planning.usable(name)
         if not checked["ok"]:
             unusable[name] = checked["message"]
     judged = {}  # one judgement for each model entry: asking a runner about a model can take a CLI call
@@ -2124,13 +2874,16 @@ def fitness(cfg: dict, entries: list[dict]) -> tuple[dict, dict, list[str]]:
 
 
 def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list[dict], str | None]:
-    """Check that the materials are captured (or, in a usability study, that the files its
-    commands name are there), that the agent-browser CLI is there for runs that may browse,
-    every runner the targets need, and what study.json asks of each
-    (fitness()), before any process starts. Returns the targets that may start, and
-    why nothing may when that is the case. The plan command reports the same three things
-    (planning.build), so what it refuses, this refuses. Only a panellist run reads the materials:
-    analysts and the writer start without them."""
+    """Check that this shell can write to the study directory, that the materials are captured
+    (or, in a usability study, that the files its commands name are there), that the
+    agent-browser CLI is there for runs that may browse, every runner the targets need, and
+    what study.json asks of each (fitness()), before any process starts. Returns the targets
+    that may start, and why nothing may when that is the case. The plan command reports the
+    same things (planning.build), so what it refuses, this refuses. Only a panellist run reads
+    the materials: analysts and the writer start without them."""
+    locked = planning.unwritable_study(cfg) if targets else None
+    if locked:
+        return [], f"Nothing was started: {locked}"
     if any(e["role"] == "panellist" for e in targets):
         uncaptured = planning.no_materials(cfg, planning.materials(cfg))
         if uncaptured:
@@ -2145,8 +2898,8 @@ def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list
     for name, message in unusable.items():
         say(f"{name}: cannot be used: {message}")
     if unusable and not allow_missing:
-        return [], ("Nothing was started: a panel short of a model is a different study. Fix the CLI and run "
-                    "this again, or pass --allow-missing to go ahead with the runners that work.")
+        return [], ("Nothing was started: a panel short of a model is a different study. Fix what is named above "
+                    "and run this again, or pass --allow-missing to go ahead with the runners that work.")
     ready = [e for e in targets if e["runner"] not in unusable]
     if unusable:
         skipped = [e["run"] for e in targets if e["runner"] in unusable]
@@ -2229,7 +2982,8 @@ def launch(args, cfg: dict) -> int:
             kind = "launch"
             if command == "resume":
                 gone = ("its session was purged (purge-sessions)" if e.get("session") in (e.get("purged") or {})
-                        else LOST if e.get("session") in (e.get("lost") or {}) else None)
+                        else LOST if e.get("session") in (e.get("lost") or {})
+                        else NOT_SAVED if e.get("session") in (e.get("unsaved") or {}) else None)
                 can_resume = e.get("session") and not gone and sup.runner(e["runner"]).capabilities()["resume"]
                 kind = "resume" if can_resume else "restart"
                 if not can_resume and progress_of(cfg, e)["written"]:
@@ -2264,9 +3018,29 @@ def launch(args, cfg: dict) -> int:
 
 def stop_launcher(args, cfg: dict) -> int:
     """Ask the launcher that has the study to stop its runs. When there is none, take the study
-    and ask the watchdogs of the runs still alive."""
+    and ask the watchdogs of the runs still alive.
+
+    That is done whatever became of a command of the study. Every other launcher command exits
+    when a process that an earlier command left cannot be proved gone (accounts.recover()), and
+    this one would then leave runs alive that it was asked to stop. So it stops them first,
+    starts no command of the study meanwhile (Supervisor.recover(), "held"), then says what
+    holds the study up, on stderr, and returns 1. The success checks and teardowns that fell due
+    stay due, for the next launcher command.
+
+    A launcher whose processes this shell cannot see (Lock.holder()) cannot be signalled from
+    it, and the process id on record may be another process's here: nothing is signalled, and
+    the command says where to run it. That is so of an id recorded in another process
+    namespace even when a process here holds it under the same start identity: holder() is
+    the one answer to whether the launcher is seen, and no signal goes to the id on record
+    without it. The same holds with no launcher, of runs that one left alive where this shell
+    cannot look: the study is then not given to this command (Lock.acquire())."""
     sd = cfg["_dir"]
+    done = (f"Stopped. Runs that wrote sections are partial: continue them with launch.py {sd} resume. Runs that "
+            f"wrote nothing are pending again: start them with launch.py {sd} run.")
     held = Lock.holder(sd)
+    if held and not held["seen"]:
+        raise SystemExit(f"A launcher has this study{Lock.who(held)}, and \"stop\" could not ask it to stop. {UNSEEN}, "
+                         f"so nothing was signalled and the runs go on. {pl.SANDBOX_HINT}")
     if held:
         try:
             os.kill(held["pid"], signal.SIGTERM)
@@ -2283,16 +3057,20 @@ def stop_launcher(args, cfg: dict) -> int:
         lock.acquire("stop", args.grace)
         try:
             sup = Supervisor(cfg, pl.read_runs(sd), args.grace, args.poll)
-            sup.reconcile()
-            if not sup.children:
-                say("Nothing is running.")
-                return 0
+            sup.reconcile(commands=False)
+            stopped = [c.entry["run"] for c in sup.children]
             sup.stop.asked = True
             sup.supervise()
         finally:
             lock.release()
-    say(f"Stopped. Runs that wrote sections are partial: continue them with launch.py {sd} resume. Runs that "
-        f"wrote nothing are pending again: start them with launch.py {sd} run.")
+        say(done if stopped else "Nothing is running.")
+        if sup.held:  # said last, and by the exit code: the runs are stopped, and the study is still held up
+            print(f"{sup.held}\nstop started no command of the study either: the success checks and teardowns that "
+                  "are due stay due, and the next launcher command sees to them once that is cleared.",
+                  file=sys.stderr, flush=True)
+            return 1
+        return 0
+    say(done)
     return 0
 
 
@@ -2376,8 +3154,18 @@ def check_runs(args, cfg: dict) -> int:
 
 
 def status(args, cfg: dict) -> int:
+    """Print every run and job as it is on record, with what can be seen of its process. Starts
+    nothing, holds no lock and changes nothing.
+
+    A launcher has the study when the lock says so (Lock.holder()). When its process is not to
+    be seen from this shell, no process of the study is: a run's process is then "unseen", in
+    place of "alive" or "gone", nothing is said of its browser session, and no run is called
+    gone for a launcher to settle. One line says so. With no launcher, the same is said of each
+    run that is alive where this shell cannot look: its watchdog holds its lock and is not to
+    be seen (unseen()). A run whose watchdog has let go of its lock is "gone", wherever it ran."""
     sd, now = cfg["_dir"], time.time()
     held = Lock.holder(sd)
+    blind = bool(held) and not held["seen"]
     rows = {"run": [], "job": []}  # panellist runs, then analyst and writer jobs
     for e in pl.read_runs(sd):
         if e["role"] not in ROLES:
@@ -2392,17 +3180,18 @@ def status(args, cfg: dict) -> int:
         log = str(sd / "logs" / f"{e['run']}.{attempts[-1]['n']}") if running and attempts else None
         pids = (recorded(Path(log + ".pid")) if log else None) or {}
         record = end_record(Path(log + ".end")) if pids else None
-        over = not pids or record or not any(alive(*pair) for pair in pids.values())
+        over = not pids or record or not living(pids)
+        hidden = blind or unseen(pids)
         current = ((record or {}).get("ended") or now) - attempts[-1]["started"] if log else 0
         rows[ROLES[e["role"]].noun].append({
             "run": e["run"], "role": e["role"], "name": e.get("name", ""), "key": e["key"], "runner": e["runner"],
             "state": state, **own,
-            "process": ("gone" if over else "alive") if running else None,
+            "process": ("unseen" if hidden else "gone" if over else "alive") if running else None,
             "pid": pids["cli"][0] if pids else None, "attempts": len(attempts) - len(asked),
             "followups": sorted({a["followup"] for a in asked if a.get("ended") is not None}),  # the settled ones
             "asking": asking(e)["followup"] if asking(e) else None,
             # Its file was read as it stood before that follow-up: nothing is taken from it until it is settled.
-            "unsettled": bool(asking(e)) and Path(log + ".before").is_file(),
+            "unsettled": bool(asking(e)) and pl.read_copy(Path(log + ".before")) is not None,
             "seconds_used": round((e.get("seconds_used") or 0) + (0 if asking(e) else current), 1),
             "usage": usage_of(e), "unreported_attempts": planning.unreported(e),
             "unallocated": planning.unallocated(e),
@@ -2410,14 +3199,15 @@ def status(args, cfg: dict) -> int:
             "leftover": still_left(attempts[-1].get("leftover")) if attempts else None,
             # The browser session of the attempt now running (browser_session.state()), and what was found or
             # left of the session of its last attempt (Supervisor.browser_left()).
-            "browser": browser.state(log) if log and not over else None,
+            "browser": browser.state(log) if log and not over and not hidden else None,
             "browser_left": attempts[-1].get("browser_left") if attempts else None,
             "account": e.get("account"),  # a usability run's test account (panel_lib.py), with no identifier or secret
             "checks": e.get("checks"),    # what the success check of each of its tasks said (accounts.py)
             "released": e.get("released"),  # when the lead let its account go with "release", unfinished
             "reset_at": e.get("reset_at"),
             "extended": e.get("extended") or 0, "session": e.get("session"),
-            "purged": sorted(e.get("purged") or {}), "lost": sorted(e.get("lost") or {})})
+            "purged": sorted(e.get("purged") or {}), "lost": sorted(e.get("lost") or {}),
+            "unsaved": sorted(e.get("unsaved") or {})})  # the sessions its harness did not keep (ended())
     every = rows["run"] + rows["job"]
     extended = [r["run"] for r in every if r["extended"]]
     gone = [r["run"] for r in every if r["process"] == "gone"]
@@ -2436,7 +3226,8 @@ def status(args, cfg: dict) -> int:
                 [f"{shared['input_tokens']:,} in and {shared['output_tokens'] or 0:,} out tokens"]
                 if shared["input_tokens"] is not None else []) + (
                 [planning.money(shared["cost_usd"])] if shared["cost_usd"] is not None else [])
-            facts = [f"process {r['process']}" + (f", pid {r['pid']}" if r["pid"] else "") if r["process"] else "",
+            facts = [", ".join(x for x in ("" if r["process"] == "unseen" else f"process {r['process']}",
+                                           f"pid {r['pid']}" if r["pid"] else "") if x) if r["process"] else "",
                      {"up": "browser session up", "starting": "browser session starting",
                       "down": "browser session not running"}.get(r["browser"], ""),
                      (f"being asked follow-up {r['asking']}" if r["process"] == "alive"
@@ -2461,7 +3252,8 @@ def status(args, cfg: dict) -> int:
                      "session lost" if r["session"] in r["lost"] else
                      "earlier sessions purged" if r["purged"] else ""]
             lost = r["browser_left"]
-            why = [r["reason"] or "", r.get("note") or "", leftover(r["leftover"]) if r["leftover"] else "",
+            why = [r["reason"] or "", r.get("note") or "", UNSAVED if r["session"] in r["unsaved"] else "",
+                   leftover(r["leftover"]) if r["leftover"] else "",
                    f"TEARDOWN OF ITS TEST ACCOUNT FAILED: {r['account']['teardown_error']}"
                    if (r["account"] or {}).get("teardown_error") else "",
                    "" if not lost else
@@ -2479,11 +3271,16 @@ def status(args, cfg: dict) -> int:
         states = [r["state"] for r in group]
         if group or noun == "run":
             print(" | ".join(f"{s}: {states.count(s)}" for s in sorted(set(states))))
-    print(f'Launcher: running "{held["command"]}" (pid {held["pid"]})' if held else "Launcher: not running")
+    print("Launcher: " + ("not running" if not held else "running" if not held["pid"] else
+                          f'running "{held["command"]}" (pid {held["pid"]})'))
+    unseen_here = blind or any(r["process"] == "unseen" for r in every)
+    if unseen_here:
+        print(f"{UNSEEN}: run states are as last recorded.")
     if gone:
         print(f"Marked running, but the process is gone: {', '.join(gone)}. "
               + ("The launcher above settles them within its next poll." if held else
-                 "The next launch.py run, resume or stop settles them."))
+                 "The next launch.py run, resume or stop settles them"
+                 + (", from a shell that sees the runs this one cannot." if unseen_here else ".")))
     for line in pl.unsettled_lines(rows["run"]):
         print(line)
     if extended:
@@ -2497,8 +3294,9 @@ def status(args, cfg: dict) -> int:
 
 
 def plan(args, cfg: dict) -> int:
-    """Print the plan. Starts no run, takes no lock and writes nothing to the study. A runner's
-    sign-in check may let its harness refresh its own login."""
+    """Print the plan. Starts no run, holds no lock and writes nothing to the study: whether a
+    launcher has it is asked of the lock, which says so from any shell (Lock.holder()). A
+    runner's sign-in check may let its harness refresh its own login."""
     sd = cfg["_dir"]
     scaffolded = (sd / "runs.json").exists()
     entries = pl.read_runs(sd) if scaffolded else pl.planned_runs(cfg)

@@ -38,6 +38,9 @@ Steps, in the order given:
                     no JSON, an entry for a task the study does not have, numbered far above any
                     limit, an intent for step 1 of the first task again, and for the next task an
                     entry that is no step at all, under attempt 999
+    empty           usability: empty the step log: a panellist that starts its log again
+    link            usability: move the step log to the run's scratch folder and leave a symbolic
+                    link to it at its name: a log the launcher cannot read as the run's own
     final           append the final sections only
     meddle:<run id> append a line to the persona file of another run, <pid>-<key>: a panellist
                     writing outside its own file
@@ -58,9 +61,12 @@ Steps, in the order given:
                     log its pid: what a CLI leaves behind
     hang            print a run cut off part-way, then sleep until killed
     end:<mode>      print that recorded run and exit with its code: ok, error, usage_limit,
-                    budget, or killed (no closing line, exit code 1). Default: end:ok
+                    budget, a run of that CLI alone (unreachable on claude, nested on codex), or
+                    killed (no closing line, exit code 1). Default: end:ok
     exit:<code>     exit with that code and print nothing more: a process that went quiet long
                     before it ended
+    fail:<words>    write the words on stderr and exit with code 1, printing nothing more: a CLI
+                    that fails with a message of its own
 
 Sections have one score column for each factor in the score table of the panel instructions.
 
@@ -291,6 +297,12 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
                                                       "step": 1, **INTENT})
                                  + "\n" + json.dumps({"task": next_task(file), "attempt": 999, "step": "one",
                                                       "phase": "note"}) + "\n")
+        elif verb == "empty":
+            step_log(file).write_text("")
+        elif verb == "link":
+            moved = file.parents[1] / "scratch" / run / "steps.jsonl"
+            step_log(file).rename(moved)
+            step_log(file).symlink_to(moved)
         elif verb == "meddle":
             pid, _, key = arg.partition("-")
             other = next(file.parent.glob(f"{pid}-*--{key}.md"))
@@ -330,6 +342,10 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
         elif verb == "exit":
             log(event="end", run=run, pid=os.getpid(), code=int(arg))
             sys.exit(int(arg))
+        elif verb == "fail":
+            sys.stderr.write(arg + "\n")
+            log(event="end", run=run, pid=os.getpid(), code=1)
+            sys.exit(1)
         else:
             raise SystemExit(f"fake CLI: unknown step {step!r}")
     end("ok")

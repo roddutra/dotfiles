@@ -136,6 +136,12 @@ flight when the process was killed is in no figure.
 
 Sessions are deleted by removing the file: Pi has no command for it and its docs say to.
 
+A sandboxed shell. Nothing was run with Pi's own folder read-only, or with no network, so what
+Pi prints there is not known and no pattern for it is here. What follows from the above is
+inferred: a session is its file, so shell_check() tests the sessions folder with a write, and a
+process that ended well and left no file ran in a session nothing can resume ("session_saved"
+false). Pi builds no sandbox of its own.
+
 Not settled: anything on an OpenAI-compatible endpoint (tool calling, whether usage is
 reported, the text of its errors); the real text at a usage or rate limit; concurrency above
 three runs; compaction in a long run.
@@ -151,7 +157,7 @@ import tempfile
 import time
 import uuid
 
-from . import BROWSER_GAPS, child_env, exited, launch_effort, model_facts, result, run_cli, usage
+from . import BROWSER_GAPS, child_env, exited, launch_effort, model_facts, result, run_cli, unwritable, usage
 
 CLI = "pi"
 EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -447,7 +453,9 @@ def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
     finished = (last.get("stopReason") in DONE and "".join(reply.split()) == "".join(stdout.split()) if record
                 else bool(stdout.strip()))
     if exit_code == 0 and finished and FORKED not in stdout:
-        out.update(outcome="ok", reply=stdout[:-1] if stdout.endswith("\n") else stdout)
+        # INFERRED: a reply with no session file under the id the process was given is a session that was not kept
+        out.update(outcome="ok", reply=stdout[:-1] if stdout.endswith("\n") else stdout,
+                   session_saved=bool(record) if UUID.fullmatch(session_id or "") else None)
         return out
     forked = next((line.strip() for line in stdout.splitlines() if FORKED in line), "")
     reason = last.get("errorMessage") if last.get("stopReason") == "error" else None
@@ -495,6 +503,18 @@ def check() -> dict:
             return {"ok": False, "message": _said(err) or _said(out) or f"{CLI} refused the resume options"}
     providers = ", ".join(sorted({p for p, _ in listed}))
     return {"ok": True, "message": f"{CLI} {version[1]}, guard loaded, {len(listed)} models listed ({providers})"}
+
+
+def shell_check() -> dict:
+    """Whether Pi's sessions folder can be written (INFERRED: a session is its file, and a run
+    that cannot keep one cannot be resumed). The folder of one working directory beneath it
+    (_session_dir()) is not tested: this is not told the working directory. Nor is Pi's own
+    folder above it, which nothing has shown a run to need. Pi builds no sandbox, and what it
+    prints where it cannot reach a provider has not been seen."""
+    why = unwritable(_sessions())
+    if why:
+        return {"ok": False, "message": f"cannot write to {_sessions()}, where it keeps its sessions ({why})"}
+    return {"ok": True, "message": ""}
 
 
 def purge_command(session_id: str, workdir) -> list | None:

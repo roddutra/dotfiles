@@ -14,11 +14,11 @@ Registry and helpers (this file):
     launch_effort(run, levels)      the effort a runner passes, refusing a level it does not have
     merge_usage(recorded, usage)    one session's usage after another result
     total_usage(sessions)           a run's usage, summed over its sessions
-    usage(), result(), model_facts(), json_lines(), last_line(), exited(), run_cli(), child_env()
-                                    building blocks for runner modules
+    usage(), result(), model_facts(), json_lines(), last_line(), exited(), run_cli(), child_env(),
+    unwritable()                    building blocks for runner modules
     BROWSER_GAPS                    what browsing leaves open on every runner
 
-Every runner module exposes these seven functions.
+Every runner module exposes these eight functions.
 
 capabilities() -> dict
     images_by_path       bool: a panellist can open an image file by path during the run. The
@@ -82,6 +82,17 @@ parse_result(stdout, stderr, exit_code, session_id=None) -> dict
     session_lost  bool: the CLI refused a resume because the session it named is gone. The
                 outcome is "error". The caller then treats the session as it does a purged one,
                 and does not take the process for a CLI that could not be started
+    session_saved  bool or None: False when the process ran in a session and the runner, looking
+                where its harness keeps sessions, finds none of that id: nothing can resume it,
+                ask it a follow-up or purge it. Not "session_lost", which is a resume that was
+                refused: here the process did its work. True when the session is there, None
+                when the runner cannot tell. The caller says so and refuses to continue the run
+    cannot_run  str: "" unless the output shows that no run of this CLI can work from the shell
+                the caller is in, whatever the prompt: it could not build its own sandbox, or
+                could not reach its provider. Then a clause that starts "it could not", with
+                the CLI's own words in brackets. The outcome is whatever the CLI made of it,
+                "ok" included. The caller does not retry, starts nothing more on the runner in
+                its command, and tells the user how to get out of a sandboxed shell
     Never raises on missing, cut-off or half-written output. A process killed at its time limit
     leaves no closing line: that parses as "error" with whatever session id and usage came out,
     and the caller, which knows it sent the signal, records the run as limited.
@@ -93,6 +104,22 @@ check() -> {"ok": bool, "message": str}
     whether it is signed in can make the harness refresh its own login, here and in
     model_status(), so neither is free of side effects outside the study. The runner itself
     must never read, store or relay a login.
+
+shell_check() -> {"ok": bool, "message": str}
+    Whether the shell the caller is in lets the CLI do a run at all, where check() asks whether
+    it is installed and signed in. A sandboxed shell tool can pass check() and fail every run.
+    The runner tests what it knows its CLI needs: that the directory where the harness keeps
+    its sessions can be written (unwritable()), the folder they go in and not only a
+    configuration directory above it, which can be writable where that folder is not, and
+    anything more, such as a sandbox of its own that the CLI must be able to build. It is not
+    told a working directory, so a folder a harness keeps for one is not tested. No model
+    call, within seconds, and every command under a timeout. Whether the provider can be
+    reached is not tested: a proxy or a custom endpoint makes any general test of that
+    unreliable, and "cannot_run" of parse_result() covers it.
+    Only what is known to stop a run refuses: a test that cannot be made, or that fails in a
+    way nothing has explained, passes. On failure the message is what the CLI cannot do here,
+    as clauses that each start "cannot", with the system's or the CLI's own words in brackets.
+    Called after a check() that passed.
 
 purge_command(session_id, workdir) -> list or None
     The argv that deletes one session, or None when it cannot be deleted.
@@ -143,11 +170,13 @@ session-scoped result from the same session brings the spend in.
 
 from __future__ import annotations
 
+import errno
 import importlib
 import json
 import os
 import pkgutil
 import subprocess
+import tempfile
 
 # What stays open on every runner for a run that may browse: each runner's "browse_gaps" holds them.
 BROWSER_GAPS = [
@@ -161,8 +190,8 @@ BROWSER_GAPS = [
     "reading cookies and page source, but a run that reached that port could read them.",
 ]
 
-INTERFACE = ("capabilities", "launch_command", "resume_command", "parse_result", "check", "purge_command",
-             "model_status")
+INTERFACE = ("capabilities", "launch_command", "resume_command", "parse_result", "check", "shell_check",
+             "purge_command", "model_status")
 OUTCOMES = ("ok", "usage_limit", "budget", "error")
 USAGE_FIELDS = ("input_tokens", "output_tokens", "cached_tokens", "cost_usd", "duration_s")
 
@@ -223,7 +252,8 @@ def usage(scope: str = "session", **figures) -> dict:
 def result(outcome: str = "error", **fields) -> dict:
     """A parse_result() return value with every key present."""
     return {"session_id": None, "reply": None, "usage": usage(), "outcome": outcome,
-            "reset_at": None, "message": "", "session_lost": False, **fields}
+            "reset_at": None, "message": "", "session_lost": False, "session_saved": None, "cannot_run": "",
+            **fields}
 
 
 def model_facts(**facts) -> dict:
@@ -303,6 +333,25 @@ def child_env(run: dict, env: dict | None = None) -> dict | None:
         else:
             out[name] = value
     return out
+
+
+def unwritable(path) -> str | None:
+    """Why nothing can be written in a directory, in the system's words, or None when a file
+    can be. A directory that is not there yet is judged by the nearest thing above it that is,
+    where it would be made. Something that is there and is no directory, at the path or on the
+    way to it, is itself the reason: nothing can be made in or under it. The test is a write,
+    because a sandbox can refuse one that the permission bits allow: a file with no name where
+    the system has such a thing, and otherwise one that is removed at once."""
+    path = os.path.abspath(os.path.expanduser(str(path)))
+    while not os.path.lexists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    if not os.path.isdir(path):
+        return os.strerror(errno.ENOTDIR)
+    try:
+        with tempfile.TemporaryFile(dir=path):
+            return None
+    except OSError as err:
+        return err.strerror or str(err)
 
 
 def run_cli(argv: list[str], env: dict | None = None, timeout: int = 30):
