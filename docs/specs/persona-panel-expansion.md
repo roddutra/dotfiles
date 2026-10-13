@@ -1,10 +1,13 @@
 # Persona panel: other harnesses, limits and wider research
 
 **Status:** Paused on 13 October 2026. All six parts are built, reviewed by
-Codex and committed on the branch `persona-panel-expansion`. Nothing is merged
-to `main`. Three acceptance criteria are not verified. Codex reviewed this PRD
-on 12 October 2026 over three rounds and approved it, and Rod settled the open
-questions on 13 October 2026. See
+Codex and committed on the branch `persona-panel-expansion`: milestones 1 to
+5, and follow-up work in one more commit (`5e5dfe3`). 105 contract tests
+pass. Nothing is merged to `main`. Two acceptance criteria are not verified:
+a panel with a model on an OpenAI-compatible endpoint, and a harness other
+than Claude Code completing a study by following `SKILL.md`. Codex reviewed
+this PRD on 12 October 2026 over three rounds and approved it, and the user
+settled the open questions on 13 October 2026. See
 [Implementation status](#implementation-status).
 
 PRD for extending the `persona-panel` skill
@@ -28,18 +31,32 @@ Drafted 12 October 2026.
 As at 13 October 2026. Work is paused.
 
 All six parts are built on the branch `persona-panel-expansion`, which is not
-merged to `main`. Each milestone was committed once Codex approved it. 97
-contract tests pass. Real end-to-end runs
-passed for milestones 1, 2, 3 and 5 on Claude Code and Codex, and for
-milestone 4 on Pi through its `openai-codex` provider only. Three acceptance
-criteria are not verified, and everything ran on Linux. The evidence sat in
-temporary directories that will not survive, so this section carries the
-conclusions.
+merged to `main`. Each of milestones 1 to 5 was committed once Codex approved
+it. One follow-up commit (`5e5dfe3`) fixes the 14 problems that the last fix
+pass had listed and left, settles how a panel is started from a Codex
+session and from a terminal, and keeps a study safe from a shell that cannot
+see its processes. Codex approved it in round 27: see
+[Follow-up work](#follow-up-work) for what it holds. 105 contract tests
+pass.
+
+Real end-to-end runs passed for milestones 1, 2, 3 and 5 on Claude Code and
+Codex, for milestone 4 on Pi through its `openai-codex` provider only, and
+for the follow-up work on Claude Code and Codex in three rounds. The third
+round ran on a snapshot taken before the last lock changes, which tests and
+fake panels inside real sandboxes cover and no real panel does
+([Built but not tested](#built-but-not-tested)). Two acceptance criteria are
+not verified: a panel with a model on an OpenAI-compatible endpoint, and a
+harness other than Claude Code completing a study by following `SKILL.md`.
+Everything ran on Linux. The evidence sat in temporary directories that will
+not survive, so this section carries the conclusions.
 
 Terms used here:
 
 - **Milestone** is the PRD's [order of work](#order-of-work). Milestone 1
   covers parts 1 and 2, and milestones 2 to 5 cover parts 3 to 6.
+- **Follow-up work** is what the user asked for on 13 October 2026, after
+  milestone 5 was committed (`d3b4451`, with the status note `21ff323`). It
+  is commit `5e5dfe3`.
 - **Real run** means a study run end to end with real harness CLIs and real
   models. The models were Claude Code on `haiku` and `sonnet`, Codex on its
   default model at low effort, and Pi on `openai-codex/gpt-6-luna` at low
@@ -107,9 +124,26 @@ Part 6, usability studies and launcher-owned browser sessions:
 | --- | --- |
 | Built | `"type": "usability"`, `scripts/accounts.py` (provision, teardown, reset, success checks), `scripts/browser_session.py` (one session for each attempt of every run that browses, in review studies too), the step limit's backstop, `launch.py check` and `release`, the usability analysis, the secret scan, the archive rules for evidence, `references/usability.md` |
 | Commit | `d3b4451` |
-| Tests | `BrowserSessionTest`, the browser session and usability tests of `LauncherTest`. 97 tests pass |
-| Real run | Passed on Claude Code (`haiku`) and Codex. Browser sessions: a browsing review study on Claude Code, Codex and Pi. Usability, against a local test app: a study of two personas on both harnesses with two tasks, accounts, success checks, an analyst, the writer and an archive, a study whose panellist signs in, a run stopped and resumed twice, and a task that ran out of steps. These runs came before the fixes of review rounds 16 to 19, which change no instruction a panellist is given and are covered by the tests alone |
+| Tests | `BrowserSessionTest`, the browser session and usability tests of `LauncherTest`. 97 tests passed when the milestone was reviewed |
+| Real run | Passed on Claude Code (`haiku`) and Codex. Browser sessions: a browsing review study on Claude Code, Codex and Pi. Usability, against a local test app: a study of two personas on both harnesses with two tasks, accounts, success checks, an analyst, the writer and an archive, a study whose panellist signs in, a run stopped and resumed twice, and a task that ran out of steps. These runs came before the fixes of review rounds 16 to 19, which change no instruction a panellist is given and were covered by the tests alone until the usability run under [Follow-up work](#follow-up-work) |
 | Codex review | Rounds 14 onwards. The browser sessions were approved with one note in round 15, and round 16 confirmed the note resolved. Round 16 required changes to the usability part (nine findings, all since fixed). Round 17 found seven of the nine resolved, and round 18 the other two. Round 18 also classed as blocking two archive problems that the fix pass had found and disclosed (an unreadable folder, and an empty folder named with a secret); both were fixed. Rounds 14 to 19 (six rounds). Final verdict: APPROVE |
+
+### Follow-up work
+
+Done on 13 October 2026, after milestone 5. It touches the launcher, the
+runners, the accounts, the scaffold, the archive and the scripts that read a
+study, in studies of both types. The design decisions are under
+[Follow-up work after milestone 5](#follow-up-work-after-milestone-5), and
+the runs from each kind of shell under
+[A lead in a sandboxed shell](#a-lead-in-a-sandboxed-shell).
+
+| Item | Detail |
+| --- | --- |
+| Built | Fixes for all 14 problems that the milestone 5 fix pass had listed and left. Archive (`archive.py`): one walk and one copy for both study types, a refusal of links and special files, a round built beside the destination and published whole, no empty folders, an empty folder it cannot remove named on stderr with exit code 0, and a closing line that counts the markdown files carrying the synthetic notice. Launcher and accounts: earlier evidence set aside when a run starts afresh, a step count of the launcher's own, harness messages checked for secrets, a `stop` that always stops, and "cannot tell" kept apart from "nothing left". Reading: one safe way to open a persona file, escaped `step_notes`, and safe opens for follow-up copies. And what the runs from other shells showed was missing: a check of what the shell can do before a runner is called ready (`shell_check()` on every runner), `cannot_run` and `session_saved` in `parse_result()`, and scripts that end in one sentence when the study directory cannot be written. Liveness decided by locks where a shell cannot see the study's processes: a study lock file that persists between launchers and that `init_study.py` makes at every scaffold, a lock each attempt's watchdog holds for life, the process namespace on the launcher's lock record and on each watchdog's pid file, no recorded id looked up or signalled across namespaces, a shared lock for the archive of a study that cannot be written, and a lock and a namespace record for a lead's account command |
+| Commit | `5e5dfe3` |
+| Tests | Eight added, one or more for each area: `test_archive_reads_nothing_through_a_link_or_a_special_file_and_one_that_fails_leaves_no_part_of_itself`, `test_persona_file_that_cannot_be_read_as_the_runs_own_is_no_persona_file_and_nothing_waits_for_it`, `test_step_log_that_is_emptied_or_cannot_be_read_as_the_runs_own_does_not_switch_the_step_backstop_off`, `test_runner_says_what_its_cli_cannot_do_from_a_sandboxed_shell_without_calling_a_model`, `test_run_that_shows_its_cli_cannot_work_from_this_shell_is_not_retried_and_closes_its_runner`, `test_run_whose_session_its_harness_did_not_keep_is_said_once_and_cannot_be_resumed_or_asked`, `test_held_lock_is_a_launcher_running_and_status_says_nothing_of_processes_it_cannot_see`, `test_archive_of_a_study_it_cannot_write_turns_launchers_away_until_the_round_is_copied`. The other fixes extend tests that were there: the scaffold's lock file in `test_scaffold_is_neutral_and_deterministic`, a run settled across namespaces with its browser session in `test_killed_launcher_loses_no_work_and_starts_no_duplicate`, and a lead command recorded in another namespace in `test_provision_command_that_outlived_its_launcher_is_stopped_before_the_run_is_provisioned_again`, among others. 105 tests pass, on Python 3.14. At 104 tests the archive tests also passed on Python 3.12 and 3.13 |
+| Real run | Three rounds on 13 October 2026, on Claude Code 2.1.296 (`haiku`) and codex-cli 0.162.1 (default model, low effort), of one text-only review of four runs (two personas on two model entries), with a usability study in the second. Round 1, on the tree at `21ff323`, before the shell check existed: 4 of 4 done from a Claude Code session's shell, from a plain terminal and with no terminal, and from a Codex session only with `run` approved outside its sandbox. Round 2, on a snapshot after the fixes and before liveness was decided by locks: the terminal leg through plan, run, status, checks, extraction, analysis, archive, a second archive (byte for byte the same), two follow-ups (both reached the original sessions) and purge; the Codex lead leg, where `plan` refused inside the sandbox as designed and the lead asked for `run` outside; and a usability study of one persona on both harnesses with two tasks, accounts, success checks and an archive (both runs done, the launcher's step count equal to the step log for every task, no run stopped in error, accounts torn down, no secret found by its shape in any output or in the archive). Round 3, on a snapshot with the lock each watchdog holds, the namespace on each watchdog's pid file and `status` by lock: the same review study from a clean terminal, 4 runs done from one `run` with one attempt each. Mid-run, `status` from the ordinary shell showed four runs alive and the launcher running, and inside a Codex sandbox (no model) it showed the recorded states, "Launcher: running" and the line saying that this shell cannot see the launcher's processes, with no advice to resume or stop. `stop` inside the sandbox exited with 1, signalled nothing and left `runs.json` byte for byte the same, and the runs finished. Each attempt's lock was held by its watchdog while the run lived and by nothing after, and both shells then said "Launcher: not running". Follow-ups reached the original sessions, the archive was complete with no empty folder, a second archive was byte for byte the same, and 4 sessions were purged. No real panel covered what came after that snapshot: the persistent lock file, the shared lock for a read-only archive, the namespace on the launcher's lock record, the account command's lock with its recovery across namespaces, and the scaffold's lock-file failure. Tests cover those, and fake panels inside real sandboxes (Codex's, and `bwrap` for a process namespace of its own), with no model |
+| Codex review | Rounds 20 to 27 (eight rounds), in the review session of the earlier rounds. Round 20: launcher and accounts approved, reading approved, the archive sent back with four findings, the lead shell work approved with notes and one finding. Round 20 also confirmed 13 of the 14 problems resolved. Round 21: approved with notes, one finding left (empty folders, the fourteenth problem). Round 22: APPROVE. Rounds 23 to 27 reviewed the sandbox visibility and lock changes. Round 23: changes required, one blocking finding and one that should be fixed. Round 24: changes required, one should-fix finding left, and one item the lead had disclosed classed as blocking. Round 25: approved with notes, two should-fix findings. Round 26: approved with notes, one should-fix finding. Round 27: APPROVE. Every finding Codex required was fixed. Final verdict: APPROVE |
 
 ### Acceptance criteria
 
@@ -122,13 +156,13 @@ Runners and launcher:
 | Criterion | Status | Evidence |
 | --- | --- | --- |
 | A Claude Code and Codex panel runs to completion from one `launch.py run`, every persona file passing `check_runs.py` | verified on real harnesses | Milestone 2 study: one `run` finished the four runs left after the pilot, 6 of 6 run files with no blocking problem. Milestone 1 study: 4 of 4 |
-| The same panel is started from a Codex session, a Claude Code session and a plain terminal | not verified | The real runs were started from a Claude Code session's shell. From inside a Codex session `status` and `plan` worked and `run` did not. No run from a plain terminal is on record |
+| The same panel is started from a Codex session, a Claude Code session and a plain terminal | verified on real harnesses | 13 October 2026, claude 2.1.296 and codex-cli 0.162.1 on Linux, one text-only review of four runs on a `claude` and a `codex` entry: 4 of 4 done from a Claude Code session's shell, from a plain terminal (a clean login environment, a real tty, no harness variable) and with no terminal (`nohup`, stdin from `/dev/null`). From a Codex session it holds on one condition: `launch.py run` is approved to run outside the Codex sandbox (seen with `codex exec --approve-for-me`, where Codex's automatic reviewer decides). Inside the default read-only sandbox `run` is refused in a sentence, and inside `workspace-write` no Codex panellist can complete. An interactive session's approval prompt was not tested. Round 3 of the follow-up work, the same day: 4 of 4 again from a clean terminal, one attempt each, while `status` and `stop` from inside a Codex sandbox reported the recorded states, signalled nothing and changed nothing. [A lead in a sandboxed shell](#a-lead-in-a-sandboxed-shell) |
 | Model agreement covers pairs across vendors | verified on real harnesses | Milestone 3 study: `haiku-codex`, Spearman 0.50 over three concepts |
 | A run past its time limit stops, keeps what it wrote and is `limited` | verified on real harnesses | `test_run_over_its_time_limit_is_stopped_and_keeps_what_it_wrote`. Milestone 1 on Claude Code and Codex, milestone 4 on Pi |
 | A usage limit leaves runs `blocked`, other runners unaffected, and `resume` finishes them | verified by tests only | `test_usage_limit_blocks_one_runner_and_resume_finishes_its_run`. No usage or rate limit has been seen in a real run. The nearest real case was the milestone 1 pilot, Codex only: a capacity refusal left its run `blocked`, the Claude Code run finished, and `resume` completed it. See [Built but not tested](#built-but-not-tested) |
-| Killing the launcher mid-panel loses no work and starts no duplicate | verified on real harnesses | `test_killed_launcher_loses_no_work_and_starts_no_duplicate`. Milestone 1 study: the next `run` cleared the stale lock, adopted the live Codex run and finished 4 of 4 |
+| Killing the launcher mid-panel loses no work and starts no duplicate | verified on real harnesses | `test_killed_launcher_loses_no_work_and_starts_no_duplicate`. Milestone 1 study: the next `run` cleared the stale lock, adopted the live Codex run and finished 4 of 4. Since the follow-up work the next launcher tells a live run by the lock its watchdog holds, also where it cannot see the run's processes. Round 3 of the follow-up work: each attempt's lock was held by its watchdog while the run lived and by nothing after, and a `stop` from inside a Codex sandbox signalled nothing and left `runs.json` byte for byte the same. No launcher was killed in that round. A launcher killed with its runs alive, one killed with its runs ended and one killed inside a sandbox were checked with fake panels inside real Codex sandboxes |
 | A panellist does not see the lead project's instruction files | verified on real harnesses | Milestone 1: a marker term in the project's `AGENTS.md` and `CLAUDE.md` is in no persona file or analysis file, on Claude Code and Codex. Pi: in its discovery fixture only. Codex's user-level `AGENTS.md` is not covered |
-| `plan` starts no process and makes no model call | verified by tests only | `test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap`. Since milestone 4 the claim is narrower: `plan` starts no run and changes no study file, and a sign-in check may let a harness refresh its own login |
+| `plan` starts no process and makes no model call | verified by tests only | `test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap`. Since milestone 4 the claim is narrower: `plan` starts no run and changes no study file, and a sign-in check may let a harness refresh its own login. Since the follow-up work it also tests the shell: a write to the study directory that leaves nothing behind, and for `codex` a probe that builds a sandbox with no model call (`test_runner_says_what_its_cli_cannot_do_from_a_sandboxed_shell_without_calling_a_model`). Where the shell cannot run a panel it shows the runner as `CANNOT BE USED` and exits with 1, which was seen with the real CLIs in real Codex sandboxes |
 | `run` never restarts a `partial` or `limited` run | verified by tests only | `test_run_and_resume_start_only_the_states_they_own` |
 | Analyst and writer jobs run on the `synthesis` models, the writer after the analysts | verified on real harnesses | `test_analysts_then_the_writer_run_on_their_own_models_within_a_share_of_the_pool`. Milestones 1, 2, 3 and 5, always on Claude Code `sonnet` |
 | An existing archived study still passes `extract_scores.py` and `analyze.py` | verified by tests only | `test_archived_study_from_before_run_completeness_still_analyses`, `test_runs_json_from_before_model_entries_still_works` |
@@ -147,7 +181,7 @@ Small additions:
 | Criterion | Status | Evidence |
 | --- | --- | --- |
 | A text-only study completes and its analysis has no visual factors | verified on real harnesses | Milestone 2 study: 6 runs on Claude Code and Codex, and no visual or mobile factor in `quant.md` or `scores.csv` |
-| A follow-up reaches the original session and appends one section without changing any score | verified on real harnesses | `test_follow_up_reaches_the_original_session_and_appends_one_section_without_changing_a_score`. Milestone 2 study: one Claude Code run and one Codex run answered in their recorded sessions, with no score changed |
+| A follow-up reaches the original session and appends one section without changing any score | verified on real harnesses | `test_follow_up_reaches_the_original_session_and_appends_one_section_without_changing_a_score`. Milestone 2 study: one Claude Code run and one Codex run answered in their recorded sessions, with no score changed. Follow-up work, round 2: two follow-ups, both in the original sessions. Round 3: follow-ups again reached the original sessions |
 | Tallies match a hand count of three runs | verified on real harnesses | Milestone 2 study: three persona files recounted on 13 October 2026 (6 Found; 5 Found and 1 Partly; 6 Found), the same as `answers.csv` |
 
 Artefact kinds:
@@ -169,43 +203,83 @@ Usability:
 | Criterion | Status | Evidence |
 | --- | --- | --- |
 | Panellists on two harnesses attempt a task on a local build, each with its own account, and produce step logs with screenshots | verified on real harnesses | Milestone 5 study: 4 runs on Claude Code and Codex, each with a provisioned account that was torn down |
-| A task that uses its step limit keeps its last step, and the run goes on to the next task | verified on real harnesses | `test_task_that_uses_its_step_limit_keeps_its_last_step_and_a_run_that_passes_the_limit_is_stopped`. Milestone 5, Claude Code: a task with a limit of 3 ended "ran out of steps" with its third result and screenshot saved, then the run did the next task. The launcher's backstop has stopped a run only in the test |
+| A task that uses its step limit keeps its last step, and the run goes on to the next task | verified on real harnesses | `test_task_that_uses_its_step_limit_keeps_its_last_step_and_a_run_that_passes_the_limit_is_stopped`. Milestone 5, Claude Code: a task with a limit of 3 ended "ran out of steps" with its third result and screenshot saved, then the run did the next task. The launcher's backstop has stopped a run only in the tests. In the follow-up usability run its count equalled the step log for every task and it stopped nothing |
 | An archived usability study contains the step logs and screenshots its synthesis cites | verified on real harnesses | `test_usability_archive_keeps_the_evidence_without_a_secret_or_a_screenshot_that_could_show_one`. Milestone 5 archive: all 59 step and screenshot citations in the synthesis resolve in the archived evidence, checked on 13 October 2026 |
-| A claimed success that the check denies is flagged | verified by tests only | `test_claim_that_the_success_check_denies_is_flagged_and_a_check_that_fails_to_run_is_no_verdict`. No real run made such a claim |
-| No secret value in any persona file, step log or synthesis, and no archived screenshot from a step that could show one | verified by tests only | `test_secret_value_in_a_persona_file_or_step_log_fails_its_run_and_is_never_printed` and the archive test above. In milestone 5 a planted secret was refused by `check_runs.py` and `archive.py`, and the archive of the sign-in study left out every screenshot |
+| A claimed success that the check denies is flagged | verified by tests only | `test_claim_that_the_success_check_denies_is_flagged_and_a_check_that_fails_to_run_is_no_verdict`. No real run in milestone 5 made such a claim. The follow-up usability run had success checks, and whether a claim and a check disagreed in it is not on record here |
+| No secret value in any persona file, step log or synthesis, and no archived screenshot from a step that could show one | verified by tests only | `test_secret_value_in_a_persona_file_or_step_log_fails_its_run_and_is_never_printed` and the archive test above. In milestone 5 a planted secret was refused by `check_runs.py` and `archive.py`, and the archive of the sign-in study left out every screenshot. In the follow-up usability run, on the changed tree, a search by shape found no secret in any output or in the archive. That is one small run and a search that knows only the shape of a secret, so the mark stays |
 | A remote target without `allow_remote` is refused | verified by tests only | `test_invalid_model_entries_and_options_are_refused`, the case "a usability target that is not a local host" |
 
 Documents:
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| `SKILL.md` names no harness tool, and a harness other than Claude Code completes a study by following it | not verified | `SKILL.md` says "your harness's shell tool" and names no tool. No harness other than Claude Code has led a study |
+| `SKILL.md` names no harness tool, and a harness other than Claude Code completes a study by following it | not verified | `SKILL.md` says "your harness's shell tool" and names no tool. A Codex session led the `plan` and `run` steps of one panel on 13 October 2026. No harness other than Claude Code has completed a study by following `SKILL.md` |
 
 ### Built but not tested
 
-- **Pi against an OpenAI-compatible endpoint.** None is configured in Rod's
-  Pi. It needs a provider in `~/.pi/agent/models.json` or an OpenRouter login,
-  which is Rod's to set up. Tool calling, usage figures, image input and
-  error text on such an endpoint are all unknown.
+- **Pi against an OpenAI-compatible endpoint.** None is configured in the
+  user's Pi. It needs a provider in `~/.pi/agent/models.json` or an
+  OpenRouter login, which is the user's to set up. Tool calling, usage
+  figures, image input and error text on such an endpoint are all unknown.
 - **macOS.** Everything ran on Linux. The watchdog's path for a Python
   without `os.waitid` runs in the tests (`LauncherWithoutWaitidTest`), on
-  Linux.
+  Linux. The locks that say whether a launcher, a run or a lead's command is
+  alive are plain `flock`, which macOS has. macOS names no process
+  namespace, so nothing records one there, none of the work on a sandboxed
+  lead was run there, and Codex's sandbox on macOS is a different one.
 - **Usage-limit and rate-limit detection, on all three harnesses.** The
   patterns are inferred from documentation and message shapes, and no limit
   was ever seen. The one refusal seen in a real run was a Codex capacity
   error ("Selected model is at capacity"), which ends in the same `blocked`
   state.
-- **A harness other than Claude Code as the lead.** No other harness has
-  followed the `SKILL.md` walkthrough. From inside a Codex sandbox the
-  launcher cannot start a Codex run (`references/runners.md`, "When the lead's
-  own sandbox blocks the launcher").
+- **A harness other than Claude Code as the lead of a whole study.** A Codex
+  session led the `plan` and `run` steps of one panel on 13 October 2026. No
+  harness other than Claude Code has completed a study by following
+  `SKILL.md`. Not tested from a Codex lead:
+  - an interactive Codex session, where the request to run outside the
+    sandbox goes to the user as an approval prompt
+  - full access mode
+  - `pilot`, `resume`, follow-ups, `purge-sessions --yes` and the analyst and
+    writer jobs
+  - a usability study
+- **The last lock changes on a real panel.** Round 3 of the follow-up runs
+  used a snapshot with the lock each watchdog holds, the namespace on each
+  watchdog's pid file and `status` by lock. What came after it is covered by
+  tests and by fake panels inside real sandboxes (Codex's, and `bwrap` for a
+  process namespace of its own), with no model:
+  - the study lock file that persists between launchers
+  - the shared lock for the archive of a study that cannot be written
+  - the namespace on the launcher's lock record
+  - the account command's lock and its recovery across namespaces
+  - the scaffold's failure when it cannot make the lock file
+- **A launcher killed while a real panel runs under the lock work.** A
+  launcher killed with its runs alive, with its runs ended, inside a sandbox
+  that ended and inside one that stayed open was checked with fake panels
+  inside real Codex sandboxes. So was the archive's report of an empty
+  folder it cannot remove.
+- **Sandbox cases checked under `bwrap` only, not under `codex sandbox`:** a
+  lead's account command left on the other side of the sandbox, and
+  `archive.py` inside while a launcher starts outside.
+- **A process inside a sandbox that holds the launcher's process id under
+  the same start time.** No sandbox was made to produce one. The tests cover
+  it with a lock file edited to name a live process and another namespace.
+- **The `pi` runner in any sandbox.** Its `shell_check()` is inferred.
 - **The usability protocol on larger panels and larger models.** The largest
   usability study was 4 runs, on `haiku` and on Codex at low effort. The
   default time limit and the "decide from the screen" result both rest on
   that.
 - **Features with tests and no real run on record:** the step limit's
-  backstop, a sequential usability study with `accounts.reset`, a remote
-  usability target (`allow_remote`), and `replicates` above 1.
+  backstop stopping a run, a sequential usability study with
+  `accounts.reset`, a remote usability target (`allow_remote`), and
+  `replicates` above 1.
+- **Refusals and failure paths of the follow-up work, which have tests and
+  no real run on record:** the archive's refusal of a link or a special file
+  and its recovery from an interrupted publish, a persona file or step log
+  that cannot be read as the run's own, a step log cut or rewritten,
+  evidence set aside on a fresh start, a harness message withheld for a
+  secret, and a run ended as `cannot_run` or as "session not saved". Both
+  endings were seen in round 1, before the code that names them existed, and
+  `cannot_run` is recognised from output recorded then.
 - **Analyst and writer jobs on Codex or Pi.** Every real one ran on Claude
   Code.
 - **A usability study with a Pi panellist.** Pi browsed in a review study
@@ -220,10 +294,15 @@ Documents:
 - A study option that replaces a harness's system prompt
   ([decision](#system-prompt-override-experiment-and-decision)).
 - A limit on where a panellist's browser can go.
+- A test of network access before a run starts. A proxy or a custom endpoint
+  makes any general test unreliable, so a run's own output shows it.
+- A way for a Codex panellist to run inside a lead's Codex sandbox
+  (`workspace-write`). A Codex CLI cannot build its own sandbox there, and
+  no writable directory changes that.
 
 ### Known limitations
 
-Rod set the trust boundary: a panellist can write only under `panel/`.
+The user set the trust boundary: a panellist can write only under `panel/`.
 `logs/`, `accounts/`, `runs.json` and the records are lead-only and trusted.
 A finding that needs someone to tamper with a lead-only file is out of scope
 and is recorded here, not fixed.
@@ -263,54 +342,110 @@ Browsing and usability:
   account, judges the old task against the new account. The output warns.
 - Browser processes can survive when a session's daemon and the browser's
   main process were both killed outright.
-- `status` takes no lock, so it settles nothing. The next `run`, `resume`,
-  `stop` or follow-up does.
+- `status` never holds the study lock (it only asks whether one is held), so
+  it settles nothing. The next `run`, `resume`, `stop` or follow-up does.
 
 Recovery:
 
 - When a watchdog was itself killed, the launcher checks who holds the CLI's
   process id and then signals its group. The id could change hands between
   the two.
-- A study directory that cannot be written is archived without the lock.
+- A study directory that cannot be written is archived under a shared lock
+  on `.launch.lock`, not under the launcher's own. It keeps launchers out
+  for the copy. The one study it cannot protect is in the list below.
 - The reader that keeps an unsettled follow-up's edits away from the scripts
   has no permanent test for its race: it was checked with a throwaway stress
   run.
+- A watchdog killed on its own in another process namespace can leave its
+  CLI running. A launcher in any other shell settles the run and adds to its
+  reason that the CLI could not be checked from there. Look for the CLI in
+  the shell that started the run.
 
-Noticed during the last fix pass and deliberately not fixed:
+The 14 problems that the milestone 5 fix pass listed here and left are fixed
+([Follow-up work](#follow-up-work)).
 
-- A review-study archive still copies through symbolic links in kept folders.
-- `analyze.py` splits `step_notes` on "; ", which one note type also uses
-  between its items.
-- A failed run that is started afresh logs attempt 1 again over its earlier
-  entries, and its evidence folder is not cleared.
-- Follow-up `.before` copies in `logs/` are read by name.
-- Persona files are parsed through plain reads. Only the secret scan refuses
-  a persona file that is a symbolic link.
-- A step log that is refused as a link stops nothing in the backstop
-  (`check_runs.py` blocks the run), and a panellist can evade the backstop by
-  truncating its own log.
-- Harness error messages that the launcher prints are not passed through the
-  secret-safe rendering.
-- While a process left by a lead command holds up recovery, `launch.py stop`
-  exits before it stops runs that are still alive under their watchdogs.
-- Where no list of processes can be had (no `ps` and no `/proc`), a command's
-  process group is taken to be empty.
-- A stray evidence file whose name is not shown loses its run id in the
+Noticed during the follow-up work and left as they are:
+
+- `purge-sessions` lists a run once for each attempt's session, with nothing
+  to tell the lines apart, and says "found no session to delete" for a
+  session that was never saved.
+- A usability study's `analysis/` has a `rankings.csv` that holds a header
+  line only.
+- Two archives to one destination at the same time are not serialised. Each
+  leaves whole files, but one can fail with a "could not be finished"
   message.
-- On Python 3.12 and earlier, a kept folder that can be listed but not
-  searched may end an archive in a traceback that carries its path. It is
-  refused cleanly on Python 3.14, where this was run.
-- A FIFO or socket under a kept folder is not refused by the archive's plan:
-  the scan may block on it, or the copy may fail.
-- The archive plans, then copies. A folder made unreadable between the two
-  still fails in the copy.
-- A kept folder that holds only ignored names (`__pycache__`, `.DS_Store`) is
-  archived as an empty folder.
+- `capture.py` still decides by process id that another capture's scratch
+  folder is dead. A reused id delays its recovery, and a capture started
+  inside a sandbox could remove the scratch of one running outside.
+  Captures can be regenerated.
+- Archiving a round that is already archived would skip its personas and
+  panel instructions, because the kept names are the study's paths. Not
+  tested.
+- The secret scan of `analysis/*.md` and the archive's scan still guard
+  against links with a path comparison (`read_kept()`), which is weaker than
+  the descriptor walk used elsewhere. The scan and the copy read a file
+  separately.
+- A persona file that is not valid UTF-8 ends every reader in a traceback.
+- `launch.py status` shows a run whose persona file cannot be read as
+  `pending` and does not say why (only `check_runs.py` does), and `run`
+  would start it afresh.
+- An analyst's brief names persona files by path, and the analyst's own
+  tools would follow a link there. It can happen only with
+  `--allow-incomplete`.
+- `init_study.py --force` does not remove `logs/*.evidence` from an earlier
+  scaffold.
+- A launcher killed between setting evidence aside and writing `runs.json`
+  leaves the earlier evidence in `logs/` with the run unchanged.
+- Messages that do not come from a harness result are printed without a
+  check for secrets: those of `purge-sessions`, of the runner checks and of
+  a browser session that failed to start. None comes from a panellist
+  process.
+- `browser_session.py` treats "no process list" as "nothing left".
+- `shell_check()` does not probe the folder a CLI keeps for one working
+  directory under its sessions root.
+- The `claude` runner calls `claude auth status` once for each attempt that
+  ends, to find where sessions are kept.
+- On a file system without `flock`, a sandboxed shell falls back to process
+  ids and can settle runs it cannot see.
+- A run settled as "watchdog was killed", as every run is that was settled
+  after its sandbox ended, has no flag that its spend was not reported.
+- Liveness across process namespaces is Linux only in what it records: a
+  launcher, a watchdog and a lead's command name their namespace there and
+  not on macOS. macOS was not run at all.
+- A study scaffolded before the lock file was kept has none until a launcher
+  or a new scaffold makes one, so a read-only archive of it cannot keep a
+  launcher out. Start no launcher on that study until the archive has
+  finished.
+- Archiving an already archived round from a shell that can write it leaves
+  an empty `.launch.lock` in that source round, never in the copy.
+- A lead who deletes `.launch.lock` while a launcher runs breaks the
+  one-launcher guarantee. The skill's documents say not to delete it.
+- After a sandbox ended part of the way through a lead's account command,
+  the study waits for the lead to delete the command's record.
+- A process that a lead's command means to leave running keeps the command's
+  lock if it keeps the descriptor. After a killed launcher it holds the
+  study until the lead stops it or deletes the record.
+- A command started through `sudo`, or a worker started with its descriptors
+  closed, holds no lock while it runs. Recovery in the same namespace still
+  goes by process ids for that reason.
+- `followup.py list` waits 5 seconds behind an archive that is reading the
+  study.
+- `archive.py` prints a traceback on Ctrl-C.
+- From a shell outside a sandbox that can write the study, `archive.py`
+  takes the lock and archives a study whose launcher was killed while its
+  runs are still alive and in sight. Only `init_study.py --force` refuses on
+  runs still at work.
+- Inside a sandbox, `status` still prints each run's recorded process id,
+  which names nothing in that shell.
+- `init_study.py` and `analyze.py` label a study by its folder name, while
+  `plan` uses the study's own name.
 
-Codex raised no finding that was left unfixed, and none outside the trust
-boundary.
+Up to round 19 Codex raised no finding that was left unfixed, and none
+outside the trust boundary. In rounds 20 to 27 every finding it required was
+fixed, and none was left. The `shell_check()` item above is one it classed
+as optional.
 
-### Rod's decisions
+### The user's decisions
 
 All made on 13 October 2026.
 
@@ -320,8 +455,14 @@ All made on 13 October 2026.
   prompt.** The experiment showed no measurable difference
   ([System prompt override](#system-prompt-override-experiment-and-decision)).
 - **Open questions 5 and 6 are built as drafted.**
+- **Fix the 14 problems that the milestone 5 fix pass had left, and settle
+  the criterion on starting a panel from a Codex session, a Claude Code
+  session and a plain terminal.** Both are done
+  ([Follow-up work](#follow-up-work)).
+- **The PRD and the skill say "the user" and name no person,** because the
+  repository is public.
 
-How each of the [open questions](#open-questions-for-rod) was settled:
+How each of the [open questions](#open-questions-for-the-user) was settled:
 
 | Question | Settled as |
 | --- | --- |
@@ -334,35 +475,55 @@ How each of the [open questions](#open-questions-for-rod) was settled:
 
 ### Where to pick up
 
-1. Run the tests and confirm that all pass.
+1. Run the tests and confirm that all 105 pass.
 2. Lead one small study from a harness other than Claude Code by following
-   `SKILL.md`, and start one from a plain terminal. That settles two
-   criteria.
-3. Run the tests and one small study on macOS.
-4. When a usage or rate limit next happens, keep the CLI's output and exit
+   `SKILL.md` from its first step to the archive. That settles one
+   criterion. On Codex, follow `references/runners.md`, "A lead on Codex",
+   and cover what a Codex lead has not done: an interactive session's
+   approval prompt, `pilot`, `resume`, a follow-up, the analyst and writer
+   jobs, and a usability study.
+3. Run one small panel on the tree as committed, with a shell inside a
+   sandbox beside it, to cover what no real panel has: a read-only archive
+   while a launcher starts outside, a launcher killed with its runs alive,
+   and a usability study whose account command is cut off when its sandbox
+   ends ([Built but not tested](#built-but-not-tested)).
+4. Run the tests and one small study on macOS, with a lead inside Codex's
+   sandbox there.
+5. When a usage or rate limit next happens, keep the CLI's output and exit
    code, compare them with the patterns in `scripts/runners/` (each is marked
    verified or inferred), and add the real output to
    `test_runner_parses_recorded_outcomes`.
-5. Run a usability study of real size on larger models. Check the default
+6. Run a usability study of real size on larger models. Check the default
    time limit against the measured time for each step, and whether panellists
    open their screenshots.
-6. Fix the items under "deliberately not fixed", above.
-7. If Pi work resumes: configure a provider for an OpenAI-compatible endpoint
+7. Decide which of the items under "Noticed during the follow-up work and
+   left as they are", above, are worth fixing.
+8. If Pi work resumes: configure a provider for an OpenAI-compatible endpoint
    in Pi, pilot a model on it, and recheck the guard against the installed Pi
-   version.
-8. Merge the branch, then update the status line at the top.
+   version. That settles the other criterion.
+9. Merge the branch, then update the status line at the top.
 
 ### Leftovers on this machine
 
 - Two scratch `trust_level` entries in `~/.codex/config.toml`, for the
   projects `.../scratchpad/disc-codex/iso/parent/proj` and
-  `.../scratchpad/e2e-m1/project`. Rod may want to remove them.
+  `.../scratchpad/e2e-m1/project`. The user may want to remove them. The
+  follow-up work did not change that file.
 - Eight `/tmp/agent-browser-chrome-*` directories, dated 12 October 2026.
-- The scratch studies, under
-  `/tmp/claude-1000/-home-roddutra-dotfiles/fcdf3c9a-0eec-4f8d-ba8b-9b436b3ec29c/scratchpad/`.
+- The scratch studies, under the scratchpad directory of the Claude Code
+  session that did the work (under `/tmp/claude-<uid>/`). The scratch
+  folders of the checks made with fake panels are there too.
 - Harness sessions of the scratch studies. `purge-sessions` was run in
-  milestones 1 and 4. Whether the other studies' sessions were purged is not
-  verified.
+  milestones 1 and 4, for the round 1 panels of the follow-up work that
+  finished, in the terminal leg of round 2 and in round 3 (4 sessions).
+  Whether the other studies' sessions were purged is not verified.
+- Nine Codex sessions in `~/.codex/sessions/2026/10/13/`, of the Codex leads
+  used in the follow-up runs and of their automatic reviewers. The lead
+  agent left them. `codex delete --force <id>` removes one.
+- Empty folders in `~/.claude/projects/`, named for the scratch studies. The
+  study of round 3 left one more.
+- Two small folders, `/tmp/persona-panel-launch-*`, left by a proof run of
+  the old code.
 
 ## Problem
 
@@ -405,7 +566,7 @@ needs. A cheap text-only pass is worth having alongside the full panel.
   that reaches an OpenAI-compatible endpoint.
 - Adding a harness means adding one adapter, with no change to the rest of
   the skill.
-- The lead agent can be any harness, and Rod can run the launcher from a
+- The lead agent can be any harness, and the user can run the launcher from a
   terminal with no agent at all.
 - Every run has a time limit, and a budget limit where the harness can
   enforce one. The plan shows the cost before launch.
@@ -471,7 +632,7 @@ attempts, usage and why a run stopped.
 
 Two separate questions, answered separately.
 
-**Who can lead.** Any harness, or Rod in a terminal.
+**Who can lead.** Any harness, or the user in a terminal.
 
 - `SKILL.md` uses only the common `name` and `description` frontmatter and
   names no harness tool. It says "run in the background with your harness's
@@ -1765,6 +1926,215 @@ The step limit's backstop, success checks, analysis and the jobs:
   study refuses in a sentence. The lock itself is unchanged: `flock` on the
   one file every launcher opens.
 
+### Follow-up work after milestone 5
+
+Decided on 13 October 2026, while fixing the 14 problems that the milestone 5
+fix pass had left and while starting one panel from each kind of shell
+([A lead in a sandboxed shell](#a-lead-in-a-sandboxed-shell)). They reach
+studies of both types, not only usability studies.
+
+The archive:
+
+- **One walk and one copy serve both study types.** `archive.py` finds the
+  kept files by one walk that opens each folder by descriptor, then copies
+  the files that walk listed and no others, each opened without following a
+  link at its name or at a folder above it. A review study has a plan step
+  too. Before, a review-study archive copied through symbolic links in kept
+  folders. A file that can no longer be read when it is copied now ends the
+  archive in the same refusal as one the walk found.
+- **A symbolic link, a FIFO, a socket or a device at or under a kept name
+  refuses the archive,** in a study of either type. A link could bring in a
+  file from outside the study. The others are no file to copy, and opening
+  one may never return.
+- **The round is built in a scratch folder beside the destination,**
+  `.<round>.archive-<random>`, and everything that reads the study happens
+  there. A failure while the study is read therefore leaves the destination
+  as it was.
+- **Publishing is one rename to a new destination, and file by file into an
+  earlier archive,** each file moved into place whole with `os.replace`. An
+  interrupted publish leaves whole files, some of this round and the rest as
+  the earlier archive had them, and archiving again completes it.
+- **No empty folder is archived.** A folder travels only as part of the path
+  of a kept file, and folders left empty at the destination are pruned. A
+  folder that held only ignored names used to be archived empty, and an
+  empty folder named with a secret had to be refused.
+- **An empty folder that cannot be removed is named on stderr and left.**
+  The round is archived all the same, the exit code is 0 and no permission
+  is changed to get at it.
+- **Archived files get default permissions and keep their modification
+  times.** Each is written to a file made anew, not copied with its mode.
+- **A stray evidence file keeps its run id in the message,** also when its
+  own name is not shown.
+- **The closing line counts the markdown files that carry the synthetic
+  notice,** not the ones this archive gave it to, so archiving twice prints
+  the same line.
+
+The launcher and accounts:
+
+- **A run that is started afresh has its earlier evidence set aside,** in
+  `logs/<run id>.<attempt>.evidence/`. A new session logs every task as
+  attempt 1 and names its screenshots as the earlier one did, so the two
+  would mix. Nothing is deleted, the folder is put back when the start never
+  ran as the CLI, and the run's `task_attempts` go with it.
+- **The step backstop keeps a count of its own in `runs.json`,** which never
+  goes down when a step log is cut or rewritten. A panellist could otherwise
+  switch the backstop off by truncating its own log.
+- **A step log that cannot be read as the run's own stops the run,** as
+  `limited`. A log refused as a link used to stop nothing. A log that does
+  not exist yet stops nothing.
+- **The backstop is stated as a backstop.** It counts the steps a log shows
+  while a launcher is running. A run that logs nothing is bounded by its
+  time limit, and the documents say so.
+- **A harness message that holds a known secret is withheld** before it is
+  printed or stored. The reason names the attempt's `.err` and `.out` files
+  in `logs/`, which have it and are the lead's alone.
+- **`stop` stops live runs first,** also while a process left by a lead
+  command holds up recovery. It then starts no command of the study, says
+  what holds the study up and exits with 1. Before, it exited without
+  stopping anything.
+- **"No process list can be had" is never read as "empty".** With no `/proc`
+  and no `ps`, the launcher says that it could not check a process group,
+  and keeps the record of a command it cannot prove gone.
+
+Reading what a panellist can write:
+
+- **Every persona file is opened one way** (`panel_lib.persona_bytes`):
+  without following a link at the file or at any folder above it, regular
+  files only, and never waiting, as an open of a FIFO would. Before, only
+  the secret scan refused a persona file that was a link.
+- **A persona file that cannot be read as the run's own is no persona
+  file.** Its run is not done, it gives nothing to the scores or the
+  answers, and `check_runs.py` blocks it and names the reason.
+- **`step_notes` cells are escaped,** so a note that holds "; " stays one
+  note. An existing `runs.csv` reads as before.
+- **Follow-up `.before` copies go through the safe-open helpers** that every
+  other file of an attempt uses. They were read by name.
+
+A lead in a sandboxed shell:
+
+- **The shell is tested before a runner is called ready.** `plan`, `run`,
+  `pilot`, `resume` and follow-ups test that the study directory can be
+  written, that each CLI can write where it keeps its sessions, and for
+  `codex` that it can build its sandbox. In the first round of runs `plan`
+  said "ready" inside every sandbox. Codex runs there then could not start,
+  or called the model for up to 160,000 input tokens a run and wrote
+  nothing.
+- **The runner interface gains `shell_check()`,** asked after a `check()`
+  that passed. It makes no model call, and the `codex` probe builds a
+  sandbox and runs nothing in it. Only what is known to stop a run refuses:
+  a test that cannot be made passes.
+- **A runner the shell cannot run is shown as `CANNOT BE USED`,** with what
+  it cannot do there and the two ways out, and `plan` exits with 1. Other
+  runners are judged on their own.
+- **Network access is not tested.** A proxy or a custom endpoint makes any
+  general test unreliable. A run's own output shows it.
+- **`parse_result()` gains `cannot_run`:** a Codex run whose every shell
+  command failed to build its sandbox, and a Claude Code run that cannot
+  reach its provider. The run is not retried and the runner is closed for
+  the command, because the next run would spend the same time and tokens to
+  end the same way.
+- **`parse_result()` gains `session_saved`.** A run whose session was not
+  saved says so once, shows it in `status`, and is refused for `resume` and
+  for a follow-up. A Claude Code run completes without a saved session
+  where its CLI cannot write its own folder.
+- **`check_runs.py`, `extract_scores.py`, `extract_answers.py` and
+  `analyze.py` end in a sentence,** not a traceback, when the study
+  directory cannot be written.
+- **A Codex lead asks for `plan` and `run` outside its sandbox.** Inside it,
+  `plan` answers for the sandbox and never says `ready`. A Codex CLI cannot
+  build its own sandbox inside another Codex sandbox, so nothing tried
+  inside `workspace-write` lets a Codex panellist run. A study with only
+  Claude Code panellists can stay inside, with network on and the Claude
+  configuration directory writable.
+
+Runs that a shell cannot see (another process namespace, as inside a
+sandbox):
+
+- **Whether a launcher is running is what the `flock` on `.launch.lock`
+  says,** not whether its process can be seen. Every shell sees a lock.
+  `status`, `plan` and `stop` ask with a shared lock that they do not wait
+  for and let go at once, and a launcher that finds only such a lock in its
+  way asks again, so a question never turns a launcher away.
+- **The lock file persists.** A launcher that ends empties its record and
+  leaves the file, and no command removes it. A killed launcher still leaves
+  its record, and the next launcher clears it. A shell that cannot write the
+  study, as in a read-only sandbox, can lock a file and cannot make one, so
+  the file has to be there while the study is at rest.
+- **`init_study.py` makes the lock file at every scaffold,** of a
+  native-mode study too, so a study has one before it has had a launcher.
+  When it cannot, it says so in one sentence that names the file and the
+  system's reason, and exits with 1. A link, a FIFO or a folder at the name
+  is refused the same way and left there.
+- **Each attempt's watchdog holds a lock of its own for life,**
+  `logs/<run id>.<attempt>.lock`. The system lets go of it when the watchdog
+  ends, however it ends, so the lock says whether the attempt is alive when
+  no launcher is. The watchdog closes the descriptor before a child becomes
+  the CLI or a hook, so nothing a panellist runs holds the lock or can let
+  go of it.
+- **The launcher's lock record and each watchdog's pid file name the
+  process namespace,** where the system names one (Linux does, macOS does
+  not). A launcher or a run counts as visible only when the process id, the
+  start identity and the namespace all agree. A process id means its process
+  only within a namespace, and a start identity can be the same on both
+  sides of a sandbox, so the two alone could take a stranger's process for
+  the launcher.
+- **A recorded id is never looked up or signalled across namespaces.** That
+  covers the daemon and the browser of a run's browser session, which is
+  closed through its socket.
+- **A held lock whose holder cannot be seen is a live run out of sight.**
+  `status` reports the recorded states with one line saying so, and every
+  command that takes the study refuses before it changes anything. Going by
+  process ids, a launcher in a sandbox would have taken live runs for gone
+  and settled or restarted them.
+- **A free lock means the watchdog has ended,** in whatever namespace it
+  ran, and any launcher settles the run as always. That lets any shell
+  settle the runs that died with a sandbox, with nothing edited by hand.
+- **The namespace on record never decides whether a run is alive.** An
+  earlier version did decide by it: a record from another namespace was a
+  run out of sight, and every command refused. A launcher killed inside a
+  sandbox then left a dead end. Its runs had died with the sandbox, their
+  records named a namespace no shell would ever be in again, and every shell
+  refused the study. The locks replaced that rule, because the system frees
+  a lock when its holder ends, whatever shell asks. The namespace now only
+  says which ids may be looked up and signalled.
+- **One case is left: a watchdog killed on its own in another namespace.**
+  The ids on record name nothing in this shell, so the launcher looks none
+  up and signals nothing, settles the run as one whose watchdog was killed,
+  and notes that its CLI could not be checked.
+- **A study that cannot be written is archived under a shared lock on
+  `.launch.lock`,** held from before `archive.py` looks at the study until
+  the round is copied. A shell that only reads can take a shared lock, and
+  it turns every launcher away, so no run or follow-up starts under the
+  copy. A launcher that meets it waits 5 seconds, says that something is
+  reading the study and exits with 1. Under that lock the archive asks each
+  watchdog's lock and refuses a study with a run it cannot see. Before, such
+  a study was archived with no lock at all.
+- **A study from before the lock file was kept is the one unprotected
+  case.** It has no file to share until a launcher or a new scaffold makes
+  one, and a read-only shell cannot. `archive.py` refuses it with a run on
+  record as running, and copies any other with nothing to keep a launcher
+  out.
+- **A lead's account command holds a lock for as long as it or anything it
+  started lives,** `accounts/command.lock`, and its record names the
+  namespace it was started in. In the same namespace recovery goes by the
+  process ids as before, because a process that closed the descriptor it was
+  given (one started through `sudo` or by Python's `subprocess`) holds no
+  lock. A lock still held when the command's group is empty holds the study:
+  a process left the group and kept the lock.
+- **Recovery of a command recorded in another namespace waits for the
+  lead.** It never clears the record and signals nothing. It keeps
+  `accounts/command.running`, starts no command, exits with 1 and says to
+  run the launcher from the shell that started the command, or to delete the
+  record and the lock file if that shell was a sandbox that has ended. A
+  run's free lock proves that its watchdog ended, because the watchdog never
+  gives the lock up. A command's free lock proves nothing, because what the
+  command started may have closed the descriptor and still be running where
+  this shell cannot look. This is the one place where a study waits for the
+  lead after a sandbox has ended.
+- **Without a lock the old rule stands.** An attempt from before watchdogs
+  held a lock, and one on a file system without `flock`, is looked for by
+  the process ids on record.
+
 ## Changes to the skill's documents
 
 - **`SKILL.md`:** harness-neutral wording; the launcher workflow as the main
@@ -2139,7 +2509,7 @@ below).
 **Question.** The Claude Code and Codex runners strip user and project
 instruction files, memory, skills, hooks and MCP servers, but leave each
 harness's default system prompt in place, and that prompt addresses a coding
-agent. Rod asked whether replacing it would let a panellist take on its
+agent. The user asked whether replacing it would let a panellist take on its
 persona more reliably.
 
 Findings come from each harness's session record (the `prompt_snapshot` record
@@ -2400,9 +2770,9 @@ and flow, Mobile, Next step, Overall.
   Confidence is high that nothing breaks, and moderate that there is no effect
   worth having.
 
-**Decision (Rod, 13 October 2026).** The `claude` and `codex` runners keep
+**Decision (the user, 13 October 2026).** The `claude` and `codex` runners keep
 their harness's default system prompt for now, and no study option replaces
-it. Rod's reason: the experiment showed no tangible benefit or difference in
+it. The user's reason: the experiment showed no tangible benefit or difference in
 the research output when the default system prompts were overridden. The
 question is set aside, not closed.
 
@@ -2497,6 +2867,116 @@ Codex, at launch and on resume alike, among the `-c` options before `-C`:
 working directory, shell, date and timezone, an isolation gap the plan reports
 today. The key is undocumented and was not tried on a full panellist run, so
 the runner does not pass it.
+
+### A lead in a sandboxed shell
+
+Checked on 13 October 2026 on Linux, with claude 2.1.296 and codex-cli
+0.162.1. **Outcome:** a panel starts from a Claude Code session's shell, from
+a terminal and with no terminal at all. From a Codex session it starts only
+when `launch.py run` is approved to run outside the Codex sandbox. The full
+text, with what each refusal means and how a Codex lead works, is in
+`references/runners.md`, "When the lead's own sandbox blocks the launcher".
+The decisions it led to are under
+[Follow-up work after milestone 5](#follow-up-work-after-milestone-5).
+
+**Round 1.** One text-only review of four runs: two personas, on `haiku`
+through `claude` and on the default model at low effort through `codex`. It
+ran before the launcher tested the shell, when `plan` said "ready"
+everywhere. The last column is what `plan` says since, checked the same day
+in the same shells with no model.
+
+| Where `run` was started | What the runs did | `plan` now |
+| --- | --- | --- |
+| A Claude Code session's shell tool, its sandbox off | 4 done | Both ready |
+| A plain terminal: a clean login environment, a real tty, no harness variable | 4 done | Both ready |
+| No terminal: `nohup`, stdin from `/dev/null` | 4 done | Both ready |
+| Codex sandbox, read-only (the default of a headless Codex session) | Nothing started. `run` was refused in one sentence, for the lock file it could not write | Refuses the study directory and both runners |
+| Codex sandbox, `workspace-write` | Codex: the CLI exited before printing anything. Claude Code: no network, so each run and its retry failed | Refuses both runners |
+| The same, with network access | Codex: the same. Claude Code: 2 of 2 done, with no session saved | Refuses both runners |
+| The same, with the Codex and Claude configuration directories writable | Claude Code: 2 of 2 done, sessions saved. Codex: each run called the model, had every shell command refused and wrote nothing, for up to 160,000 input tokens a run | Refuses `codex`, `claude` ready |
+| A Codex session as the lead (`codex exec --approve-for-me`), `run` approved to run outside its sandbox | 4 done | Refuses inside the sandbox (round 2) |
+
+**Round 2,** on the tree after the fixes:
+
+- **Terminal:** plan, run, status, checks, extraction, analysis, archive, a
+  second archive (byte for byte the same), two follow-ups (both reached the
+  original sessions) and purge.
+- **Codex lead:** `plan` refused inside the sandbox, as designed, and the
+  lead asked for `run` outside it.
+- **Usability:** one persona on Claude Code (`haiku`) and on Codex (low
+  effort), two tasks, accounts, success checks and an archive. Both runs
+  done, the launcher's step count equal to the step log for every task, no
+  run stopped in error, accounts torn down, and no secret found by its shape
+  in any output or in the archive.
+
+Round 2 ran on a snapshot taken before the archive reported a folder it
+cannot prune and before liveness was decided by locks.
+
+**Round 3,** on a snapshot with the lock each watchdog holds, the namespace
+on each watchdog's pid file and `status` by lock. The same four-run review
+study, started from a clean terminal:
+
+- **Runs:** 4 done from one `run`, one attempt each.
+- **`status` mid-run, from the ordinary shell:** four runs alive and the
+  launcher running.
+- **`status` mid-run, inside a Codex sandbox (no model):** the recorded
+  states, "Launcher: running" and the line saying that this shell cannot see
+  the launcher's processes, with no advice to resume or stop.
+- **`stop` inside the sandbox:** exit code 1, nothing signalled, `runs.json`
+  byte for byte the same, and the runs finished.
+- **Locks:** each attempt's lock was held by its watchdog while the run
+  lived and by nothing after. Both shells then said "Launcher: not running".
+- **After the runs:** follow-ups reached the original sessions, the archive
+  was complete with no empty folder, a second archive was byte for byte the
+  same, and 4 sessions were purged.
+
+Checked with fake panels only, inside real sandboxes and with no model:
+
+- **Inside `codex sandbox`, against a launcher outside it:** `status`,
+  `plan`, `run`, `resume` and `stop`, with the launcher running, killed with
+  its runs alive, and killed with its runs ended. Also a launcher started
+  and killed inside a sandbox, one killed inside a sandbox that stayed open,
+  `archive.py` on a study the sandbox showed read-only, and the archive's
+  report of a folder it cannot prune.
+- **Inside a `bwrap` sandbox with a process namespace of its own:** the
+  shared lock of `archive.py` on a read-only study while a launcher command
+  waited outside, and a lead's account command on the other side of the
+  sandbox from the launcher, in both directions, also after the sandbox had
+  ended.
+- **By tests alone:** a process that holds the launcher's process id and
+  start identity in another namespace (a lock file edited to say so), and
+  the scaffold's failure when it cannot make the lock file.
+
+Round 3's snapshot came before the last lock changes, so no real panel has
+run on them: the lock file that persists between launchers, the shared lock
+for a read-only archive, the namespace on the launcher's lock record, and
+the account command's lock with its recovery across namespaces.
+
+What the runs showed:
+
+- A Codex CLI cannot build its own sandbox inside another Codex sandbox. No
+  writable directory changes that.
+- A study with only Claude Code panellists can stay inside the sandbox, with
+  network on and the Claude configuration directory writable.
+- The approval of `run` was decided by Codex's automatic reviewer, itself a
+  model. It refused while nothing in the session said that the user had
+  agreed to the materials going to the providers, and allowed the same run
+  once the session said so.
+
+Not tested:
+
+- an interactive Codex session, where the request goes to the user as an
+  approval prompt
+- full access mode: with no model the `codex` CLI could build its sandbox
+  under it, and no run was made
+- `pilot`, `resume`, follow-ups, `purge-sessions --yes` and the analyst and
+  writer jobs from a Codex lead
+- a usability study from a Codex lead
+- macOS, where Codex's sandbox is a different one, and the `pi` runner in
+  any sandbox
+- a lead's account command left on the other side of `codex sandbox`, and
+  `archive.py` there while a launcher starts outside it: both were checked
+  under `bwrap` only
 
 ## Edge cases
 
@@ -2669,7 +3149,7 @@ Documents:
 - **Scope.** This is a large change to a skill that works. Mitigation: the
   order of work, with native mode and the existing tests intact throughout.
 
-## Open questions for Rod
+## Open questions for the user
 
 1. **Default concurrency.** What is safe on each subscription? The draft
    uses 6 for Claude Code and 4 for Codex until discovery says otherwise.
