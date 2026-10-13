@@ -1,9 +1,9 @@
 # Persona panel: interview studies
 
-**Status:** Draft, 13 October 2026. Nothing here is built or tested. Codex
-reviewed it over two rounds on 13 October 2026 and approved it with notes,
-which are applied. The [open questions](#open-questions-for-the-user) are
-the user's to settle.
+**Status:** Ready, 13 October 2026. Nothing here is built or tested. The
+user settled the open questions on 13 October 2026:
+[The user's decisions](#the-users-decisions). Codex reviewed the PRD over
+three rounds that day and approved it with those decisions in.
 
 PRD for a third study type in the `persona-panel` skill
 (`packages/common/agents/.agents/skills/persona-panel/`): simulated discovery
@@ -15,9 +15,8 @@ interviews, run the way [The Mom Test](https://www.momtestbook.com/) teaches.
    transcript, so neither side needs to write a file.
 3. **The analysis codes each transcript** into problems, tallies them across
    participants and segments, and critiques the interviewer's questions.
-4. **Two later additions** reuse the same turn loop: a debrief interview in
-   the session of a finished review or usability run, and a practice mode
-   where the user asks the questions.
+4. **A later addition** reuses the same turn loop: a debrief interview in
+   the session of a finished review or usability run.
 
 It follows [persona-panel-expansion.md](persona-panel-expansion.md), which
 built the runners, the launcher, follow-up questions and usability studies.
@@ -67,8 +66,6 @@ Corrected:
 - **Analysts and the writer work in the study directory**
   (`panel_lib.workdir`). Keeping a file from them is an instruction, as it is
   for `study-brief.md` today.
-- **`archive.py` keeps `prompts/`.** A prompt that held real background
-  material would be archived with it.
 - **Native mode cannot run an interview.** The turn loop is the launcher's.
 
 ## Problem
@@ -86,7 +83,8 @@ to a panellist who has already reviewed something. It cannot open a topic,
 react to an answer or dig past the first shallow one.
 
 The user also wants to learn the technique: to read the questions, the answers
-and how the interviewer drilled down, and to rehearse before real interviews.
+and how the interviewer drilled down, and to rehearse a guide before real
+interviews.
 
 ## Goals
 
@@ -118,8 +116,10 @@ and how the interviewer drilled down, and to rehearse before real interviews.
 - **Recruiting.** Finding conversations, invitations and warm introductions
   have no place in a simulation.
 - **Interviews in native mode.**
-- **New work on the Pi, OMP or OpenCode runners.** See
-  [Runners](#runners).
+- **Interviews on the Pi runner,** and any work on the Pi, OMP or OpenCode
+  runners. An interview study refuses a Pi model entry: [Runners](#runners).
+- **Practice mode and background material.** Both are
+  [deferred](#deferred).
 - **An interviewer that learns from one interview to the next** inside a
   round. See [Design decisions](#design-decisions).
 - **Scores, leaderboards, capture, concept labels and review orders.**
@@ -141,9 +141,8 @@ and how the interviewer drilled down, and to rehearse before real interviews.
 
 ## Design decisions
 
-The seven the design discussion asked this PRD to settle. Each is built into
-the draft and repeated under [Open questions](#open-questions-for-the-user) where
-the user should confirm it.
+The seven the design discussion asked this PRD to settle, as the user
+settled them: [The user's decisions](#the-users-decisions).
 
 **1. Same skill, a third type.** `"type": "interview"`, built as usability
 was. Personas, rosters, model entries, the launcher, limits, the plan, the
@@ -164,9 +163,8 @@ and the first participant's wording would lead the second. Learning happens
 between rounds instead. The debrief ends with a revised guide, and the next
 round is a new study directory, as the book's batch procedure has it.
 
-**4. Practice mode is in scope, as the last milestone.** The turn loop does
-not care who writes the question. It costs a terminal front end, runs marked
-as practice and kept out of the tallies, and a critique of one run.
+**4. Practice mode is deferred.** The turn loop does not care who writes the
+question, so it stays cheap to add: [Deferred](#deferred).
 
 **5. Interviews about the user's own tool happen only in a debrief.** A persona
 has never used the tool, so a question about its history with it gets pure
@@ -176,10 +174,8 @@ is discovery, and its interviewer never names the tool. A debrief is product
 feedback. The two are never mixed, because the book treats feedback given
 after a demo as a different kind of evidence.
 
-**6. Background material reaches participants only, in their prompts.** It
-lives in `<study>/background/`, never under `panel/`. The interviewer never
-sees it: it would ask about what it knew was there. Analysts are not given
-it, by instruction only.
+**6. Background material is deferred.** A participant answers from its
+persona alone: [Deferred](#deferred).
 
 **7. Hypotheses stay with the lead.** The interviewer gets learning goals
 written as things to find out, never the study brief, the idea or the tool's
@@ -274,11 +270,7 @@ All new keys are optional for the other two types, which load unchanged.
        "opener": "What was the last piece of software the business started or stopped paying for?"}
     ],
     "turns": 30,
-    "situation_card": true,
-    "background": {
-      "all": ["background/forum-threads.md"],
-      "personas": {"P01": ["background/calls-with-solo-brokers.md"]}
-    }
+    "situation_card": true
   },
   "limits": {
     "run": {"minutes": 20, "budget_usd": 2.0},
@@ -316,22 +308,20 @@ Rules:
 - **`topics[]`** are opened in the order written. `area` is a neutral name
   the interviewer may use to raise the topic when it has not come up.
   `opener` is the first question, sent as written. `goals` lists what the
-  topic serves. `turns` is its cap in exchanges. `segments` limits a topic to
+  topic serves. `turns` is its cap in exchanges, 8 when not given. `segments` limits a topic to
   personas in those segments, so that a buyer is asked about buying and a
   user is not.
-- **`interview.turns`** caps the whole interview in exchanges. It must be at
-  least the number of topics plus two, for the opening and the close.
+- **`interview.turns`** caps the whole interview in exchanges and defaults
+  to 30. It must be at least the number of topics plus two, for the opening
+  and the close.
 - **`situation_card`** defaults to true: [Situation card](#situation-card).
-- **`background`** names text or Markdown files inside
-  `<study>/background/`, for every participant or by persona id. A path
-  outside that folder is refused, and so is one over 20,000 words, since a
-  participant's every turn re-reads it.
 - **`limits.interviewer`** is each interviewer's allowance over a whole
   interview. `limits.run` stays the participant's. `limits.turn.minutes`
-  bounds any single turn of either side. The defaults come from the
-  [discovery](#discovery) measurements.
-- **`synthesis.critic`** is the model entry of the critique jobs. The plan
-  says so when it is the interviewer's own model.
+  bounds any single turn of either side and defaults to 3. The defaults for
+  the other two come from the [discovery](#discovery) measurements, which
+  may also move the caps above.
+- **`synthesis.critic`** is the model entry of the critique jobs. When it is
+  the interviewer's own model the plan warns, and the study still runs.
 - **Keys of the other types are refused**, as now: `concepts`, `tasks`,
   `target`, `accounts`, `find_the_answer`, `materials`, `browse`, `capture`,
   `factors` and `fit_factors` among them. `replicates`, variants, the roster
@@ -347,7 +337,7 @@ Rules:
 For each interview the launcher:
 
 1. **Starts the participant** in its room with its prompt: the participant
-   brief, the persona, any `context_notes` and any background. With
+   brief, the persona and any `context_notes`. With
    `situation_card` on, the prompt asks for the card as its only reply.
    Otherwise it asks for the single word "Ready".
 2. **Starts the interviewer** in its folder with its prompt: the interviewer
@@ -479,9 +469,9 @@ the interview's cap.
 
 - every interview: its participant's model entry, the interviewer's, the
   caps and all three limits
-- what each provider receives. The participant's provider gets the persona
-  and the background. The interviewer's provider gets the guide and every
-  answer, which can repeat background material in the participant's words
+- what each provider receives. The participant's provider gets the persona.
+  The interviewer's provider gets the guide and every answer
+- a warning when the critic or a participant is on the interviewer's model
 - the estimate, from measured tokens per exchange when a pilot has run
 - the ceiling: both sides' caps for each interview, plus the synthesis pool,
   labelled a guaranteed maximum or an estimate by today's rule
@@ -492,13 +482,17 @@ whether the interviewer keeps to the method.
 
 ### Runners
 
-An interview needs nothing new from a runner: a launch, a resume with a
-message, a final reply and usage. The interface in `runners/__init__.py`
-does not change in the first three milestones.
+An interview asks a runner for what it already does: a launch, a resume with
+a message, a final reply and usage. The interface in `runners/__init__.py`
+gains one capability, `interview`, which says that the runner is verified for
+interviews.
 
-- **Claude Code and Codex** are the runners this PRD verifies.
-- **Pi** stays as built. A Pi model entry is allowed if the unchanged runner
-  passes the pilot. No work is done to make it pass.
+- **Claude Code and Codex** declare it. They are the runners this PRD
+  verifies.
+- **Pi is refused.** The launcher reads a capability a runner does not
+  declare as false, so `runners/pi.py` is not edited. The plan step refuses
+  a participant, an interviewer or a debrief on such a runner, naming the
+  runner and the reason.
 - **A runner that cannot resume** is refused at the plan step.
 - **Both runners keep their harness's default system prompt.** Whether a
   conversation needs otherwise is a [discovery](#discovery) question. If it
@@ -515,7 +509,6 @@ everything else in the study is the lead's and trusted.
 | --- | --- | --- | --- | --- | --- |
 | Persona: name, role, segment | yes | yes | yes | yes | no |
 | Persona: bio and personality | yes | no | yes | yes | no |
-| Background material | yes | no | no | no | no |
 | Its situation card | yes | no | no | yes | no |
 | Learning goals and the guide | no | yes | no | yes | yes |
 | The interviewer's `SAY` | yes | yes | yes | yes | no |
@@ -537,9 +530,6 @@ files, not the transcripts, as it does today.
   stops one interviewer leaving notes for another.
 - **The launcher writes `interviews/`,** outside `panel/`. No session of
   either side is told it exists.
-- **`background/` is lead only.** The scaffold copies its text into the
-  participant's prompt, between two marker lines. `archive.py` cuts that
-  block from the archived prompt and never copies `background/`.
 
 ### What enforces it
 
@@ -547,9 +537,8 @@ files, not the transcripts, as it does today.
 | --- | --- |
 | Claude Code | Read and write only its own folder (`--restricted`) |
 | Codex | Write its own folder and `/tmp`, and read the whole disk. Only its instructions keep it out of the rest of the study |
-| Pi | Read and write only its own folder (the guard) |
 
-On Codex the guide, the background and the other transcripts are a file read
+On Codex the guide and the other transcripts are a file read
 away from either side. That gap exists for every Codex panellist today and is
 printed by the plan. A session with no tools would close it on Claude Code:
 [Discovery](#discovery).
@@ -573,16 +562,6 @@ Four layers, the first two deterministic:
 
 A leading question that uses no listed term gets past the gate. That is what
 layers 3 and 4 are for.
-
-### Background material
-
-- It is third-party text and may hold instructions. It reaches a session with
-  no network, which can write only in its own room.
-- It may hold real people's words. The user removes names and identifying
-  details before adding a file. No script can check that, so the scaffold says it
-  once, and the plan names the providers that will receive it.
-- A harness transcript holds whatever its session read. `purge-sessions`
-  deletes those sessions, as now.
 
 ## The Mom Test in the briefs
 
@@ -667,7 +646,7 @@ learning from.
 ### Situation card
 
 Before the first question a participant writes a short private card from its
-persona and its background material:
+persona:
 
 - what is taking its attention at work now
 - two to four things that really bother it, each with one recent incident:
@@ -885,23 +864,21 @@ puts a question to one.
 A debrief has no situation card, and nothing in it counts as discovery: the
 participant has seen the product.
 
-## Practice mode
+## Deferred
 
-`interview.py <study> practise --persona <id> --model <key>` puts the user in
-the interviewer's seat, in a terminal.
+Set aside by the user on 13 October 2026. Neither is built, and nothing in
+this PRD depends on either.
 
-- It starts a participant exactly as an interview does, prints the
-  recruitment facts, and reads each question from the keyboard. `/end` closes
-  the interview and `/quit` leaves it to continue later.
-- It is a run of its own, `<pid>-<key>-p<n>`, marked as practice. It appears
-  in `status` and the usage record, and in no tally.
-- `launch.py <study> run --role critic --runs <id>` critiques it against the
-  same rubric and the participant's card. That is the point of the mode.
-- It holds the study lock while it is open, so nothing else runs in that
-  study meanwhile. A study directory of its own avoids that.
-- It needs a real terminal. A lead's background shell cannot type for the user.
-- The participant's `limits.run` and `limits.turn` apply. Time the user
-  spends thinking is not counted, since only a process's time is.
+- **Practice mode.** The user types the questions in a terminal in place of
+  the interviewer agent, and the critique marks them against the same rubric
+  and the participant's card. It would need a terminal front end, runs
+  marked as practice and kept out of the tallies, and a critique of one run.
+- **Background material.** Real material for participants to answer from:
+  notes from conversations, support tickets, forum threads. It would need a
+  lead-only folder, a block in the participant's prompt that the archive
+  cuts, a line in the plan naming the providers that receive it, and a
+  decision on whether analysts see it too, so that a note can be marked as
+  backed by real material.
 
 ## Known weaknesses
 
@@ -920,9 +897,6 @@ the interviewer's seat, in a terminal.
   conversation, so an interview's input grows with the square of its
   exchanges. Most of it should be read from a cache. Whether it is, on each
   harness, is a discovery measurement, and turn caps bound it either way.
-- **Background material cannot be told from invention.** An answer that
-  paraphrases a real support ticket reads like one the model made up. The
-  user checks any finding that matters against their own material.
 - **An interviewer and a participant on the same model** agree with each
   other more readily. The plan says when they match.
 - **The critique is a model's opinion** of a model's questions. It teaches
@@ -934,7 +908,7 @@ the interviewer's seat, in a terminal.
 
 **`SKILL.md`:**
 
-- The `description`, rewritten for three types in 1,021 characters:
+- The `description`, rewritten for three types in 1,009 characters:
 
   > Run simulated customer research with AI agents playing personas (buyers,
   > users, gatekeepers, sceptics) on several models. Review: personas score
@@ -948,16 +922,15 @@ the interviewer's seat, in a terminal.
   > personas, a persona panel, simulated or synthetic users, customers or
   > user research, AI agents to review, compare or score concepts 'like real
   > customers would', which concept prospects prefer or who the ideal
-  > customer is, usability or task testing with AI personas, simulated
-  > customer interviews, interview practice, or to rerun or extend an
-  > earlier round, even without the word 'panel'.
+  > customer is, usability or task testing with AI personas, simulated user
+  > or customer interviews, or to rerun or extend an earlier round, even
+  > without the word 'panel'.
 
-- The study layout gains `interviews/`, `interviewer/`, `background/` and
-  `panel/rooms/`.
+- The study layout gains `interviews/`, `interviewer/` and `panel/rooms/`.
 - One paragraph for an interview study, as usability has: read
   `references/interviews.md` first, start from
   `assets/study.interview.example.json`, and how the workflow differs.
-- One line each for debriefs and practice mode.
+- One line for debriefs.
 - Rules: a standalone interview never names the user's own product, and a
   count of simulated participants is never reported as frequency.
 
@@ -965,11 +938,12 @@ the interviewer's seat, in a terminal.
 
 - New `references/interviews.md`: when to run one, drafting the goals and the
   guide with the user (the toolkit's discovery brief), the protocol, reading
-  a transcript, the analysis steps, debriefs, practice mode, safety and how
-  much to trust the result.
+  a transcript, the analysis steps, debriefs, safety and how much to trust
+  the result.
 - `references/method.md`: a short section that points to it.
-- `references/runners.md`: what an interview asks of a runner.
-- `references/archive.md`: what is kept and what is cut.
+- `references/runners.md`: what an interview asks of a runner, and the
+  `interview` capability.
+- `references/archive.md`: the turn logs and transcripts it keeps.
 - `references/communicating.md`: how to report an interview round.
 
 **Assets:**
@@ -989,12 +963,14 @@ the interviewer's seat, in a terminal.
 
 **Scripts:**
 
-- New `interview.py` (the turn rules, `render`, `debrief`, `practise`) and
+- New `interview.py` (the turn rules, `render`, `debrief`) and
   `extract_notes.py`.
 - Changed: `panel_lib.py` (the type, its keys, the turn log),
   `init_study.py` (a third scaffold), `launch.py` and `launch_plan.py` (the
   interviewer role, the turn loop, the plan, the job roles `critic` and
-  `themes`), `check_runs.py`, `analyze.py` and `archive.py`.
+  `themes`), `check_runs.py`, `analyze.py`, `archive.py` (it keeps
+  `interviews/`), and `runners/claude.py` and `runners/codex.py` (the
+  `interview` capability).
 - `followup.py` refuses an interview study: an interview that has ended is
   closed, and a new question belongs in the next round's guide.
 
@@ -1065,10 +1041,8 @@ the results recorded in this document as the expansion PRD records its own.
   between them is reported beside model agreement.
 - **A variant** is interviewed like any persona and grouped with its parent
   in the tallies.
-- **A background file changes after the scaffold.** The prompt holds the
-  copy made then. `init_study.py --force` takes the new one.
-- **A practice run is left open.** It stays `partial` and holds no lock once
-  its terminal has gone.
+- **A Pi model entry in an interview study.** Refused at the plan step, for
+  a participant and for the interviewer.
 - **A debrief names a run whose session is gone.** It is refused before
   anything starts, as a follow-up is.
 - **An old study is loaded.** It has no `interview` key and reads as it does
@@ -1085,8 +1059,8 @@ Contracts worth a test:
 - the turn loop alternates, and the turn log has one record for each turn
 - only `SAY` reaches the participant: a marker planted in `WHY` and in the
   guide never appears in a participant's input
-- a marker planted in a persona's bio, its background and its card never
-  appears in an interviewer's input
+- a marker planted in a persona's bio and in its card never appears in an
+  interviewer's input
 - a launcher killed at each point of a turn loses no turn and records none
   twice, and `resume` continues at the turn reached
 - `done` is decided by the end record, never by an exit code
@@ -1111,11 +1085,10 @@ Contracts worth a test:
 - the tallies count participants, split prompted from unprompted, and mark
   notes that rest on a flagged question
 - the synthesis pool is divided among every planned job
-- the archive keeps the turn logs and transcripts, cuts the background from
-  the prompts and leaves `background/` out
+- the archive keeps the turn logs and transcripts
 - a debrief turn never changes a persona file or a run's state
-- a practice run takes its questions from standard input and stays out of
-  the tallies
+- a model entry on a runner that declares no `interview` capability is
+  refused at the plan step, for an interview study and for a debrief
 
 ## Acceptance criteria
 
@@ -1131,8 +1104,8 @@ Interviews:
   E2E
 - No participant input holds a learning goal, a topic id or the
   interviewer's notes. Tests, and once E2E with planted markers
-- No interviewer input holds a persona's bio, background or card. Tests, and
-  once E2E with planted markers
+- No interviewer input holds a persona's bio or card. Tests, and once E2E
+  with planted markers
 - Killing the launcher mid-interview and starting it again loses no turn and
   repeats none. Tests and E2E
 - An interview stopped by a limit keeps its turns and is reported `limited`.
@@ -1143,9 +1116,9 @@ Method:
 
 - In a pilot, the critique finds no `pitch` and no `price-guess` in an
   interview led by the interviewer brief. E2E
-- A deliberately bad question from a scripted interviewer ("would you pay
-  for an app that does this?") gets an agreeable answer from the participant
-  and a flag from the critic. E2E
+- With the interviewer brief swapped for a test brief that makes it ask
+  "would you pay for an app that does this?", the participant gives an
+  agreeable answer and the critic flags the question. E2E
 - Asked about something its card lists as no problem, a participant says so.
   E2E
 
@@ -1158,12 +1131,10 @@ Analysis:
 - An incomplete interview is absent from the headline tables. Tests
 - The synthesis carries the notice and states the known weaknesses. E2E
 
-Debrief and practice:
+Debrief:
 
 - A debrief reaches the session of a finished usability run and changes
   nothing in its persona file. E2E
-- The user completes a practice interview in a terminal and gets a critique of
-  their own questions. E2E
 
 Documents:
 
@@ -1189,8 +1160,6 @@ Documents:
 - **The launcher grows.** `launch.py` is about 3,150 lines and gains a role
   and a loop. Mitigation: the turn rules live in `interview.py`, and the
   supervisor only calls them.
-- **Real material leaves the machine.** Mitigation: `background/` is
-  explicit, the plan names who receives it, and the archive leaves it out.
 - **The book's method is bent to fit.** Mitigation: the briefs say what was
   left out and why, and name their sources.
 
@@ -1206,36 +1175,23 @@ Each milestone is usable without the ones after it.
 3. **Analysis.** Coding, `extract_notes.py`, the themes job, the tallies, the
    critique and the writer's brief. The archive.
 4. **Debrief interviews** on finished review and usability runs.
-5. **Practice mode.**
 
-## Open questions for the user
+## The user's decisions
 
-Each is drafted as the recommended answer.
+All made on 13 October 2026. Each question was drafted with a recommended
+answer.
 
-1. **A third type in the same skill?** Recommended: yes.
-2. **Should interviewers learn across interviews?** Recommended: no, within
-   a round. Revise the guide between rounds.
-3. **The situation card.** Recommended: on by default. It costs one turn an
-   interview and gives the critique an answer key.
-4. **Your own tool.** Recommended: only in a debrief of a finished review or
-   usability run. A standalone interview never names it. Is the debrief
-   worth building, or do follow-up questions cover it for now?
-5. **Background material.** Recommended: participants only, copied into
-   their prompts from `background/`, with names removed by you first. Should
-   analysts later see it too, so each note can be marked as backed by real
-   material or not? Recommended: yes, as a later addition.
-6. **Practice mode.** Recommended: in scope, last. Should it ship before the
-   debrief, since rehearsal is one of your two reasons for wanting this?
-7. **One interviewer model for a study.** Recommended: yes. Comparing
-   interviewers is a second study.
-8. **The critic's model.** Recommended: a different vendor from the
-   interviewer's, with a note in the plan when they match and no refusal.
-9. **A themes job of its own.** Recommended: yes. The alternative is one
-   analyst for a whole round, which reads worse as transcripts add up.
-10. **Follow-up questions after an interview.** Recommended: refused. A new
-    question goes in the next round's guide.
-11. **Pi.** Recommended: allowed when the unchanged runner passes the pilot,
-    with no work to make it pass.
-12. **Defaults** for `interview.turns` (30), a topic's turns (8) and
-    `limits.turn` (3 minutes). Recommended: keep these until discovery
-    measures them.
+| Question | Settled as |
+| --- | --- |
+| 1. Same skill or a derived one | A third type in the same skill |
+| 2. Learning across interviews | None within a round. The guide is revised between rounds |
+| 3. The situation card | On by default |
+| 4. The user's own tool | Only in a debrief, which is built |
+| 5. Background material | Deferred |
+| 6. Practice mode | Deferred |
+| 7. Interviewer models | One for a study |
+| 8. A critic on the interviewer's model | Allowed, with a warning in the plan |
+| 9. Themes | A job of its own |
+| 10. Follow-up questions after an interview | Refused. A new question goes in the next round's guide |
+| 11. Pi | Refused for interview studies and debriefs |
+| 12. Default caps | 30 exchanges an interview, 8 a topic and 3 minutes a turn, until discovery measures them |
