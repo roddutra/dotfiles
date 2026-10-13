@@ -2,6 +2,8 @@
 
 Voxtype provides local speech recognition with an optional Groq cleanup profile. The primary shortcuts use Groq cleanup; secondary shortcuts keep raw local transcription available.
 
+Voxtype is disabled on the Omarchy desktop while Handy is compared with it. See [Handy trial](#handy-trial).
+
 Recordings stop automatically after 6.5 minutes (`max_duration_secs = 390`) and transcribe what was captured. `voxtype-progress` counts down the last minute. The reasons are under [Recording limit](#recording-limit).
 
 ## Shortcut contract
@@ -90,7 +92,15 @@ on_demand_loading = false
 
 ## Handy trial
 
-Started 12 October 2026 to test whether [Handy](https://github.com/cjpais/Handy) 0.9.8 can lift the recording limit while keeping on-demand model loading. Voxtype stays the default until a 10 to 15 minute dictation has worked in Handy.
+Started 12 October 2026 to test whether [Handy](https://github.com/cjpais/Handy) 0.9.8 can lift the recording limit while keeping on-demand model loading.
+
+Since 14 October 2026 Handy is the only dictation tool in use, so the two can be compared. `voxtype.service` and `voxtype-progress.service` are stopped and disabled, and the Voxtype shortcuts do nothing. Voxtype's package, configuration and models stay installed. To turn it back on:
+
+```sh
+systemctl --user enable --now voxtype.service voxtype-progress.service
+```
+
+`systemctl --user disable` deletes the stowed `voxtype-progress.service` link along with the enablement links. Recreate it with `./scripts/apply-dotfiles`, then run `systemctl --user daemon-reload`.
 
 | Shortcut | Action |
 |---|---|
