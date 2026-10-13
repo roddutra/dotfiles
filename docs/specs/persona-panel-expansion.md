@@ -3,7 +3,8 @@
 **Status:** Paused on 13 October 2026. All six parts are built, reviewed by
 Codex and committed on the branch `persona-panel-expansion`: milestones 1 to
 5, and follow-up work in one more commit (`5e5dfe3`). 105 contract tests
-pass. Nothing is merged to `main`. Two acceptance criteria are not verified:
+pass. The branch was merged to `main` in pull request 3 of this repository.
+Two acceptance criteria are not verified:
 a panel with a model on an OpenAI-compatible endpoint, and a harness other
 than Claude Code completing a study by following `SKILL.md`. Codex reviewed
 this PRD on 12 October 2026 over three rounds and approved it, and the user
@@ -30,8 +31,8 @@ Drafted 12 October 2026.
 
 As at 13 October 2026. Work is paused.
 
-All six parts are built on the branch `persona-panel-expansion`, which is not
-merged to `main`. Each of milestones 1 to 5 was committed once Codex approved
+All six parts were built on the branch `persona-panel-expansion`, which was
+merged to `main` in pull request 3. Each of milestones 1 to 5 was committed once Codex approved
 it. One follow-up commit (`5e5dfe3`) fixes the 14 problems that the last fix
 pass had listed and left, settles how a panel is started from a Codex
 session and from a terminal, and keeps a study safe from a shell that cannot
@@ -497,11 +498,50 @@ How each of the [open questions](#open-questions-for-the-user) was settled:
    time limit against the measured time for each step, and whether panellists
    open their screenshots.
 7. Decide which of the items under "Noticed during the follow-up work and
-   left as they are", above, are worth fixing.
+   left as they are", above, are worth fixing. Three are picked out under
+   [Set aside for a later review](#set-aside-for-a-later-review).
 8. If Pi work resumes: configure a provider for an OpenAI-compatible endpoint
    in Pi, pilot a model on it, and recheck the guard against the installed Pi
    version. That settles the other criterion.
-9. Merge the branch, then update the status line at the top.
+
+### Set aside for a later review
+
+Three known limitations that the user chose on 13 October 2026 to record and
+not fix before the merge. None blocks use of the skill. Each has the fix that
+was in mind, so a later session can weigh it without working it out again.
+
+1. **`capture.py` judges another capture's scratch folder by process id.**
+   `clear_scratch()` there decides that a scratch folder is dead when no
+   process has the id in its name. A reused id delays the recovery, and a
+   capture started inside a sandbox, which cannot see processes outside it,
+   could remove the scratch of a capture still running outside. This is the
+   pattern the archive had until review round 20 classed it as blocking
+   there. Nothing is lost for good, because a capture can be made again.
+   Fix in mind: do what `archive.py` now does. Each capture holds a `flock`
+   on its own scratch folder, and another capture removes only a scratch
+   folder it can lock.
+2. **A run whose persona file cannot be read is `pending` with no reason.**
+   When a persona file is a symbolic link, a special file or unreadable,
+   `launch.py status` shows its run as `pending` (or `partial`) and says
+   nothing more. Only `check_runs.py` gives the reason. `launch.py run`
+   would start such a run afresh and spend on it. Fix in mind: `status`
+   prints the reason on the run's line, and `run` and `resume` refuse to
+   start that run until the file is put right or removed.
+3. **A study waits for the lead after a sandbox ended during an account
+   command.** In a usability study, when the launcher was started inside a
+   sandbox and the sandbox ended while a provision, teardown, reset or
+   success check was running, recovery from another shell holds the study
+   and names the record to delete (`accounts/command.running`). It does not
+   clear the record itself, because a free lock is no proof that the command
+   ended where this shell cannot look. The case needs a usability study with
+   accounts, a launcher inside a sandbox, and an end in the few seconds a
+   command takes. Fix in mind, on Linux only: a shell in the machine's
+   initial process namespace sees every process, so it can check whether any
+   process is still in the namespace the record names (the targets of
+   `/proc/<pid>/ns/pid`). None left means the sandbox and everything in it
+   have ended, and the record can be cleared. From any other shell recovery
+   would still wait. Not verified: that the initial namespace can be told
+   apart reliably from a kernel constant, which the fix would rest on.
 
 ### Leftovers on this machine
 
