@@ -71,7 +71,7 @@ Then scans the text of every kind for study.json "forbidden_terms" (build notes,
 and "leak_terms", and reports any hit, because panellists read everything literally. It also
 brings forms.json up to date with the files it read (panel_lib.py, "Forms").
 
-A usability study has nothing to capture, and is refused in one line.
+A usability study has nothing to capture, and is refused in one line. So is an interview study.
 
 Usage: capture.py <study-dir> [--label A] [--page index] [--jobs 3]
 """
@@ -387,6 +387,9 @@ def main():
     if cfg["type"] == "usability":
         raise SystemExit("A usability study has nothing to capture: its panellists use the running product in a "
                          f"browser. Next: launch.py {cfg['_dir']} plan")
+    if cfg["type"] == "interview":
+        raise SystemExit("An interview study has nothing to capture: its participants are asked about their work "
+                         f"and shown nothing. Next: launch.py {cfg['_dir']} plan")
     sd = cfg["_dir"]
     materials = sd / "panel" / "materials"
     clear_scratch(sd, materials)

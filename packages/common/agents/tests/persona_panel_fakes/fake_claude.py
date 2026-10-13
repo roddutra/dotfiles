@@ -18,9 +18,12 @@ Steering, through the environment:
                    signed_out: `auth status` reports no login, and a run ends as "error"
                    no_flag:<option>: the CLI no longer has that option
                    lockout: answers the runner's check, then loses its execute permission, as
-                   when a sandbox refuses to start it
+                   when a sandbox refuses to start it. The check ends with a run that has no
+                   prompt and no tools: that is the one it answers last
     FAKE_PANEL     a directory with a plan: the fake then plays whole panellist runs and analyst
-                   and writer jobs, writing their files and logging events (see panellist.py)
+                   and writer jobs, writing their files and logging events (see panellist.py). Started
+                   in a folder of an interview it plays that side of it, one reply a process
+                   (see talker.py)
     FAKE_CLI_LOG   a file that gets one JSON line per invocation: cli, argv, stdin, cwd, the
                    CLAUDE*, ANTHROPIC* and AI_AGENT variables it saw, and model_call (whether
                    the real CLI would have called a model)
@@ -36,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panellist  # noqa: E402
+import talker  # noqa: E402
 
 RECORDED = Path(__file__).resolve().parent / "claude"
 MODE = os.environ.get("FAKE_CLAUDE", "ok")
@@ -118,7 +122,7 @@ def main():
         finish(1, err="Error: Invalid session ID. Must be a valid UUID.\n")
     prompt = sys.stdin.read()
     if not prompt:
-        if MODE == "lockout":
+        if MODE == "lockout" and found.get("--tools") == [""]:
             os.chmod(shutil.which("claude"), 0o644)
         finish(1, err="Error: Input must be provided either through stdin or as a prompt argument "
                       "when using --print\n", stdin=prompt)
@@ -130,8 +134,9 @@ def main():
         return out.replace(json.loads(out.splitlines()[0])["session_id"], session)
 
     keep_transcript(session)
-    panellist.play("claude", session, "--resume" in found, prompt, recording, RUNS,
-                   f"No conversation found with session ID: {session}\n")
+    lost = f"No conversation found with session ID: {session}\n"
+    talker.play("claude", session, "--resume" in found, prompt, recording, RUNS, lost)
+    panellist.play("claude", session, "--resume" in found, prompt, recording, RUNS, lost)
     name, code = RUNS.get(MODE.split(":")[0], RUNS["ok"])
     finish(code, recording(name), stdin=prompt, model_call=True)
 

@@ -10,6 +10,7 @@ Registry and helpers (this file):
 
     names() -> list[str]            the runners available
     get(name) -> module             the runner, or exit with a message listing names()
+    can(module, name) -> bool       whether a runner declares a capability that not every runner has
     check_effort(entry) -> dict     whether a model entry's effort can be launched on its runner
     launch_effort(run, levels)      the effort a runner passes, refusing a level it does not have
     merge_usage(recorded, usage)    one session's usage after another result
@@ -46,11 +47,30 @@ capabilities() -> dict
                          ("browse" true), in the same words. Empty when "browser" is false. The
                          plan step prints them when the study's runs can browse on this runner
 
+    Three more are declared only by a runner that has them. The first two are read through
+    can(), which takes a capability a runner does not declare as false. So a runner written
+    before one of them existed needs no edit to be refused:
+
+    interview            bool: the runner is verified for interviews, where a launcher carries a
+                         conversation turn by turn: one launch, then a resume with a message for
+                         every later turn, each a process of its own
+    no_tools             bool: the runner can start a process with no tool at all, or with as few
+                         as its harness allows (see "tools" below)
+    no_tools_note        str: what such a process is left with, in plain words, as a sentence or
+                         two with no subject, for after "<runner>: ": whether "no tools" is
+                         literally none on this harness, and what stays where it is not. Only
+                         with "no_tools". The plan step prints it for both sides of an interview
+
 launch_command(run, prompt, workdir, limits) -> dict
 resume_command(run, session_id, message, workdir, limits) -> dict
     run      a runs.json entry (see panel_lib): "model" (None = the harness default), "effort"
-             (None = unset), "role", "browse" (may this run use agent-browser; missing = no) and,
-             with "browse", "browser_env" (see "Browsing")
+             (None = unset), "role", "browse" (may this run use agent-browser; missing = no),
+             with "browse", "browser_env" (see "Browsing"), and "tools": "files" (the default,
+             and what a missing key means: the file tools every run has had) or "none" (no tool,
+             for a side of an interview, which reads and writes nothing). Only a runner whose
+             "no_tools" is true is given "none", and it raises ValueError for "none" with
+             "browse": a browser is a tool. Like "browse", "tools" is the caller's for one
+             attempt and is never written to runs.json
     prompt, message   delivered verbatim. A runner adds nothing
     workdir  the directory the process starts in, and the only place it may write: panel/ for
              a panellist, the study directory for an analyst or the writer. The caller starts
@@ -60,8 +80,9 @@ resume_command(run, session_id, message, workdir, limits) -> dict
     Returns {"argv": list, "stdin": str or None, "env": dict or None, "session_id": str or None}.
     "env" is the complete environment for the child process, None meaning unchanged.
     "session_id" is set when the runner knows the id before the process starts, so a run killed
-    before it prints anything can still be resumed. Resume repeats every launch setting, because
-    no harness tried so far inherits the working directory, the tools or the budget.
+    before it prints anything can still be resumed. Resume repeats every launch setting, "tools"
+    included, because no harness tried so far inherits the working directory, the tools or the
+    budget.
     Both raise ValueError for an effort the harness does not have, for a budget of zero or
     less, and for a model the runner can see its harness does not have: validate with
     check_effort() and model_status(), and stop a spent run before asking for a command.
@@ -211,6 +232,13 @@ def get(name: str):
     if missing:
         raise SystemExit(f'Runner "{name}" is incomplete: it lacks {", ".join(missing)}')
     return module
+
+
+def can(module, name: str) -> bool:
+    """Whether a runner declares the capability called name: "interview" or "no_tools", the two
+    that not every runner has. One it does not declare reads as false, so a runner is never
+    edited to say what it cannot do."""
+    return bool(module.capabilities().get(name))
 
 
 def check_effort(entry: dict) -> dict:

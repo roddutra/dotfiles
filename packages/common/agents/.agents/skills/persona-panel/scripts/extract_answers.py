@@ -37,7 +37,8 @@ A run whose latest follow-up question is not settled yet is read as it stood bef
 
 Works on a live study and on an archived one. Run it after extract_scores.py, before analyze.py.
 
-A usability study has none of these fields, and is refused in one line.
+A usability study has none of these fields, and is refused in one line. So is an interview study,
+which has no persona file at all.
 
 Where the system refuses one of the two files (a sandboxed shell tool, a study directory that is
 not yours to write), one sentence names the file and the reason, and the exit code is 1.
@@ -67,6 +68,10 @@ def main():
         raise SystemExit("A usability study has no find-the-answer questions and no line or forward fields: there "
                          "is nothing for extract_answers.py to extract. Its task sections are read by "
                          "extract_scores.py.")
+    if cfg["type"] == "interview":
+        raise SystemExit("An interview study has no persona files, so there is nothing for extract_answers.py to "
+                         f"extract: once check_runs.py {cfg['_dir']} passes, its transcripts go to the analysts with "
+                         f"launch.py {cfg['_dir']} run --role analyst.")
     sd = cfg["_dir"]
     questions = cfg["find_the_answer"]
     runs = pl.run_records(sd, cfg)

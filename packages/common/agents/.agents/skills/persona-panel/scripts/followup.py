@@ -65,6 +65,9 @@ On a native-mode study nothing is sent: "ask" prints the message for each run, f
 to its recorded subagent, and records the follow-up as sent by hand. Nothing is checked there,
 so compare analysis/scores.csv before and after if the answer matters.
 
+An interview study is refused in one line, by "ask" and "list" alike: an interview that has
+ended is closed, and a new question belongs in the next round's guide.
+
 Exit code of "ask": 0 when every run asked has its section, 1 otherwise.
 """
 
@@ -351,6 +354,9 @@ def main():
     ap.add_argument("--json", action="store_true", help="list: followups.json as it is")
     args = ap.parse_args()
     cfg = pl.load_study(args.study_dir)
+    if cfg["type"] == "interview":
+        raise SystemExit("An interview that has ended is closed, so an interview study takes no follow-up question: "
+                         "a new question belongs in the next round's guide.")
     sys.exit({"ask": ask, "list": list_asked}[args.cmd](args, cfg))
 
 

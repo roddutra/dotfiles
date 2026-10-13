@@ -17,6 +17,9 @@ shell_check() and model_status().
     usability(cfg)                what the plan says of a usability study: its target, tasks,
                                   step limits, success checks, accounts and time rule. It
                                   provisions nothing and runs no check
+    interview(cfg, runs, states)  what the plan says of an interview study: every interview with
+                                  both its sides, its caps and its limits, the tools each side
+                                  has on its runner, and how many are carried at once
     no_browser(cfg, names)        why no run that browses can start: the agent-browser CLI is
                                   not on PATH. The plan lists it as a problem, and "run" refuses
     usage_of(entry)               a run's own usage: its sessions' totals, less its follow-ups
@@ -45,6 +48,32 @@ question, apart from its run limits, so what a follow-up used is taken out of it
 and shown under a role of its own, "follow-up": a finished run measures the same for the estimate
 whether or not it was asked anything afterwards.
 
+An interview study (panel_lib.py, "Interview studies"). An interview is two runs.json entries,
+its participant's and its interviewer's, and the plan is given both: runs holds the
+interviewers' entries with the participants'. Each side has limits of its own, so each is a
+row of the model entries, a line of the estimate and a cap of the ceiling, which counts each
+side of each interview once. The section on the study (interview_lines()) takes the place of
+the materials, and the interviews, one row each with both sides' limits (interview_rows()),
+the place of the runs.
+
+Its estimate. A model entry with a finished interview is measured as any other: the mean of
+what that side of its finished interviews reported, times the interviews to go, with what
+that came to for each exchange (interview.measured()), so that an interview of another length
+can be judged. One with none gets the method's figure for an interview, TURN_TOKENS: the input
+tokens of one process of a side at each exchange, added up to the interview's cap. Those were
+measured for a runner and a side, never for a model, on the date and the CLI versions
+TURN_TOKENS_FROM names, and they are the one place where this module names a runner: a runner
+with no figure there gets none. The figure is what it says and no ceiling: an interview that
+ends before its cap uses less, and the participant's first reply, a reply that is sent back
+and a turn that is put again are processes it does not count, so what a capped interview
+used has come in a little over it. It is input alone, nearly all of it read from a cache after
+a side's first process. No interview is ever given the per-page figure of a review.
+
+A runner's note on its budget cap ("budget_cap_note") is in its harness's words, where a run
+is one process and a turn one request of that process to the model. An interview study's plan
+uses "turn" for a turn of the interview, so there what the note's words mean is said
+(HARNESS_WORDS): once under the notes of the model entries, and with the ceiling's caveat.
+
 That holds where a follow-up's spend cannot be told from the run's, too. A harness that reports
 running totals for a session gives a follow-up one total for itself and for an earlier process of
 the run that was stopped before reporting. That total is "unallocated": in the totals, in neither
@@ -63,6 +92,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import browser_session as browser
+import interview as rules  # the module: interview() below is the plan's section on an interview study
 import panel_lib as pl
 import runners
 
@@ -73,6 +103,14 @@ import runners
 # (folder_counts(), "opens"), where a page of a PDF and a supplied image each count as one such
 # page: nothing has measured those, so it stands in only until a pilot has measured the real figure.
 TOKENS_PER_CONCEPT_PAGE = 20_000
+# The method's figure for an interview: the input tokens of one process of a side at exchange e are about
+# base + slope * e, as (base, slope). Fitted to interviews of 23 to 34 exchanges with the situation card on, every
+# turn a resumed session, the reference notes in the interviewer's brief and no tools on either side
+# (docs/specs/persona-panel-interviews.md, discovery items 1 and 7). By runner and side, never by model: the
+# harness's own fixed prefix is the larger part of every request. A runner with no entry has no figure.
+TURN_TOKENS = {("claude", "participant"): (4_300, 200), ("claude", "interviewer"): (10_600, 260),
+               ("codex", "participant"): (12_100, 62), ("codex", "interviewer"): (18_250, 155)}
+TURN_TOKENS_FROM = "13 October 2026 with Claude Code 2.1.296 and codex-cli 0.162.1"  # when, and on which CLIs
 
 IMAGE_TYPES = pl.IMAGE_TYPES
 TO_GO = ("pending", "running", "partial", "blocked", "failed")  # a limited run starts again only with --extend
@@ -83,6 +121,15 @@ NATIVE = ("Native mode: the lead starts each run with its own subagent tool (run
           "Native mode has no limits, no usage record and no isolation beyond the instructions in the run "
           "prompt, so there is no ceiling and nothing below is enforced.")
 CEILING_LABELS = {True: "guaranteed maximum", False: "estimate"}
+# The floor for the models of an interview study, in every plan of one. By tier: the plan cannot tell a tier from
+# a model's name, no model is named or matched anywhere, and the launcher holds the floor by what a model does.
+TIERS = ("Both sides need a mid-tier model or larger, never a vendor's smallest and fastest tier, and the "
+         "interviewer the strongest model you have. In testing, small models refused the participant's role, asked "
+         "two questions at once and left topics unopened.")
+# What a runner's note on its budget cap means by its words, for the plan of an interview study, where a turn is
+# a turn of the interview: after "In the lines above on a budget cap, " or "There ".
+HARNESS_WORDS = ('"run" and "turn" are the harness\'s words: a run is one process, which here is one turn of an '
+                 "interview or one job, and a turn is one request of that process to the model.")
 STOPPED = ("a process the launcher stops, at its time limit or by the stop command, can end before its harness "
            "reports what it spent. That spend is counted when its session is next resumed and reports its total, "
            "so until then the attempt that resumes it can be given more of the cap than is left")
@@ -178,8 +225,34 @@ def unwritable_study(cfg: dict) -> str | None:
 
 def label(entry: dict) -> str:
     """The name of an entry's model entry: its model key for a panellist run, its role for a job
-    (synthesis.analyst and synthesis.writer are one model entry each)."""
+    (synthesis.analyst and synthesis.writer are one model entry each) and for an interviewer
+    (interview.interviewer is one too)."""
     return entry["key"] if entry["role"] == "panellist" else entry["role"]
+
+
+def side_of(entry: dict) -> str:
+    """Which side of a conversation an entry speaks for (pl.SIDES): the interviewer's entry is
+    the interviewer, and any other the participant."""
+    return "interviewer" if entry["role"] == "interviewer" else "participant"
+
+
+def no_interview(name: str) -> str | None:
+    """Why no side of an interview can be on a runner, else None. A runner must declare that it
+    is verified for interviews (runners.can(), "interview"), and must be able to resume a
+    session: every turn after a side's first continues one."""
+    runner = runners.get(name)
+    if not runners.can(runner, "interview"):
+        verified = []
+        for other in runners.names():
+            try:
+                verified += [other] if runners.can(runners.get(other), "interview") else []
+            except SystemExit:  # a module of the package that is no whole runner
+                continue
+        return (f"{name} is not verified for interviews, and an interview is carried turn by turn through its "
+                f"runner. Put the model entry on a runner that is ({', '.join(verified)})")
+    if not runner.capabilities()["resume"]:
+        return f"{name} cannot resume a session, and every turn of an interview after the first is one"
+    return None
 
 
 def reads_images(caps: dict, status: dict) -> bool:
@@ -188,20 +261,31 @@ def reads_images(caps: dict, status: dict) -> bool:
     return caps["images_by_path"] if status["images"] is None else status["images"]
 
 
-def unfit(cfg: dict, entry: dict, status: dict | None = None) -> tuple[list[str], str | None]:
+def unfit(cfg: dict, entry: dict, status: dict | None = None,
+          interview: bool | None = None) -> tuple[list[str], str | None]:
     """Why a run or job cannot be started on its runner as study.json has it, and a note where
     something it asks for is left out instead: (errors, note). An error refuses the launch.
-    status is the runner's model_status() for the entry, asked for here when not given."""
+    status is the runner's model_status() for the entry, asked for here when not given.
+    interview: the entry is a side of a conversation, which is what "interview" on it says when
+    this is not given. Its runner must be one that can carry an interview (no_interview()), and
+    nothing more is asked of a runner that cannot. Such an entry reviews and browses nothing,
+    so it is held to neither the browser of a usability study nor the images of a review: it
+    is given words alone."""
     runner = runners.get(entry["runner"])
     caps, effort = runner.capabilities(), runners.check_effort(entry)
-    status = status or runner.model_status(entry)
     errors = [effort["error"]] if effort["error"] else []
+    talks = "interview" in entry if interview is None else interview
+    refused = no_interview(entry["runner"]) if talks else None
+    if refused:
+        return [*errors, refused], effort["note"]
+    status = status or runner.model_status(entry)
+    reviews = entry["role"] == "panellist" and not talks
     if status["known"] is False or status["signed_in"] is False:
         errors.append(status["message"] or f'{entry["runner"]} cannot run the model "{entry["model"]}"')
-    elif entry["role"] == "panellist" and cfg["type"] == "usability" and not caps["browser"]:
+    elif reviews and cfg["type"] == "usability" and not caps["browser"]:
         errors.append(f'{entry["runner"]} cannot drive a browser, and a usability study is done in one: its runs '
                       "could attempt no task. Take the model entry out, or put it on a runner that can browse")
-    elif entry["role"] == "panellist" and cfg["materials"] == "full" and not reads_images(caps, status):
+    elif reviews and cfg["materials"] == "full" and not reads_images(caps, status):
         who = entry["runner"] if status["images"] is None else f'{entry["model"]} on {entry["runner"]}'
         errors.append(f'{who} cannot open images, and this study\'s "materials" is "full", so its '
                       'runs would review designs they cannot see. A model that reads no images is for '
@@ -210,13 +294,16 @@ def unfit(cfg: dict, entry: dict, status: dict | None = None) -> tuple[list[str]
 
 
 def lacks(cfg: dict, entry: dict, caps: dict, status: dict) -> list[dict]:
-    """The capabilities a model entry does not have on its runner, each with what that means here."""
-    panellist, out = entry["role"] == "panellist", []
+    """The capabilities a model entry does not have on its runner, each with what that means here.
+    A side of an interview opens no image and no browser, and lacks neither."""
+    talks = "interview" in entry
+    panellist, out = entry["role"] == "panellist" and not talks, []
     if panellist and not reads_images(caps, status):
         out.append(("images", "it cannot open an image file" + (
             ", which a text-only study does not need" if cfg["materials"] == "text" else "")))
     if not caps["budget_cap"]:
-        out.append(("budget cap", "the harness enforces no spend cap, so the time limit is what bounds its runs"))
+        out.append(("budget cap", "the harness enforces no spend cap, so the time limit is what bounds "
+                                  + ("its side of an interview" if talks else "its runs")))
     if not caps["resume"]:
         out.append(("resume", "an interrupted run cannot be continued in its session"))
     if panellist and cfg["browse"] and not caps["browser"] and cfg["type"] != "usability":  # there it is refused
@@ -360,8 +447,8 @@ def no_materials(cfg: dict, mat: dict) -> str | None:
     nothing for one of the study's concepts, or one of them is short of a page, state or item
     (materials(), "incomplete"), each named. The plan lists it as missing, and "run", "pilot" and
     "resume" refuse on it (launch.preflight), so what one says the other does. A usability study
-    has no materials, and none to wait for."""
-    if cfg["type"] == "usability":
+    and an interview study have no materials, and none to wait for."""
+    if cfg["type"] != "review":
         return None
     if not mat["captured"]:
         return f"panel/materials has no captured page. Run capture.py {cfg['_dir']} before the runs."
@@ -491,6 +578,176 @@ def usability_lines(plan: dict) -> list[str]:
                + (f", with accounts.reset ({acc['reset']} <run id>) between runs." if acc and acc["reset"] else ".")
                if u["sequential"] else "  Runs: side by side, within each runner's concurrency.")
     return out
+
+
+# ---------------------------------------------------------------- interview studies
+
+def interview_tokens(runner: str, side: str, exchanges: int) -> int | None:
+    """The method's figure for one side of an interview of that many exchanges, in input tokens:
+    one process of TURN_TOKENS for each exchange, added up. None for a runner it has no figure
+    for."""
+    if (runner, side) not in TURN_TOKENS:
+        return None
+    base, slope = TURN_TOKENS[runner, side]
+    return exchanges * base + slope * exchanges * (exchanges + 1) // 2
+
+
+def interview(cfg: dict, runs: list[dict], states: dict) -> dict | None:
+    """What the plan says of an interview study, None for a study of another type. runs are the
+    participants' entries and the interviewers', and states maps each to its state.
+
+    "interviews" has one object for each interview: its run id and persona, both sides
+    ("participant" and "interviewer": the model entry, its limits, whether its harness enforces
+    the budget, the tools it is started with and the allowances --extend gave it), the
+    interview's cap, the cap of each topic its persona gets, the exchanges on record, its state
+    and, from its turn log, what it waits for and why it stopped (interview.standing()), with
+    "malformed", what is wrong with a turn log that is not as a launcher writes one, else None
+    (interview.malformed()): "run" and "resume" leave such an interview alone.
+    "tools" says, for each runner, which model entries are on it and what a side there is left
+    with: "none" with the runner's own account of that ("no_tools_note"), or "files" on a runner
+    that cannot start a process without tools. "carried" is how many interviews a launcher
+    carries at once, which is the slots of the interviewer's runner. "notes" are what the lead
+    should know: a participant or the critic on the interviewer's runner and model, and topic
+    caps that add up to more than the interview's. Read from study.json, runs and the turn
+    logs: nothing is started."""
+    if cfg["type"] != "interview":
+        return None
+    sd, held = cfg["_dir"], cfg["interview"]
+    panel, hosts = ([e for e in runs if e["role"] == role] for role in ("panellist", "interviewer"))
+    host_of = {h["interview"]: h for h in hosts}
+    host_of = {e["run"]: host_of.get(e["run"]) or pl.interviewer_entry(cfg, e) for e in panel}
+
+    def side(e: dict) -> dict:
+        runner = runners.get(e["runner"])
+        return {"run": e["run"], "entry": label(e), "runner": e["runner"], "model": e["model"], "effort": e["effort"],
+                "limits": pl.limits_for(cfg, e["role"], e.get("key")),
+                "budget_enforced": runner.capabilities()["budget_cap"], "tools": rules.tools(side_of(e), runner),
+                "extended": e.get("extended") or 0}
+
+    interviews, over = [], {}
+    for e in panel:
+        guide, records = pl.guide(cfg, e["persona"]), pl.read_turns(sd, e["run"])
+        stands = rules.standing(records, guide)
+        interviews.append({
+            "run": e["run"], "persona": e["persona"], "name": e.get("name", ""), "participant": side(e),
+            "interviewer": side(host_of[e["run"]]), "cap": guide["turns"],
+            "topics": [{"id": t["id"], "turns": t["turns"]} for t in guide["topics"]],
+            "exchanges": sum(r["t"] == "answer" for r in records), "state": states[e["run"]],
+            "awaiting": stands["awaiting"], "reason": stands["reason"], "malformed": rules.malformed(records)})
+        if sum(t["turns"] for t in guide["topics"]) > guide["turns"]:
+            over[e["persona"]] = sum(t["turns"] for t in guide["topics"])
+
+    sides, tools = [*panel, *host_of.values()], []
+    for name in dict.fromkeys(e["runner"] for e in sides):
+        runner = runners.get(name)
+        for given in dict.fromkeys(rules.tools(side_of(e), runner) for e in sides if e["runner"] == name):
+            mine = [e for e in sides if e["runner"] == name and rules.tools(side_of(e), runner) == given]
+            tools.append({"runner": name, "tools": given, "entries": list(dict.fromkeys(label(e) for e in mine)),
+                          "sides": [x for x in pl.SIDES if any(side_of(e) == x for e in mine)],
+                          "note": runner.capabilities().get("no_tools_note") if given == "none" else None})
+
+    def named(pair: tuple) -> str:
+        return f"{pair[0]}, {pair[1] or 'its default model'}"
+
+    asks, notes = list(dict.fromkeys((h["runner"], h["model"]) for h in host_of.values())), []
+    same = list(dict.fromkeys(e["key"] for e in panel if (e["runner"], e["model"]) in asks))
+    if same:
+        n = len(same)
+        notes.append(f"{listed(same)} {agree(n, 'is', 'are')} on the interviewer's runner and model "
+                     f"({listed([named(a) for a in asks])}): in {agree(n, 'its', 'their')} interviews one model "
+                     "asks and answers, each in a session of its own that is given only what the other says. That "
+                     "is allowed.")
+    critic = cfg["synthesis"].get("critic")
+    critic = pl.model_entry(critic, cfg.get("runner"), "synthesis.critic") if critic is not None else None
+    if critic and (critic["runner"], critic["model"]) in asks:
+        notes.append(f"synthesis.critic is on the interviewer's runner and model ({named(asks[0])}): the critique "
+                     "of the interviewer's questions would come from the model that asked them. Give it another "
+                     "model where you have one.")
+    if over:  # by what they add up to, which "segments" can make another figure for another persona
+        everyone = len({e["persona"] for e in panel})
+        sums = [f"{total} exchanges for " + ("every persona" if len(own) == everyone > 1 else listed(own))
+                for total in dict.fromkeys(over.values()) for own in [[p for p, t in over.items() if t == total]]]
+        notes.append(f"the topic caps add up to {listed(sums)}, and an interview has at most {held['turns']}: "
+                     "not every topic can run to its cap.")
+    first = next(iter(host_of.values()))
+    return {
+        "about": held["about"], "goals": [g["id"] for g in held["goals"]],
+        "topics": [{"id": t["id"], "area": t["area"], "turns": t["turns"], "segments": t["segments"]}
+                   for t in held["topics"]],
+        "turns": held["turns"], "card": held["situation_card"],
+        "interviewer": {k: first[k] for k in ("runner", "model", "effort")},
+        "limits": {"turn": pl.limits_for(cfg, "turn"), "interviewer": pl.limits_for(cfg, "interviewer")},
+        "carried": [{"runner": name, "interviews": sum(h["runner"] == name for h in host_of.values()),
+                     "at_once": pl.runner_concurrency(cfg, name,
+                                                      runners.get(name).capabilities()["default_concurrency"])}
+                    for name in dict.fromkeys(h["runner"] for h in host_of.values())],
+        "tools": tools, "tiers": TIERS, "notes": notes, "interviews": interviews}
+
+
+def interview_lines(plan: dict) -> list[str]:
+    """The plan's section on an interview study, in place of the materials: what an interview
+    is, the guide, the caps and limits and who enforces each, how many are carried at once, the
+    tools each side has on each runner, the floor for the models, and the notes."""
+    t = plan["interview"]
+    seat, topics = t["interviewer"], t["topics"]
+    limited = [f"{x['id']} is put only to the {agree(len(x['segments']), 'segment', 'segments')} "
+               f"{listed(x['segments'])}" for x in topics if x["segments"]]
+    out = ["", "Interview study, what each interview is:",
+           "  Two sessions: a participant, who plays its persona, and an interviewer, who follows the guide. The "
+           "launcher carries every turn between them, so each side is given the other's words and nothing else.",
+           f"  Guide: {plural(len(t['goals']), 'learning goal')} and {plural(len(topics), 'topic')} "
+           f"({', '.join(x['id'] for x in topics)}). " + "".join(f"{x}. " for x in limited)
+           + ("Each participant writes a situation card before the first question, which its interviewer never sees."
+              if t["card"] else 'No situation card: each participant replies "Ready", and the interview begins.'),
+           f"  Interviewer: {seat['runner']}, {seat['model'] or 'its default model'}"
+           + (f", effort {seat['effort']}" if seat["effort"] else "")
+           + ", for every interview (interview.interviewer).",
+           "  Caps and limits:",
+           f"    interview.turns: at most {plural(t['turns'], 'exchange')} an interview, each a question and its "
+           "answer. The launcher counts them, and ends the interview there.",
+           "    A topic's cap: the interviewer is told when a topic reaches it, and may still go on. An exchange "
+           "past it is delivered and counted, and check_runs.py notes it.",
+           "    limits.run and limits.interviewer: what the participant and the interviewer may each use over a "
+           "whole interview, in spend and in the time of its own processes. Both are in the tables below.",
+           f"    limits.turn: {t['limits']['turn']['minutes']:g} min for one turn of either side. A turn stopped "
+           "there is not put again unasked: its interview reads partial until resume takes it up, or failed at a "
+           "side's first turn, which run starts once more."]
+    for c in t["carried"]:
+        out.append(f"  At once: up to {plural(c['at_once'], 'interview')} carried at a time, as many as the "
+                   f"interviewer's runner ({c['runner']}) runs processes at once. Each turn is one process on the "
+                   "runner of its own side, and waits there for a slot.")
+    out.append("  Tools: no side is given one where its runner can start a process without. Each side starts in a "
+               "folder of its own that holds nothing.")
+    for x in t["tools"]:
+        who = f"{x['runner']} ({', '.join(x['entries'])})"
+        kept = " and ".join(f"{side}s" for side in x["sides"])
+        out.append(f"    {who}: {stop(x['note'] or 'as few tools as its harness allows')}" if x["tools"] == "none" else
+                   f"    {who}: it cannot start a process without tools. Its {kept} keep the file tools a review run "
+                   "has. What keeps them to their folders is their instructions, and whatever its runner does about "
+                   "it, which is under Runners, below.")
+    return out + [f"  Models: {t['tiers']}", *(f"  Note: {note}" for note in t["notes"])]
+
+
+def interview_rows(plan: dict) -> list[str]:
+    """The plan's table of interviews, in place of the runs: one row each, with the model entry
+    of its participant, what each of its two sides may use, the caps of its persona's topics,
+    how far it has got of its own cap, and its state. Under it, a line for each interview whose
+    turn log is not as a launcher writes one, which no command goes on with."""
+    def may(side: dict) -> str:  # one allowance of its limits, and how many it has when --extend gave it more
+        return (f"{side['limits']['minutes']:g} min, " + money(side["limits"]["budget_usd"])
+                + (" cap" if side["budget_enforced"] else ", not enforced")
+                + (f", {1 + side['extended']} allowances" if side["extended"] else ""))
+
+    rows = plan["interview"]["interviews"]
+    return ["", f"Interviews ({len(rows)}), each with what its two sides may use over the whole of it:",
+            *table([["Interview", "Persona", "Participant", "Participant may use", "Interviewer may use",
+                     "Topic caps", "Exchanges", "State"],
+                    *([i["run"], f"{i['persona']} {i['name']}".strip(), i["participant"]["entry"],
+                       may(i["participant"]), may(i["interviewer"]),
+                       ", ".join(f"{x['id']} {x['turns']}" for x in i["topics"]),
+                       f"{i['exchanges']} of {i['cap']}", i["state"]] for i in rows)]),
+            *(f"  {i['run']}: {i['malformed']}. run and resume leave it alone, and its state and exchanges are "
+              f"those of the records that are left: check_runs.py names what to do." for i in rows if i["malformed"])]
 
 
 def host(url: str) -> str:
@@ -654,6 +911,11 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
 
     entries are runs.json entries of any role and states maps a run id to its state. "runs"
     has one row per run or job, "keys" one per model key of the panel, "roles" one per role.
+    A side of a conversation is a row like any other, with "side" ("participant" or
+    "interviewer", None on every other row) and "interview", the run id both sides share: the
+    usage record names it by those, never by "panellist" or by an interviewer's entry id. The
+    interviewer's model entry is a row of "keys" too, so that the rows there add up to the
+    panel's and the interviewers' together, and a role whose rows are all one side has "side".
     A row's "unreported_attempts" are the attempts that unreported() names: their spend is
     missing from the row's figures, which is not the same as none.
     "followups" has one row per run that was asked a follow-up question: its follow-up attempts
@@ -674,7 +936,8 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
         apart = [f for f in FIGURES if lump.get(f) is not None]
         attempts = len(e.get("attempts") or []) - len(extra)
         who = {"run": e["run"], "key": e.get("key"), "runner": e.get("runner"), "model": e.get("model"),
-               "state": states[e["run"]]}
+               "state": states[e["run"]], "side": side_of(e) if "interview" in e else None,
+               "interview": e.get("interview")}
         rows.append({**who, "role": e["role"], "attempts": attempts,
                      "seconds": (e.get("seconds_used") or 0) if attempts else None, **{f: used[f] for f in FIGURES},
                      "unreported_attempts": unreported(e), "unallocated": apart})
@@ -687,17 +950,20 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
         if lump:
             shared.append({**who, "role": "unallocated", **{f: lump.get(f) for f in FIGURES},
                            "followups": sorted({a["followup"] for a in extra if a.get("unallocated")})})
-    keys = list(dict.fromkeys((r["key"], r["runner"], r["model"]) for r in rows if r["role"] == "panellist"))
+    panel = [r for r in rows if r["role"] == "panellist" or r["side"]]  # the runs, and both sides of a conversation
+    keys = list(dict.fromkeys((r["key"], r["runner"], r["model"]) for r in panel))
     own = summed(rows)
-    roles = [{"role": role, **summed([r for r in rows + asked if r["role"] == role])}
-             for role in dict.fromkeys(r["role"] for r in rows + asked)]
+    roles = [{"role": role, "side": next(iter(sides)) if len(sides) == 1 else None,
+              **summed([r for r in rows + asked if r["role"] == role])}
+             for role in dict.fromkeys(r["role"] for r in rows + asked)
+             for sides in [{r["side"] for r in rows if r["role"] == role}]]
     if shared:  # no process of its own: the runs it concerns, and the figures
         lumps = summed([], shared)
         roles.append({"role": "unallocated", **lumps, "runs": len(shared), "started": len(shared)})
     return {
         "runs": rows, "followups": asked, "unallocated": shared,
         "keys": [{"key": k, "runner": runner, "model": model,
-                  **summed([r for r in rows if r["role"] == "panellist" and r["key"] == k])}
+                  **summed([r for r in panel if (r["key"], r["runner"], r["model"]) == (k, runner, model)])}
                  for k, runner, model in keys],
         "roles": roles,
         "total": {**summed(rows + asked, shared), **{k: own[k] for k in ("runs", "started", "done")}}}
@@ -770,13 +1036,15 @@ def usage_markdown(figures: dict) -> str:
                     f"{', '.join(stopped)}."]
     out += block("Total", ["Runs and jobs", "Done"], [line([total["runs"], total["done"]], total, total["started"])])
     out += block("By role", ["Role", "Runs", "Done"],
-                 [line([r["role"], r["runs"], "-" if r["role"] in ("follow-up", "unallocated") else r["done"]], r,
-                       r["started"]) for r in figures["roles"]])
+                 [line([r.get("side") or r["role"], r["runs"],
+                        "-" if r["role"] in ("follow-up", "unallocated") else r["done"]], r, r["started"])
+                  for r in figures["roles"]])
     out += block("By model key", ["Key", "Runner", "Model", "Runs", "Done"],
                  [line([k["key"], k["runner"] or "-", k["model"] or "default", k["runs"], k["done"]], k, k["started"])
                   for k in figures["keys"]])
-    out += block("By run", ["Run", "Role", "Key", "State"],
-                 [line([r["run"], r["role"], r["key"] or "-", r["state"]], r, r["attempts"]) for r in figures["runs"]])
+    out += block("By run", ["Run", "Role", "Key", "State"],  # a side of a conversation: its interview, and the side
+                 [line([r.get("interview") or r["run"], r.get("side") or r["role"], r["key"] or "-", r["state"]], r,
+                       r["attempts"]) for r in figures["runs"]])
     if asked:
         out += block("Follow-ups", ["Run", "Key", "Asked"],
                      [line([r["run"], r["key"] or "-", ", ".join(map(str, r["followups"]))], r, r["attempts"])
@@ -790,12 +1058,18 @@ def usage_markdown(figures: dict) -> str:
 
 # ---------------------------------------------------------------- the plan
 
-def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
+def estimate(rows: list[dict], pages: int, text_only: bool, turns: dict | None = None) -> dict:
     """What the runs still to go are likely to use, per model entry and in all. rows are
     usage_figures() rows with "entry" added, the name of each run's model entry, and pages is
     what a run opens (materials(), "opens"), for a model entry with no finished run to measure.
     text_only: the method has no figure for a run of this study, a text-only one or a usability
-    one, so a model entry with no finished run gets none."""
+    one, so a model entry with no finished run gets none.
+
+    turns is given for an interview study, and no model entry of one is ever given the figure
+    per page: {(entry, role): the method's tokens for one interview (interview_tokens())}, None
+    or no key where it has none. Such an entry's basis is "exchanges". A row of a finished
+    interview there has "exchanges", its length, and the entry gets "per_exchange", what its
+    finished interviews came to for each (interview.measured())."""
     entries = []
     for name, role in dict.fromkeys((r["entry"], r["role"]) for r in rows):
         own = [r for r in rows if (r["entry"], r["role"]) == (name, role)]
@@ -810,11 +1084,19 @@ def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
         tokens = [r["input_tokens"] + (r["output_tokens"] or 0) for r in whole if r["input_tokens"] is not None]
         costs = [r["cost_usd"] for r in whole if r["cost_usd"] is not None]
         per = {"tokens": None, "cost_usd": None, "seconds": None}
+        each = rules.measured([
+            {"exchanges": r["exchanges"], "seconds": r["seconds"] or 0,
+             "tokens": r["input_tokens"] + (r["output_tokens"] or 0)
+             if r["input_tokens"] is not None and any(r is w for w in whole) else None}
+            for r in done if r.get("exchanges") is not None])
         if done:
             basis = "measured" if tokens else "duration"
             per.update(tokens=round(sum(tokens) / len(tokens)) if tokens else None,
                        cost_usd=sum(costs) / len(costs) if costs else None,
                        seconds=sum(r["seconds"] or 0 for r in done) / len(done))
+        elif turns is not None:  # an interview study: the figure for its runner and side, or none
+            per["tokens"] = turns.get((name, role))
+            basis = "exchanges" if per["tokens"] is not None else "none"
         elif role == "panellist" and not text_only:
             basis, per["tokens"] = "method", TOKENS_PER_CONCEPT_PAGE * pages
         else:
@@ -822,14 +1104,16 @@ def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
         entries.append({
             "entry": name, "role": role, "runner": own[0]["runner"], "runs": len(own),
             "done": sum(r["state"] == "done" for r in own), "to_go": to_go, "basis": basis,
-            "measured_runs": len(done), "per_run": per, "reports_cost": own[0].get("reports_cost", True),
+            "measured_runs": len(done), "per_run": per, "per_exchange": each,
+            "reports_cost": own[0].get("reports_cost", True),
             # finished runs left out of the mean tokens and cost, by why: they still count for the time
             "left_out": {why: len(rows) for why, rows in short.items()},
             "tokens": per["tokens"] * to_go if per["tokens"] is not None else None,
             "cost_usd": per["cost_usd"] * to_go if per["cost_usd"] is not None else None,
             "seconds": per["seconds"] * to_go if per["seconds"] is not None else None,
             "cost": "measured" if per["cost_usd"] is not None else "not reported" if done
-                    else "a pilot will provide one" if role == "panellist" else "a first job will provide one"})
+                    else "a pilot will provide one" if role in ("panellist", "interviewer")
+                    else "a first job will provide one"})
     going = [e for e in entries if e["to_go"]]
 
     def total(field):
@@ -878,17 +1162,24 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
 
     runs are the panellist entries (runs.json's, or the ones study.json plans when scaffolded
     is false), jobs the analyst and writer entries study.json plans with anything a launcher
-    recorded about them, and states maps each run and job id to its state.
+    recorded about them, and states maps each run and job id to its state. In an interview
+    study runs holds the interviewers' entries too, each with its state: "interview" is then
+    the section on the study (interview()), "runs" stays the participants' rows, one for each
+    interview, and the ceiling counts both sides of each.
     """
     sd, native = cfg["_dir"], all(e["runner"] is None for e in runs)
+    runs = sorted(runs, key=lambda e: e["role"] == "interviewer")  # the panel first, as it is without interviewers
     mat = materials(cfg)
+    talk = interview(cfg, runs, states)
     planned = [] if native else [j for j in jobs if j["runner"]]
     pool, missing, notes, problems = pl.synthesis_pool(cfg), [], [], []
 
     if not scaffolded:
-        missing.append(f"runs.json: run init_study.py {sd} first. The runs below are the ones it will create.")
+        missing.append(f"runs.json: run init_study.py {sd} first. The {'interviews' if talk else 'runs'} below are "
+                       "the ones it will create.")
     else:
-        expected, found = {e["run"] for e in pl.planned_runs(cfg)}, {e["run"] for e in runs}
+        expected = {e["run"] for e in [*pl.planned_runs(cfg), *pl.planned_interviewers(cfg)]}
+        found = {e["run"] for e in runs}
         if expected != found:
             notes.append("study.json no longer plans the runs that runs.json holds (they differ in "
                          + ", ".join(sorted(expected ^ found)[:6]) + (", ..." if len(expected ^ found) > 6 else "")
@@ -896,7 +1187,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                          "and resets every run.")
     gone = [e["prompt"] for e in runs if not (sd / e["prompt"]).is_file()]
     if scaffolded and gone:
-        missing.append(f"{plural(len(gone), 'run prompt')} ({', '.join(gone[:3])}{', ...' if len(gone) > 3 else ''})")
+        missing.append(f"{plural(len(gone), 'prompt' if talk else 'run prompt')} ({', '.join(gone[:3])}"
+                       f"{', ...' if len(gone) > 3 else ''})")
     uncaptured = no_materials(cfg, mat)
     if uncaptured:
         missing.append(f"the materials: {uncaptured}" + (
@@ -909,6 +1201,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         if problem:
             missing.append(f"{stop(problem)} init_study.py and capture.py stop on it, so no run can start.")
     problems += pl.usability_problems(cfg)  # a command of the study whose file is not there
+    problems += [stop(problem) for problem in pl.interview_problems(cfg)]  # what would spoil its interviews
     locked = None if native else unwritable_study(cfg)  # a native study starts nothing through the launcher
     if locked:
         problems.append(locked[0].upper() + locked[1:])
@@ -923,7 +1216,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     if earlier:
         notes.append(f"{earlier_sessions(earlier)} {purge_hint(sd)}")
 
-    # One row per model entry: a model key of the panel, synthesis.analyst or synthesis.writer.
+    # One row per model entry: a model key of the panel, synthesis.analyst or synthesis.writer, and in an
+    # interview study interview.interviewer.
     groups = {}
     for e in runs + planned:
         groups.setdefault((e["role"], label(e)), []).append(e)
@@ -955,7 +1249,9 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                 "prompt_exists": (sd / e["prompt"]).is_file(), "file": e["file"], "state": states[e["run"]],
                 "extended": e.get("extended") or 0}
 
-    run_rows, job_rows = [run_row(e) for e in runs], [run_row(e) for e in planned]
+    # The interviewers' rows are no run of the plan, and a cap of its ceiling each.
+    run_rows = [run_row(e) for e in runs if e["role"] != "interviewer"]
+    host_rows, job_rows = [run_row(e) for e in runs if e["role"] == "interviewer"], [run_row(e) for e in planned]
 
     checked = []
     for name in dict.fromkeys(m["runner"] for m in models if not native):
@@ -1000,6 +1296,14 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                                       else "identifiers")
         receives = ("its run prompt, the usability instructions, its persona file with the tasks"
                     + (f", its test account's {lent}" if lent else ""))
+    given = {  # an interview study: what each side's provider is sent, and what a job is
+        "panellist": "its prompt (the participant brief, the persona and the study's context notes) and every "
+                     "question its interviewer puts to it. Nothing of the guide",
+        "interviewer": "its prompt (the interviewer brief with its reference notes, the guide, and the "
+                       "participant's name, role and segment) and every answer the participant gives. Nothing of "
+                       "the persona's bio or personality, and no situation card",
+        "job": "the transcripts it is given, analysis/ and whatever else in the study directory it opens, where "
+               "it works"}
     opens = []  # what a run that browses can open, besides what it reads
     if study:
         opens.append(f"every page it opens at {study['base_url']}, with what it types there")
@@ -1015,7 +1319,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                        and runners.get(m["runner"]).capabilities()["browser"])
             entries.append({
                 "entry": m["entry"], "role": m["role"], "runner": m["runner"], "runs": m["runs"],
-                "receives": (receives + (", and " + " and ".join(opens) if browses else "")
+                "receives": given.get(m["role"], given["job"]) if talk else
+                            (receives + (", and " + " and ".join(opens) if browses else "")
                              if m["role"] == "panellist" else
                              "the persona files it is given, analysis/ and whatever else in the study "
                              "directory it opens, where it works")})
@@ -1024,14 +1329,20 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     usage = usage_figures([*runs, *planned], states)
     asked = pl.read_followups(sd)
     followups = {"asked": len(asked), "runs": sum(len(f.get("runs") or []) for f in asked),
-                 "limits": None if native else pl.limits_for(cfg, "followup"),
+                 "limits": None if native or talk else pl.limits_for(cfg, "followup"),  # no interview is asked one
                  "used": summed(usage["followups"]) if usage["followups"] else None,
                  "unallocated": summed([], usage["unallocated"]) if usage["unallocated"] else None}
     names = {e["run"]: label(e) for e in [*runs, *planned]}
     costed = {name: runners.get(name).capabilities()["usage"]["cost"] for name in {e["runner"] for e in runs + planned}
               if name}
     rows = [{**r, "entry": names[r["run"]], "reports_cost": costed.get(r["runner"], False)} for r in usage["runs"]]
-    forecast = estimate(rows, mat["opens"], cfg["materials"] == "text" or bool(study))
+    turns = None
+    if talk:  # the method's figure for each side, to the interview's cap, and how long each finished one was
+        turns = {(label(e), e["role"]): interview_tokens(e["runner"], side_of(e), talk["turns"]) for e in runs}
+        ended = {i[side]["run"]: i["exchanges"] for i in talk["interviews"] if i["state"] == "done"
+                 for side in pl.SIDES}
+        rows = [{**r, "exchanges": ended.get(r["run"])} for r in rows]
+    forecast = estimate(rows, mat["opens"], cfg["materials"] == "text" or bool(study), turns)
     if browse and browse["not_browsable"] and any(e["basis"] == "method" for e in forecast["entries"]):
         unread = mat["pdfs"] and mat["pdf_pages"] is None  # its pages are not known until it is captured
         notes.append("the estimate's figure per page was measured on captured web pages. It counts every page of a "
@@ -1040,7 +1351,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     return {
         "study": cfg.get("study") or sd.name, "dir": str(sd), "native": native, "launcher": launcher,
         "missing": missing, "notes": notes,
-        "materials": mat, "usability": study, "browsing": browse, "browser_sessions": sessions, "models": models,
+        "materials": None if talk else mat, "usability": study, "interview": talk, "browsing": browse,
+        "browser_sessions": sessions, "models": models,
         "runs": run_rows,
         "runners": checked,
         "providers": providers,
@@ -1050,14 +1362,14 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
             "missing": [role for role in pl.JOB_ROLES if not any(j["role"] == role for j in planned)]},
         "estimate": forecast,
         "used": summed(usage["runs"]),  # the runs and jobs: follow-ups are apart, under "followups"
-        "ceiling": None if native else ceiling(run_rows, job_rows, pool),
+        "ceiling": None if native else ceiling(run_rows + host_rows, job_rows, pool),
         "followups": followups, "earlier_sessions": earlier,
         "problems": problems, "ok": not problems}
 
 
 def render(plan: dict) -> list[str]:
     """The plan as the lines the plan command prints."""
-    sd, native = plan["dir"], plan["native"]
+    sd, native, talk = plan["dir"], plan["native"], plan["interview"]
     out = [f"Plan for {plan['study']} ({sd}). This command starts no run and changes no file of the study. "
            "A runner's sign-in check may let its harness refresh its own login."]
     if plan["launcher"]:
@@ -1076,7 +1388,8 @@ def render(plan: dict) -> list[str]:
     def entry_cells(row):
         return [row["runner"] or "-", row["model"] or "default", row["effort"] or "-"]
 
-    out += usability_lines(plan) if plan["usability"] else materials_lines(plan)
+    out += (interview_lines(plan) if talk else usability_lines(plan) if plan["usability"]
+            else materials_lines(plan))
     sessions = plan["browser_sessions"]
     if sessions:
         n, each = sessions["at_once"], sessions["mib_each"]
@@ -1088,11 +1401,15 @@ def render(plan: dict) -> list[str]:
                 f"  {sessions['policy']}",
                 "  What that leaves open is listed for each runner under Runners, below."]
 
-    panel = [m for m in plan["models"] if m["role"] == "panellist"]
+    # An interview study's interviewer is a model entry of its own, with limits of its own: a row beside the panel's.
+    panel = [m for m in plan["models"] if m["role"] == "panellist" or (talk and m["role"] == "interviewer")]
     out += ["", f"Model entries ({len(panel)})"
-            + (":" if native else ", with the limits in force for each of their runs:")]
-    out += table([["Key", "Runner", "Model", "Effort", "Runs", "Time limit", "Budget", "Provider"],
-                  *([m["entry"], *entry_cells(m), m["runs"], *limits_of(m), m["provider"] or "-"] for m in panel)])
+            + (":" if native else ", each with the limits in force for its side of an interview:" if talk
+               else ", with the limits in force for each of their runs:")]
+    out += table([["Key", *(["Side"] if talk else []), "Runner", "Model", "Effort", "Interviews" if talk else "Runs",
+                   "Time limit", "Budget", "Provider"],
+                  *([m["entry"], *([side_of(m)] if talk else []), *entry_cells(m), m["runs"], *limits_of(m),
+                     m["provider"] or "-"] for m in panel)])
     for m in plan["models"]:
         for lack in m["lacks"]:
             out.append(f"  {m['entry']} lacks {lack['capability']}: {stop(lack['means'])}")
@@ -1104,30 +1421,43 @@ def render(plan: dict) -> list[str]:
         if status.get("message") and False not in (status["known"], status["signed_in"]):  # else it is a problem, below
             out.append(f"  {m['entry']}: {stop(status['message'])}")
 
-    out += ["", f"Runs ({len(plan['runs'])}):"]
-    out += table([["Run", "Persona", "Key", "Runner", "Model", "Effort", "Time limit", "Budget", "State", "Prompt"],
-                  *([r["run"], f"{r['persona']} {r['name']}".strip(), r["key"], *entry_cells(r), *limits_of(r),
-                     r["state"], r["prompt"] + ("" if r["prompt_exists"] else " (missing)")] for r in plan["runs"])])
+    if talk and any(m["budget_cap_note"] for m in plan["models"]):
+        out.append(f"  In the lines above on a budget cap, {HARNESS_WORDS}")
+    if talk:
+        out += interview_rows(plan)
+    else:
+        out += ["", f"Runs ({len(plan['runs'])}):"]
+        out += table([["Run", "Persona", "Key", "Runner", "Model", "Effort", "Time limit", "Budget", "State", "Prompt"],
+                      *([r["run"], f"{r['persona']} {r['name']}".strip(), r["key"], *entry_cells(r), *limits_of(r),
+                         r["state"], r["prompt"] + ("" if r["prompt_exists"] else " (missing)")]
+                        for r in plan["runs"])])
     if native:
         out += ["", *estimate_lines(plan), *followup_lines(plan["followups"]), ""]
         return out
 
+    bare = {x["runner"] for x in talk["tools"] if x["tools"] == "none"} if talk else set()
     out += ["", "Runners:"]
     for r in plan["runners"]:
         said = f"ready: {r['message']}" if r["ok"] else f"CANNOT BE USED: {r['message']}"
-        out.append(f"  {r['runner']}: {stop(said)} Up to {plural(r['concurrency'], 'run')} at once.")
+        most = plural(r["concurrency"], "process", "processes") if talk else plural(r["concurrency"], "run")
+        out.append(f"  {r['runner']}: {stop(said)} Up to {most} at once.")
         if r["billing_env_set"]:
             out.append("    Set in this environment, and able to change who is billed: "
                        f"{', '.join(r['billing_env_set'])}.")
         if r["isolation_gaps"] or r["browse_gaps"]:
-            out.append("    Not switched off for its runs:")
+            # A side with no tools has nothing to read a file or run a command with, whatever its sandbox allows.
+            out.append("    Not switched off for its processes. A side of an interview has no tool to read a file or "
+                       "run a command with (Tools, above), so a line on what a run can read or run is about the jobs "
+                       "of the synthesis alone:" if r["runner"] in bare else
+                       "    Not switched off for its runs:")
             out += [f"      - {gap}" for gap in [*r["isolation_gaps"], *r["browse_gaps"]]]
 
     out += ["", "What each provider receives:"]
     for p in plan["providers"]:
         out.append(f"  {p['provider']}")
         for e in p["entries"]:
-            unit = "run" if e["role"] == "panellist" else "job"
+            unit = "interview" if talk and e["role"] in ("panellist", "interviewer") else (
+                "run" if e["role"] == "panellist" else "job")
             out.append(f"    {e['entry']} ({e['runner']}, {plural(e['runs'], unit)}): from each {unit}, "
                        f"{e['receives']}.")
 
@@ -1143,7 +1473,8 @@ def render(plan: dict) -> list[str]:
         out.append(f'  synthesis.{role} is missing from study.json: there is no default, so "run --role {role}" '
                    f'will refuse. Add "synthesis": {{"{role}": {{"runner": "<runner>", "model": "<model>"}}}}.')
 
-    out += ["", *estimate_lines(plan), "", *ceiling_lines(plan["ceiling"], syn),
+    sides = {i[x]["run"]: f"{i['run']} {x}" for i in talk["interviews"] for x in pl.SIDES} if talk else None
+    out += ["", *estimate_lines(plan), "", *ceiling_lines(plan["ceiling"], syn, sides),
             *followup_lines(plan["followups"]), "", LIST_PRICE]
     if plan["problems"]:
         out += ["", 'Problems, which stop "run" as they stop this plan:', *(f"  {stop(p)}" for p in plan["problems"])]
@@ -1216,16 +1547,24 @@ def browsing_lines(plan: dict) -> list[str]:
 
 
 def estimate_lines(plan: dict) -> list[str]:
-    est, used = plan["estimate"], plan["used"]
-    out = ["Estimate of what the runs still to go will use (a forecast, not a limit):"]
+    est, used, talk = plan["estimate"], plan["used"], plan.get("interview")
+    out = [f"Estimate of what the {'interviews' if talk else 'runs'} still to go will use (a forecast, not a limit):"]
     for e in est["entries"]:
-        per, unit = e["per_run"], "run" if e["role"] == "panellist" else "job"
-        go = plural(e["to_go"], unit) + " to go"
+        per = e["per_run"]
+        unit = "interview" if talk and e["role"] in ("panellist", "interviewer") else (
+            "run" if e["role"] == "panellist" else "job")
+        a, go = f"{'an' if unit == 'interview' else 'a'} {unit}", plural(e["to_go"], unit) + " to go"
         if e["basis"] in ("measured", "duration"):
             cost = money(per["cost_usd"]) if per["cost_usd"] is not None else "cost not reported"
             tokens = f"{per['tokens']:,} tokens" if per["tokens"] is not None else "tokens not reported"
             line = (f"measured on {plural(e['measured_runs'], 'finished ' + unit)}: {tokens}, {cost} and "
-                    f"{span(per['seconds'])} a {unit}. ")
+                    f"{span(per['seconds'])} {a}. ")
+            each = e.get("per_exchange")
+            if each and each["seconds"] is not None:  # an interview: what its side came to for each exchange
+                line += ((f"It ran {plural(round(each['exchanges']), 'exchange')}" if each["interviews"] == 1
+                          else f"They ran {each['exchanges']:.3g} exchanges on average") + ": about "
+                         + (f"{each['tokens']:,.0f} tokens and " if each["tokens"] is not None else "")
+                         + f"{each['seconds']:.1f}s an exchange. ")
             out_of = e["left_out"]
             if out_of["unreported"] or out_of["unallocated"]:
                 why = ([f"{out_of['unreported']} stopped before the harness reported what it used"]
@@ -1238,7 +1577,7 @@ def estimate_lines(plan: dict) -> list[str]:
             else:
                 parts = ([f"{e['tokens']:,} tokens"] if e["tokens"] is not None else []) + (
                     [money(e["cost_usd"])] if e["cost_usd"] is not None else []) + [
-                    f"{span(e['seconds'])} of run time"]
+                    f"{span(e['seconds'])} of {'process' if unit == 'interview' else 'run'} time"]
                 line += f"{go}: about {', '.join(parts)}" + (
                     "." if e["cost_usd"] is not None else ". No dollar figure, so judge it by the time.")
         elif e["basis"] == "method":
@@ -1248,6 +1587,12 @@ def estimate_lines(plan: dict) -> list[str]:
                     f"{per['tokens']:,} tokens a run, {e['tokens']:,} for {go}. No dollar figure: "
                     + ("native mode records no usage." if plan["native"]
                        else "a pilot will provide one." if e["reports_cost"]
+                       else "its harness reports no cost, so judge it by the time."))
+        elif e["basis"] == "exchanges":
+            line = (f"no finished interview to measure. About {per['tokens']:,} input tokens for an interview that "
+                    f"runs to its cap of {plural(talk['turns'], 'exchange')}: {e['tokens']:,} for {go}. No dollar "
+                    "figure: "
+                    + ("a pilot will provide one." if e["reports_cost"]
                        else "its harness reports no cost, so judge it by the time."))
         else:
             line = (f"no finished {unit} to measure, and the method has no figure for it. {go.capitalize()}. "
@@ -1264,42 +1609,66 @@ def estimate_lines(plan: dict) -> list[str]:
         out.append(f"  In all: about {' and '.join(parts)}." + (
             " No token figure for any of them." if est["tokens"] is None else
             " No dollar figure for any of them." if est["cost_usd"] is None else ""))
+    if any(e["basis"] == "exchanges" and e["to_go"] for e in est["entries"]):
+        out += ["  Where no interview has finished, the figure is the input tokens of an interview that runs to its "
+                "cap, by runner and by side and not by model: one process of the side for each exchange, at the size "
+                f"measured on {TURN_TOKENS_FROM}.",
+                "    It is a forecast and no ceiling. An interview that ends before its cap uses less. The "
+                "participant's first reply, a reply that is sent back and a turn that is put again are processes "
+                "too, and the figure leaves them out. Nearly all of that input is read from a cache after a side's "
+                "first process."]
     if used["started"]:
         tokens = (f"{used['input_tokens'] + (used['output_tokens'] or 0):,} tokens"
                   if used["input_tokens"] is not None else "tokens not reported")
-        out.append(f"  Used so far, by the {plural(used['started'], 'run or job', 'runs and jobs')} started: {tokens}, "
+        started = (plural(used["started"], "side or job", "sides and jobs") if talk
+                   else plural(used["started"], "run or job", "runs and jobs"))
+        out.append(f"  Used so far, by the {started} started: {tokens}, "
                    f"{money(used['cost_usd']) if used['cost_usd'] is not None else 'cost not reported'}.")
+    elif talk:
+        out.append("  Nothing has run yet: launch.py pilot holds the first persona's interview on each model entry, "
+                   "and the next plan estimates from what it measured. Read its transcripts before the rest.")
     elif not plan["native"]:
         out.append("  Nothing has run yet: launch.py pilot runs one persona on each model entry, and the next plan "
                    "estimates from what it measured.")
     return out
 
 
-def ceiling_lines(c: dict, syn: dict) -> list[str]:
+def ceiling_lines(c: dict, syn: dict, sides: dict | None = None) -> list[str]:
+    """The plan's lines on the ceiling. sides is given for an interview study, whose caps are
+    those of each side of each interview: {entry id: what the lines call that side}."""
+    def called(run: str) -> str:
+        return (sides or {}).get(run, run)
+
+    whole, one, each = (("every side of every interview", "side", "each side of each interview") if sides
+                        else ("every run", "run", "each"))
     out = [f"Ceiling: {money(c['usd'])}, " + (
-        f"a guaranteed maximum{' apart from the caveats below' if c['caveats'] else ''}: every run and job has a "
+        f"a guaranteed maximum{' apart from the caveats below' if c['caveats'] else ''}: {whole} and job has a "
         "budget cap that its harness enforces." if c["guaranteed"]
-        else "an estimate, not a guaranteed maximum: some runs or jobs have no budget cap.")]
-    out.append(f"  {money(c['capped_runs_usd'])} for {plural(c['capped_runs'], 'run')} with an enforced cap, each "
-               "counted once, because a cap covers all of a run's attempts.")
+        else f"an estimate, not a guaranteed maximum: some {one}s or jobs have no budget cap.")]
+    out.append(f"  {money(c['capped_runs_usd'])} for {plural(c['capped_runs'], one)} with an enforced cap, {each} "
+               f"counted once, because a cap covers all of a {one}'s {'turns' if sides else 'attempts'}.")
     out.append(f"  {money(c['synthesis_usd'])} for the synthesis pool, counted once, because it is split into the "
-               "jobs' caps. Panellist runs never spend it.")
+               f"jobs' caps. {'No interview spends it' if sides else 'Panellist runs never spend it'}.")
     if c["uncapped"]:
-        shown = ", ".join(c["uncapped"][:8]) + (", ..." if len(c["uncapped"]) > 8 else "")
+        shown = ", ".join(map(called, c["uncapped"][:8])) + (", ..." if len(c["uncapped"]) > 8 else "")
         n = len(c["uncapped"])
-        out.append(f"  {plural(n, 'run')} on a runner without a budget cap {agree(n, 'is', 'are')} left out of the "
+        out.append(f"  {plural(n, one)} on a runner without a budget cap {agree(n, 'is', 'are')} left out of the "
                    f"figure ({shown}). The time limit is what bounds {agree(n, 'it', 'them')}: at most "
-                   f"{span(c['uncapped_minutes'] * 60)} of run time{agree(n, '', ' between them')}.")
+                   f"{span(c['uncapped_minutes'] * 60)} of {'process' if sides else 'run'} time"
+                   f"{agree(n, '', ' between them')}.")
     if c["uncapped_jobs"]:
         n = len(c["uncapped_jobs"])
         out.append(f"  {plural(n, 'job')} on a runner without a budget cap {agree(n, 'has its', 'have their')} share "
                    f"of the pool counted, but nothing enforces it ({', '.join(c['uncapped_jobs'])}). The time limit "
                    f"is what bounds {agree(n, 'it', 'them')}: at most {span(c['uncapped_job_minutes'] * 60)} of run "
                    f"time{agree(n, '', ' between them')}.")
-    out += [f"  Caveat: {stop(caveat)}" for caveat in c["caveats"]]
+    # A runner's note on its cap is in its harness's words: in an interview study's plan, what they mean follows it.
+    said = f" There {HARNESS_WORDS}" if sides else ""
+    out += [f"  Caveat: {stop(caveat)}" + ("" if caveat.startswith(STOPPED) else said) for caveat in c["caveats"]]
     if not c["holds"]:
         out.append(f"  The ceiling no longer holds: resume --extend gave more than one allowance of the limits to "
-                   f"{', '.join(c['extended'])}. With those allowances it comes to {money(c['with_extensions_usd'])}.")
+                   f"{', '.join(map(called, c['extended']))}. With those allowances it comes to "
+                   f"{money(c['with_extensions_usd'])}.")
     return out
 
 

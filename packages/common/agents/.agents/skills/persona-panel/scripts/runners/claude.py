@@ -16,6 +16,9 @@ Launch (the caller starts the process in workdir and writes the prompt to stdin)
 Resume is the same with `--resume <session id>` in place of `--session-id <uuid>`. Nothing
 carries over from the first process, so every other option is repeated.
 
+A run with "tools": "none" (a side of an interview) has `--tools ""` in place of the `--tools`
+and `--allowed-tools` pair, on launch and on every resume (see "No tools").
+
 What each option is for (all verified unless marked):
 
 - `-p` with the prompt on stdin. A prompt argument placed after the variadic `--tools` or
@@ -67,6 +70,14 @@ panellist runs `agent-browser <command>` with no session name (verified with a s
 outside the run: the signed-in page opened, and a screenshot was saved by a relative path and
 read back). Nothing else is needed: the CLI has no sandbox between its shell and a socket.
 
+No tools (run["tools"] == "none"), verified on 13 October 2026. `claude --help` gives
+`--tools ""` as the way to disable every tool. With it under the options above, and no
+`--allowed-tools`, the init line of a run lists `"tools":[]`, the model answers that it has no
+tool to call, and a resume with the same options continues the session and has none either. A
+participant and an interviewer of an interview run this way: neither reads or writes a file, and
+the launcher carries every word between them. "none" with "browse" is a contradiction, and
+raises.
+
 Environment. The child gets the caller's environment minus the variables a Claude Code session
 sets for its own children: CLAUDECODE, CLAUDE_PID, CLAUDE_EFFORT, AI_AGENT, CLAUDE_AGENT_SDK_*
 and every CLAUDE_CODE_* except user configuration (KEEP_ENV). Inherited, they change the
@@ -117,12 +128,19 @@ purge it, and nothing in its output says so. So shell_check() tests that directo
 write before any run, and parse_result() looks for the transcript of the session a process
 ran in: none is "session_saved" false.
 
+`claude auth status` is a process of its own, a tenth of a second or more, and parse_result()
+needs its answer for every process that ends: an interview of thirty exchanges is some sixty of
+them. So the projects directory is asked for once for each configuration directory a launcher
+sees (_projects_of()): it cannot move while a launcher runs. An answer that names none is not
+kept, and is asked for again. check() and shell_check() always ask the CLI itself.
+
 Not settled: the exact headless output at a usage limit; whether `claude auth status` notices
 a revoked token; whether the account email can be kept out of context.
 """
 
 from __future__ import annotations
 
+import functools
 import glob
 import json
 import os
@@ -137,6 +155,7 @@ from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_eff
 CLI = "claude"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 FILE_TOOLS = "Read,Write,Edit,Glob,Grep"
+NO_TOOLS = ["--tools", ""]  # run["tools"] == "none": no tool exists, so there is none to allow either
 # One allow rule for each agent-browser command a panellist may run: a prefix rule for a command
 # of one word, and an exact one for a command of two (`get url`), which takes nothing after it.
 BROWSER_RULES = ",".join(f"Bash(agent-browser {c}{'' if ' ' in c else ':*'})" for c in browser_session.COMMANDS)
@@ -190,6 +209,9 @@ def capabilities() -> dict:
         "default_concurrency": 6,
         "provider": "Anthropic",
         "billing_env": list(BILLING_ENV),
+        "interview": True,
+        "no_tools": True,
+        "no_tools_note": "no tool of any kind. It reads, writes and runs nothing.",
         "isolation_gaps": [
             "The signed-in account's email address is always in the model's context.",
             "The full path of the working directory, the OS version and today's date are always "
@@ -225,10 +247,14 @@ def _command(run: dict, limits: dict | None, session: list[str], stdin: str, ses
             raise ValueError("no budget left for this run")
         argv += ["--max-budget-usd", amount]
     browse = bool(run.get("browse"))
-    argv += [*ISOLATION,
-             "--tools", FILE_TOOLS + (",Bash" if browse else ""),
-             "--allowed-tools", FILE_TOOLS + ("," + BROWSER_RULES if browse else ""),
-             *OUTPUT]
+    if run.get("tools") == "none":
+        if browse:
+            raise ValueError("a run with no tools cannot browse")
+        tools = NO_TOOLS
+    else:
+        tools = ["--tools", FILE_TOOLS + (",Bash" if browse else ""),
+                 "--allowed-tools", FILE_TOOLS + ("," + BROWSER_RULES if browse else "")]
+    argv += [*ISOLATION, *tools, *OUTPUT]
     return {"argv": argv, "stdin": stdin, "env": child_env(run, _env()), "session_id": session_id}
 
 
@@ -270,10 +296,31 @@ def _usage_limit(res: dict, lines: list[dict]) -> tuple[bool, int | None]:
     return hit, reset if isinstance(reset, (int, float)) else None
 
 
-def _projects() -> str | None:
-    """The directory the CLI keeps its transcripts under, as the CLI itself reports it (also
+def _asked_projects() -> str | None:
+    """The directory the CLI keeps its transcripts under, as the CLI itself reports it now (also
     when it is signed out). None when it does not say."""
     return _auth_status(_env())[1].get("projectsDirectory") or None
+
+
+@functools.lru_cache(maxsize=None)
+def _projects_of(config_dir: str | None) -> str:
+    """_asked_projects() for one $CLAUDE_CONFIG_DIR (None: the CLI's default), asked once and
+    remembered: the directory cannot move under a launcher, and the question is a process of its
+    own (module docstring). Raises LookupError when the CLI does not say, which is not
+    remembered, so the next caller asks again."""
+    found = _asked_projects()
+    if not found:
+        raise LookupError(f"{CLI} auth status names no projects directory")
+    return found
+
+
+def _projects() -> str | None:
+    """The directory the CLI keeps its transcripts under, from _projects_of(). None when the CLI
+    does not say."""
+    try:
+        return _projects_of(os.environ.get("CLAUDE_CONFIG_DIR"))
+    except LookupError:
+        return None
 
 
 def _transcripts(session_id) -> list[str] | None:
@@ -320,7 +367,9 @@ def _auth_status(env: dict) -> tuple[int, dict]:
 
 def check() -> dict:
     """Installed, signed in, and every launch option still parses. No model call: the last step
-    runs the launch command with no prompt, which the CLI refuses after reading its options."""
+    runs the launch command with no prompt, which the CLI refuses after reading its options. It
+    is run twice: as a run that may browse, which has every other option, and as one with no
+    tools."""
     env = _env()
     version = run_cli([CLI, "--version"], env)
     if version is None:
@@ -331,11 +380,11 @@ def check() -> dict:
     if code != 0 or not status.get("loggedIn"):
         said = run_cli([CLI, "auth", "status", "--text"], env) or (1, "", "")
         return {"ok": False, "message": said[1] or said[2] or f"{CLI} auth status: not signed in"}
-    probe = launch_command({"model": "default", "effort": EFFORTS[0], "browse": True}, "", ".",
-                           {"budget_usd": 0.01})
-    _, out, err = run_cli(probe["argv"], env) or (1, "", "")
-    if NO_PROMPT not in err + out:
-        return {"ok": False, "message": last_line(err) or last_line(out) or f"{CLI} refused the launch options"}
+    for options in ({"browse": True}, {"tools": "none"}):
+        probe = launch_command({"model": "default", "effort": EFFORTS[0], **options}, "", ".", {"budget_usd": 0.01})
+        _, out, err = run_cli(probe["argv"], env) or (1, "", "")
+        if NO_PROMPT not in err + out:
+            return {"ok": False, "message": last_line(err) or last_line(out) or f"{CLI} refused the launch options"}
     signed_in = ", ".join(str(status[k]) for k in ("authMethod", "subscriptionType", "apiProvider") if status.get(k))
     return {"ok": True, "message": f"{version[1]}, signed in ({signed_in})"}
 
@@ -348,7 +397,7 @@ def shell_check() -> dict:
     the projects directory: this is not told the working directory. The CLI has no sandbox of
     its own to build, and whether it reaches its provider is seen in a run's own output
     (UNREACHABLE)."""
-    projects = _projects()
+    projects = _asked_projects()
     why = unwritable(projects) if projects else None
     if why:
         return {"ok": False, "message": f"cannot write to {projects}, where it keeps its sessions ({why})"}

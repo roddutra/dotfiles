@@ -29,6 +29,14 @@ Standard library only. Every script takes a study directory laid out as:
         evidence/<run id>/    usability only: the run's step log, steps.jsonl, and the
                               screenshot of each step (below). Nothing else belongs here, and
                               nothing is read from it through a symbolic link (evidence_fd())
+        rooms/<run id>/       interview only: the folder a participant's process starts in. It
+                              holds nothing, and nothing reads what a process leaves there
+    <study>/interviewer/      interview only: <run id>/, the folder the interviewer of that run
+                              starts in. It holds nothing either: all an interviewer is given is
+                              in its prompt
+    <study>/interviews/       interview only, and the launcher's alone: <run id>.jsonl, the turn
+                              log of each interview ("The turn log", below), and <run id>.md,
+                              its transcript. No session of either side is told it exists
     <study>/accounts/         usability only, lead only: <run id>.json, the test account
                               provisioned for each run, with its secrets (accounts.py). Mode
                               0600, never under panel/. And fingerprints.json, what a scan
@@ -39,7 +47,9 @@ Standard library only. Every script takes a study directory laid out as:
                               lead-notes.md (the lead's), qual-<n>.md (one per analyst), SYNTHESIS.md
                               (the writer's) and, from launch.py, <job id>-reply.md and usage.md
                               (what each harness reported: per run, per model key, per role and
-                              in total)
+                              in total). In an interview study also transcripts/<run id>.md, the
+                              analysts' copy of each transcript: the questions and answers, with
+                              no situation card and none of the interviewer's notes
     <study>/logs/             launch.py only: <run id>.<attempt>.in, .out and .err, the input and
                               output of each CLI process it started; .pid, where the attempt's
                               watchdog records itself and the CLI before the CLI runs, the
@@ -69,7 +79,12 @@ Standard library only. Every script takes a study directory laid out as:
                               next started afresh (launch.py). It is the lead's alone, and
                               nothing reads it as evidence. A process that never
                               ran as the CLI is no attempt: its files stay until the next
-                              attempt, which has the same number, replaces them
+                              attempt, which has the same number, replaces them. And, in an
+                              interview study, interviews-<epoch seconds>/: the turn logs and
+                              transcripts that an init_study.py --force replaced, the analysts'
+                              copies under transcripts/ in it, the files of the replaced
+                              entries' attempts under logs/ and analysis/usage.md and
+                              analysis/checks.md as they stood under analysis/
     <study>/.launch.lock      launch.py only: the study's lock file, which a launcher holds a
                               lock on while it has the study and which names that launcher
                               meanwhile. Made empty by init_study.py, emptied by a launcher
@@ -249,6 +264,51 @@ that was torn down before the record had heard of it, which the scripts name. Th
 fast one, so whoever can read the file can guess a weak password from it: it is kept from
 panellists like the records, and teardown is what makes the password worthless.
 
+Interview studies. "type": "interview" is a round of simulated discovery interviews. An
+interviewer session talks to each persona in turn, and the launcher carries every message
+between the two sessions, so neither side reads or writes a file: a run is an interview, its
+panellist is the participant, and what decides that it is done is its turn log, as a persona
+file decides it for a review. It has no concepts, tasks, materials, factors or scores, nothing
+is captured or browsed, it names no product, and it cannot run in native mode. The unit a run
+works through is a topic of the guide (study_units()). check_interview() validates "interview",
+the guide, and fills its defaults:
+
+    about           one neutral sentence on the area of work, which the interviewer may state
+                    when a participant asks what this is for. It names an area, never an idea
+    interviewer     the model entry of every interviewer of the study, as synthesis.analyst is
+                    one. There is no default: it names a runner, or the study does. Its "key"
+                    is "interviewer" unless it gives one
+    goals           [{"id", "learn"}, ...]: what the user wants to find out, each written as a
+                    question to settle and never as something to prove. "id" is letters and
+                    digits, unique ignoring case
+    topics          [{"id", "area", "goals", "turns", "opener", "segments"}, ...], opened in the
+                    order written. "id" is as a goal's, and never open, close or end, which an
+                    interviewer's reply uses for itself. "area" is a neutral name the
+                    interviewer may say to raise the topic, and "opener" its first question,
+                    sent as written. "goals" lists the ids of the goals the topic serves
+                    (default: none). "turns" caps the topic in exchanges (default
+                    DEFAULT_TOPIC_TURNS): the interviewer is told, and nothing enforces it.
+                    "segments" keeps the topic to the personas of those segments (default
+                    None: every persona gets it)
+    turns           the cap of one interview in exchanges, which the launcher enforces (default
+                    DEFAULT_TURNS). At least the number of topics plus two: the opening and
+                    the close
+    situation_card  true (the default): a participant's first reply is its situation card,
+                    which is recorded and never passed on. false: it replies "Ready"
+
+An exchange is one question and its answer, and every cap counts exchanges. guide() is the one
+reading of the guide for one persona: the topics it gets, with their caps, and the goals those
+topics leave it. Two more things are checked only when something is to be written or started
+(interview_problems(): the scaffold, the plan and every start), so that an archived study
+loads: a "leak_terms" entry in anything the interviewer is given to say, and a persona that
+"segments" leaves with no topic. A runner that does not exist is refused where it is looked up,
+as in every study (runners.get()).
+
+Its limits are limits.run (each participant, over its whole interview: INTERVIEW_RUN where
+study.json gives none), limits.interviewer (each interviewer, the same), limits.turn (minutes
+alone: the most one turn of either side may take) and limits.synthesis. synthesis.critic is the
+model entry of the jobs that critique the interviewer's questions, and belongs to no other type.
+
 A run is one persona on one model entry and one replicate. Its id is <pid>-<key>, or
 <pid>-<key>-r<n> for replicate n > 1, where <key> is the model entry's key (letters and digits).
 
@@ -272,10 +332,15 @@ runs.json is a list. init_study.py writes one entry per panellist run:
     role       "panellist"
     file       persona file, relative to the study directory
     prompt     run prompt, relative to the study directory
+    workdir    optional: the directory the entry's processes start in, relative to the study
+               directory. An entry without one works where its role does (workdir()): panel/
+               for a panellist, the study directory for a job. Only an entry of an interview
+               has one so far ("Interview entries", below)
 
-launch.py hands an entry to a runner with two keys more, which are never written here: "browse",
-whether this attempt may use agent-browser, and with it "browser_env", the variables by which
-its process reaches the browser session the launcher starts for it (runners/__init__.py).
+launch.py hands an entry to a runner with three keys more, which are never written here:
+"browse", whether this attempt may use agent-browser, with it "browser_env", the variables by
+which its process reaches the browser session the launcher starts for it, and "tools", "none"
+for a process that is to have no tool at all (runners/__init__.py).
 
 Whatever starts runs adds its own fields to an entry. runs.py mark adds "agent", the subagent
 id, in native mode. launch.py adds these, and an entry it has never touched has none of them:
@@ -418,6 +483,47 @@ finished job's output that the lead should know (it was taken from the job's rep
 process did not end cleanly), else null. Everything that lists panellist runs selects the role
 "panellist", so job entries never appear in run tracking, checks, scores or analysis.
 
+Interview entries. In an interview study init_study.py writes two entries for each run: the
+participant's (run_entry()), then its interviewer's (interviewer_entry()). Each side has a
+session, attempts, usage and limits of its own, and both name one turn log:
+
+    run        the run id | interviewer-<run id> (interviewer_id())
+    role       "panellist" | "interviewer"
+    interview  the run id, on both: the mark of an entry of a conversation (interview_of()). It
+               is there before any attempt, and nothing works it out from the study type
+    persona, segment   the participant's, on both
+    name       the persona's name | "Interviewer of <run id>"
+    replicate  the participant's. Its interviewer has none
+    key, runner, model, effort   the model entry | interview.interviewer
+    file       interviews/<run id>.jsonl on both: the turn log, which is what decides "done"
+    prompt     prompts/<run id>.md, the participant's whole launch prompt |
+               prompts/interviewer-<run id>.md, the interviewer's
+    workdir    panel/rooms/<run id> | interviewer/<run id>
+
+Everything that lists panellist runs still selects the role "panellist", so an interviewer
+never appears in run tracking. Of the launcher's fields above an entry of a conversation gets
+"pid", "pid_identity", "session", "sessions", "attempts", "seconds_used", "extended", "purged",
+"lost" and "unsaved", each side its own, and one that no other entry has:
+
+    carried    true while a launcher has this conversation in hand, between two turns too, else
+               absent: on both entries of an interview, written in one save. It is the one
+               fact about a conversation that its turn log cannot hold
+
+It never gets "state", "reason", "reset_at" or "limited_by": the state of a conversation, and
+the reason for it, are read from its turn log every time and written nowhere (interview_state()).
+Whether a process of it may be alive is asked of its attempts alone (open_attempt()).
+
+Every process of either side is one attempt of kind "turn", its first included. While it runs
+the attempt is whole, as above, with "bound": "turn" or "allowance", which of the two limits its
+watchdog was given, and "allowed" is that figure. It has no "state": a turn leaves its entry in
+none, and what it came to is on the turn log. Once it has ended and its reply is on the turn
+log it is cut down to {"n", "kind", "ended", "seconds"}: the log record has the rest, and
+logs/<entry id>.<n>.end the exit code. An attempt that ended with no reply on the log (stopped,
+timed out, failed, turned away) stays whole, as evidence. So of a settled attempt only "n",
+"kind" and "seconds" can be counted on, and "ended" says that it has ended. TURN_KINDS are the
+attempt kinds that are one turn of a conversation, and APART_KINDS the ones that leave their
+run's state and limits alone.
+
 read_runs() and write_runs() pass fields they don't know through untouched. Entries written
 before "key", "runner", "effort", "replicate" and "role" existed read as native-mode panellist
 runs: key = model, replicate 1.
@@ -533,6 +639,110 @@ the study lock nothing else writes an attempt to runs.json. What copies files ou
 A follow-up never changes a score: follow-up sections come after everything parse_persona_file()
 reads for scores, rankings, answers and lines, and it lists them apart, under "followups". They
 are qualitative evidence only, and no script tallies them.
+
+The turn log. interviews/<run id>.jsonl is the only record of an interview and of why it
+stopped: UTF-8, one JSON object a line, append only, written by a launcher that holds the study
+lock and by nothing else. append_turns() writes all the records of one settlement in a single
+write and syncs it. A settlement is on the log whole or not at all, to every reader: each of its
+records but the last carries "more": true, which says that the settlement goes on with the next
+line, and a log that ends in records so marked, or in a line with no line break, ends in what a
+killed writer left. read_turns() reads a log, [] for none, and leaves that unfinished end out
+(turn_torn() says whether there is one), and append_turns() cuts it off before it writes. So a
+turn whose "lost" record reached the disk without its "halt" reads as not settled, and the next
+launcher settles it again, both records, from its files in logs/. A line that is no JSON object
+is read as {"t": "unread", "line": its text}, which belongs to no reading of the log and which
+turn_problems() names, and so is a record that is not as a launcher writes one ("A malformed
+log", below). A log is never rewritten: a fresh start moves it to logs/, where it is
+no interview of the study any more (init_study.py --force moves every one, to
+logs/interviews-<epoch seconds>/, and a launcher that starts one interview afresh for want of
+a session moves that one, to logs/<run id>.interview-<k>.jsonl). A launcher appends to the log
+first and saves runs.json second, so the log is never behind.
+
+Every record has "t", its type (TURN_TYPES), and "at", epoch seconds to three decimals. One made
+from a process also has "side" (SIDES), "attempt", that side's attempt number, and "seconds",
+and one that is not the last of its settlement "more": true, which no reading of the log uses.
+An append is skipped when the log already has a record of that side and attempt, so a launcher
+that died between the log and runs.json records nothing twice. A record that was set aside as
+malformed (below) counts for that, and for nothing else, by the side and attempt its object
+holds: an attempt that is on the log in any form is never added to it again.
+
+    start        the first line: "v": 1, "kind" ("interview", or "debrief" for an interview
+                 held in the session of a finished review or usability run) and "run". Also
+                 "extended", {side: allowances given before this log began}, on a log that
+                 begins again for a conversation whose side had been given one (a fresh start).
+                 One that the command which began the log gave is counted there too
+    card         the participant's first reply, with the situation card on: "text"
+    ready        the same with it off: "text"
+    question     an interviewer's reply that parsed and passed the leak gate, which is
+                 delivered next: "n", "topic" (a topic id, "open" or "close"), "move", "why"
+                 and "say", the only part the participant receives. "topic" is the topic the
+                 question counts for, which its words decide where they hold the opener of a
+                 topic not yet opened (interview.opened_by()). "labelled" is there only then,
+                 and only when the interviewer wrote another TOPIC: what it wrote
+    answer       the participant's reply to question n: "n", "text"
+    rejected     an interviewer's reply that is not used: "problems", a list of [key, detail]
+                 (format, missing, topic, move, say, leak, last-exchange), and "reply", the
+                 text as received
+    end-offered  the interviewer ended while topics were unopened and exchanges remained, the
+                 first time: "reason", "say", "unopened". It is asked once whether it means it
+    end          the interview is over: "by" ("interviewer" or "cap"), "reason", "say",
+                 "exchanges", "unopened", "close" (whether the last exchange was a close) and
+                 "short": true when a cap ended it one exchange short. "side" and "attempt"
+                 only when the interviewer ended it
+    lost         an attempt ran as the CLI and left no usable reply: "why" (empty, role, stop,
+                 time, limit, budget, usage_limit, error or killed), and with "role", a
+                 participant's first reply that is neither a card nor "Ready", "reply". Also
+                 "reason", what its harness said of the ending, when it said anything
+    halt         the interview cannot go on without the lead: "state" (limited, blocked or
+                 failed), "side", "reason", and "reset_at" or "limited_by" when known
+    resume       a command took the interview up again: "by" (run, resume or debrief) and
+                 "extended", the side given one more allowance, when one was. That record is
+                 the grant: a side's allowances are one, and one more for each "resume" record
+                 that names it so (extensions()), and the "extended" on its runs.json entry is
+                 a copy the launcher brings level with the log before it queues a turn
+
+An exchange is question n and answer n, counted from 1: one number, for the transcripts, the
+caps and the analysts' notes. turn_problems() lists what is wrong with a log's form, and
+check_runs.py blocks on each. First, every record is of a known type and has the fields a
+launcher always writes for that type, each of the kind it writes (TURN_FIELDS, turn_lacking()),
+and nothing of another kind in a field a launcher writes only sometimes (TURN_SOMETIMES): a log
+with a record that does not is named for that and read no further, since every other reading
+of it counts on those fields. "unread" is no type of a record. It is what a reader calls a line
+it set aside, so a line of a log that calls itself that is of no known type, like any other no
+launcher writes, whatever it holds under "record". Then: it starts with "start", its questions
+and answers alternate with no number skipped or repeated, an interview has one card or "Ready"
+before its first question (a debrief has none), nothing follows the one "end", whose
+"exchanges" is the number of answers, and no two records share a side and attempt. An
+unfinished end is no problem of form: it is left out before the log is read, and check_runs.py
+notes it by turn_torn().
+
+A malformed log is one with a record that turn_lacking() names: changed by hand or damaged,
+since append_turns() writes no such record. It is recognised in one place, read_turns(), which
+judges each line as the object it holds (_unlike()) and gives each such record as "unread" with
+that object under "record": always the object of the line itself, and never one that was found
+inside it and trusted. So every reader is given the well-formed records alone, and nothing
+that is worked out from a log fails on a damaged one: interview_state(), interview_progress(),
+extensions() and interview.fold() pass an "unread" record over as they pass over any type they
+do not know. What they then say is what the rest of the log says, which is no account of the
+interview, so each place that acts on a log asks turn_lacking() first: check_runs.py blocks on
+it and names the record, "status" and the plan give it as what stands in the interview's way
+(interview.standing()), and "run" and "resume" leave the interview alone and say what to do,
+which is to put the log right or to move it into logs/ and hold the interview again.
+
+interview_state() reads a conversation's state from its log and whether a launcher carries it,
+first match first: "done" with an "end" record; "running" while it is carried; the state of the
+last "halt" when no "resume" follows it; "partial" with a card, a "Ready", a question or an
+answer on record; else "pending". Both entries of an interview ask with the same log and the
+same "carried", so they never disagree.
+
+"carried" on an entry says that a launcher took the conversation up and has not put it down,
+and a launcher that was killed never took it off. So it counts only while a launcher holds the
+study, and one rule decides that for every reader, carried(): a launcher asks with the study
+in its own hands, and every other reader of a state (status, the plan, the usage record,
+check_runs.py) is told by its caller whether the study lock is held, and reads a conversation
+left carried by a dead launcher as its log reads with no launcher: partial, next "resume", or
+pending with no turn on record. interview_progress() gives the same log the shape
+run_progress() gives a persona file, and run_records() reads an interview study through both.
 """
 
 from __future__ import annotations
@@ -611,15 +821,75 @@ DESIGN_FACTORS = tuple(f["key"] for f in DEFAULT_FACTORS if f.get("needs_design"
 DASHES = ("\u2013", "\u2014")
 FINAL_MARKER = "## Out of character"
 
-# Study type -> the unit a run works through: its nouns, and its section heading in a persona file.
+# Study type -> the unit a run works through: its nouns, and its section heading in a persona file,
+# None for an interview study, which has no persona file.
 STUDY_TYPES = {
     "review": {"unit": "concept", "units": "concepts", "heading": "Concept"},
     "usability": {"unit": "task", "units": "tasks", "heading": "Task"},
+    "interview": {"unit": "topic", "units": "topics", "heading": None},
 }
-# What only one type of study has in study.json. A key of the other type is refused, not ignored.
+# What only one type of study has in study.json. A key of another type is refused, not ignored.
 REVIEW_KEYS = ("concepts", "labels", "label_style", "shuffle_labels", "find_the_answer", "artefact",
                "artefact_plural", "arrival", "copy_ignore", "extra_yes_bullets")
 USABILITY_KEYS = ("target", "tasks", "accounts", "sequential")
+INTERVIEW_KEYS = ("interview",)
+TYPE_KEYS = {"review": REVIEW_KEYS, "usability": USABILITY_KEYS, "interview": INTERVIEW_KEYS}
+# What a study of one type is told to do about a key of another: [this type, the key's type], as
+# the end of check_type_keys()'s sentence, with {it} for "it" or "them".
+TYPE_HINT = {
+    ("review", "usability"): '. Set "type": "usability" (it then has "tasks" and no "concepts"), or take {it} out',
+    ("usability", "review"): (": it has tasks and no concepts, nothing is captured, and tasks are attempted in the "
+                              "order written. Take {it} out"),
+    ("review", "interview"): '. Set "type": "interview" (it then has a guide and no "concepts"), or take {it} out',
+    ("usability", "interview"): '. Set "type": "interview" (it then has a guide and no "tasks"), or take {it} out',
+    ("interview", "review"): ": nothing is reviewed, attempted, captured or scored. Take {it} out",
+    ("interview", "usability"): ": nothing is reviewed, attempted, captured or scored. Take {it} out",
+}
+# What the other two types share and an interview study cannot have: refused there, not ignored.
+NOT_INTERVIEW = ("materials", "browse", "capture", "factors", "fit_factors", "model_notes", "product",
+                 "product_phrase", "debrief")
+GUIDE_KEYS = ("about", "interviewer", "goals", "topics", "turns", "situation_card")  # of "interview", the guide
+DEBRIEF_KEYS = ("interviewer", "goals", "topics", "turns")  # of "debrief", the guide of a debrief
+GOAL_FIELDS, TOPIC_FIELDS = ("id", "learn"), ("id", "area", "goals", "turns", "opener", "segments")
+GUIDE_ID = re.compile(r"[A-Za-z0-9]+")  # a goal or topic id. A topic id is none of NOT_TOPIC, in any case
+NOT_TOPIC = ("open", "close", "end")    # what an interviewer's reply writes where a topic id goes, or to end
+DEFAULT_TURNS = 30       # the cap of an interview that names none, in exchanges
+DEFAULT_TOPIC_TURNS = 8  # the cap of a topic that names none
+SIDES = ("participant", "interviewer")  # the two sides of a conversation, as a turn log names them
+TURN_KINDS = ("turn", "debrief")        # attempt kinds that are one turn of a conversation
+APART_KINDS = ("followup", "debrief")   # attempt kinds that leave their run's state and limits alone
+INTERVIEWS = "interviews"               # the turn logs and transcripts, relative to the study directory
+ROOMS = "panel/rooms"                   # a folder for each participant, <run id>, relative to it too
+INTERVIEWER_DIR = "interviewer"         # a folder for each interviewer, <run id>
+TRANSCRIPTS = "analysis/transcripts"    # the analysts' copies of the transcripts
+# The record types of a turn log (module docstring, "The turn log"), and the ones made from a reply.
+TURN_TYPES = ("start", "card", "ready", "question", "answer", "rejected", "end-offered", "end", "lost", "halt",
+              "resume")
+SPOKEN = ("card", "ready", "question", "answer")  # with one of these on record an interview has begun
+HALTS = ("limited", "blocked", "failed")          # the states a "halt" record can give an interview
+# The fields of a record of each type, beside "t" and "at", each with the kind of value a launcher writes
+# there (_of_kind()): a type, a tuple of types for any of them, [kind] for a list of such values, [kind, kind]
+# for a list of exactly those, and {kind: kind} for an object of such keys and values. TURN_FIELDS has the
+# fields it always writes, and TURN_SOMETIMES the ones it writes only sometimes, on a record of any type ("")
+# or of one: a record may leave those out, and may not hold another kind of value there (turn_lacking()).
+_SPOKE = {"side": str, "attempt": int}
+_NUMBER = (int, float)
+TURN_FIELDS = {
+    "start": {"v": int, "kind": str, "run": str},
+    "card": {**_SPOKE, "text": str}, "ready": {**_SPOKE, "text": str},
+    "question": {**_SPOKE, "n": int, "topic": str, "move": str, "why": str, "say": str},
+    "answer": {**_SPOKE, "n": int, "text": str},
+    "rejected": {**_SPOKE, "problems": [[str, str]], "reply": str},
+    "end-offered": {**_SPOKE, "reason": str, "say": str, "unopened": [str]},
+    "end": {"by": str, "reason": str, "say": str, "exchanges": int, "unopened": [str], "close": bool},
+    "lost": {**_SPOKE, "why": str},
+    "halt": {"state": str, "side": str, "reason": str},
+    "resume": {"by": str}}
+TURN_SOMETIMES = {
+    "": {**_SPOKE, "seconds": _NUMBER, "more": bool},  # "side" and "attempt": of an "end" by its interviewer
+    "start": {"extended": {str: int}}, "question": {"labelled": str}, "end": {"short": bool},
+    "lost": {"reason": str, "reply": str}, "halt": {"limited_by": str, "reset_at": _NUMBER},
+    "resume": {"extended": str}}
 TASK_ID = re.compile(r"[A-Za-z0-9]+")  # a task id: what the parsers read after "Task", and part of a file name
 TASK_FIELDS = ("id", "goal", "start", "steps", "success_check", "read_only")
 ACCOUNT_FIELDS = ("provision", "map", "teardown", "reset", "signin")
@@ -665,10 +935,23 @@ DEFAULT_LIMITS = {
     "run": {"minutes": 15, "budget_usd": 2.0},        # each panellist run, over all its attempts
     "synthesis": {"minutes": 30, "budget_usd": 5.0},  # analyst and writer jobs
     "followup": {"minutes": 5, "budget_usd": 0.5},    # each run asked a follow-up, for each question
+    "interviewer": {"minutes": 15, "budget_usd": 1.0},  # each interviewer, over its whole interview
+    "turn": {"minutes": 3},                           # one turn of either side of a conversation
+    "debrief": {"minutes": 15, "budget_usd": 1.5},    # each side of a debrief: a placeholder, not yet measured
 }
+# limits.run of an interview's participant, where study.json gives none. With the interviewer's and
+# the turn limit above it is what interviews measured on 13 October 2026 leave room for: the slowest
+# of 921 processes took 31 seconds, the longest side used 280 seconds of its own process time, and
+# the dearest cost 0.30 USD. Minutes count a side's own process time, never the time since the
+# interview began.
+INTERVIEW_RUN = {"minutes": 15, "budget_usd": 0.5}
+# The limits a study of each type may set, each beside "overrides". Any other is refused.
+LIMIT_SETS = {"review": ("run", "synthesis", "followup", "debrief"),
+              "usability": ("run", "synthesis", "followup", "debrief"),
+              "interview": ("run", "interviewer", "turn", "synthesis")}
 RUN_DEFAULTS = {"runner": None, "effort": None, "replicate": 1, "role": "panellist"}
 JOB_ROLES = ("analyst", "writer")
-SYNTHESIS_KEYS = ("analysts", "analyst", "writer", "decision_maker", "context_files")
+SYNTHESIS_KEYS = ("analysts", "analyst", "writer", "decision_maker", "context_files", "critic")
 DEFAULT_DECISION_MAKER = "the decision-maker"
 MODIFICATIONS = "logs/modifications.json"  # the modification record, relative to the study directory
 EARLIER_SESSIONS = "logs/earlier-sessions.json"  # sessions of the runs a --force replaced, relative to it too
@@ -721,7 +1004,9 @@ def load_study(study_dir: Path) -> dict:
     if not isinstance(cfg, dict):
         raise SystemExit(f"{study_dir / 'study.json'} must hold one JSON object")
     given = frozenset(cfg)  # the keys study.json itself has, before any default
-    cfg.setdefault("factors", USABILITY_FACTORS if cfg.get("type") == "usability" else DEFAULT_FACTORS)
+    interview = cfg.get("type") == "interview"  # nothing is scored, reviewed or browsed in one
+    cfg.setdefault("factors", [] if interview else USABILITY_FACTORS if cfg.get("type") == "usability"
+                   else DEFAULT_FACTORS)
     cfg.setdefault("fit_factors", [f for f in DEFAULT_FIT_FACTORS if f in {x["key"] for x in cfg["factors"]}])
     cfg.setdefault("models", ["opus", "fable"])
     cfg.setdefault("seed", 1)
@@ -746,6 +1031,9 @@ def load_study(study_dir: Path) -> dict:
     cfg.setdefault("concepts", [])
     cfg["_dir"], cfg["_given"] = study_dir, given
     check_study(cfg)
+    if interview:  # it has no materials or concept kinds to apply, and no factor that must come last
+        cfg["browse"], cfg["_text_only"], cfg["_browse_off"] = False, None, None
+        return cfg
     apply_materials(cfg, asked_to_browse)
     apply_kinds(cfg, asked_to_browse)
 
@@ -774,7 +1062,7 @@ def _positive(x, whole: bool = False) -> bool:
 def check_study(cfg: dict):
     """Validate the shape of the optional keys. Whether a runner exists is the launcher's check."""
     if cfg["type"] not in STUDY_TYPES:
-        _fail(f'unknown "type" {cfg["type"]!r} (use {" or ".join(STUDY_TYPES)})')
+        _fail(f'unknown "type" {cfg["type"]!r} (use {listed(list(STUDY_TYPES), "or")})')
     check_type_keys(cfg)
     if cfg["materials"] not in MATERIALS:
         _fail(f'unknown "materials" {cfg["materials"]!r} (use {" or ".join(MATERIALS)})')
@@ -795,11 +1083,13 @@ def check_study(cfg: dict):
     keys = model_keys(cfg)
     if cfg["type"] == "usability":
         check_usability(cfg)
+    if cfg["type"] == "interview":
+        check_interview(cfg)
 
-    limits = cfg["limits"]
-    if not isinstance(limits, dict) or set(limits) - {*DEFAULT_LIMITS, "overrides"}:
-        _fail('"limits" must be an object with any of run, synthesis, followup and overrides')
-    sets = {f"limits.{k}": limits[k] for k in DEFAULT_LIMITS if k in limits}
+    limits, allowed = cfg["limits"], LIMIT_SETS[cfg["type"]]
+    if not isinstance(limits, dict) or set(limits) - {*allowed, "overrides"}:
+        _fail(f'"limits" must be an object with any of {", ".join(allowed)} and overrides')
+    sets = {f"limits.{k}": limits[k] for k in allowed if k in limits}
     overrides = limits.get("overrides", {})
     if not isinstance(overrides, dict):
         _fail("limits.overrides must be an object keyed by model key")
@@ -808,8 +1098,9 @@ def check_study(cfg: dict):
             _fail(f'limits.overrides: "{k}" is not a model key (keys: {", ".join(keys)})')
         sets[f"limits.overrides.{k}"] = v
     for where, d in sets.items():
-        if not isinstance(d, dict) or set(d) - set(LIMIT_NAMES):
-            _fail(f"{where} must be an object with any of {' and '.join(LIMIT_NAMES)}")
+        names = DEFAULT_LIMITS["turn"] if where == "limits.turn" else LIMIT_NAMES  # a turn has a time limit alone
+        if not isinstance(d, dict) or set(d) - set(names):
+            _fail(f"{where} must be an object with {'any of ' if len(names) > 1 else ''}{' and '.join(names)}")
         for name, v in d.items():
             if not _positive(v):
                 _fail(f"{where}.{name} must be a positive number")
@@ -827,7 +1118,10 @@ def check_study(cfg: dict):
         _fail(f'"synthesis" must be an object with any of {", ".join(SYNTHESIS_KEYS)}')
     if syn.get("analysts", 1) not in (1, 2) or isinstance(syn.get("analysts"), bool):
         _fail("synthesis.analysts must be 1 or 2")
-    for job in JOB_ROLES:
+    if "critic" in syn and cfg["type"] != "interview":
+        _fail(f'synthesis.critic belongs to an interview study, and this is {a_type(cfg["type"])} study: it is the '
+              "model entry of the jobs that critique an interviewer's questions. Take it out")
+    for job in (*JOB_ROLES, "critic"):
         if job in syn:
             model_entry(syn[job], cfg["runner"], f"synthesis.{job}")
     who = syn.get("decision_maker", DEFAULT_DECISION_MAKER)
@@ -919,22 +1213,36 @@ def check_capture(cfg: dict):
 
 # ---------------------------------------------------------------- usability studies
 
+def a_type(kind: str) -> str:
+    """A study type with its article: "a review", "an interview"."""
+    return f"{'an' if kind[0] in 'aeio' else 'a'} {kind}"
+
+
 def check_type_keys(cfg: dict):
-    """Refuse a key that belongs to the other type of study, and a setting a usability study
-    cannot have: a key that is quietly ignored reads as a setting in force."""
-    given = cfg.get("_given", frozenset(cfg))
-    if cfg["type"] != "usability":
-        stray = [k for k in USABILITY_KEYS if k in given]
+    """Refuse a key that belongs to another type of study, and a setting a usability or an
+    interview study cannot have: a key that is quietly ignored reads as a setting in force."""
+    kind, given = cfg["type"], cfg.get("_given", frozenset(cfg))
+    for other, keys in TYPE_KEYS.items():
+        stray = [] if other == kind else [k for k in keys if k in given and not (k == "concepts" and cfg[k] == [])]
         if stray:
-            _fail(f'{listed_keys(stray)} {agree(len(stray), "belongs", "belong")} to a usability study, and this is a '
-                  'review study. Set "type": "usability" (it then has "tasks" and no "concepts"), or take '
+            _fail(f'{listed_keys(stray)} {agree(len(stray), "belongs", "belong")} to {a_type(other)} study, and this '
+                  f"is {a_type(kind)} study"
+                  + TYPE_HINT[kind, other].format(it=agree(len(stray), "it", "them")))
+    if kind == "interview":
+        named = [k for k in ("product", "product_phrase") if k in given]
+        if named:
+            _fail(f"an interview study has no {listed_keys(named, 'or')}: a standalone interview never names a "
+                  f"product, and its briefs would. Take {agree(len(named), 'it', 'them')} out, and put the product's "
+                  'name in "leak_terms", so that no question can carry it')
+        if "debrief" in given:
+            _fail('an interview study has no "debrief": a debrief is an interview held in the session of a finished '
+                  "review or usability run, which has seen the product. Take it out")
+        stray = [k for k in NOT_INTERVIEW if k in given]
+        if stray:
+            _fail(f'an interview study has no {listed_keys(stray, "or")}: nothing is scored, captured or browsed. Take '
                   f'{agree(len(stray), "it", "them")} out')
+    if kind != "usability":
         return
-    stray = [k for k in REVIEW_KEYS if k in given and not (k == "concepts" and cfg[k] == [])]
-    if stray:
-        _fail(f'{listed_keys(stray)} {agree(len(stray), "belongs", "belong")} to a review study, and this is a '
-              "usability study: it has tasks and no concepts, nothing is captured, and tasks are attempted in the "
-              f'order written. Take {agree(len(stray), "it", "them")} out')
     if cfg["materials"] != "full":
         _fail('a usability study has no "materials": "text": its panellists use the running product in a browser. '
               "Take it out")
@@ -946,9 +1254,13 @@ def check_type_keys(cfg: dict):
               "height] of each panellist's browser window")
 
 
-def listed_keys(keys: list[str]) -> str:
-    named = [f'"{k}"' for k in keys]
-    return ", ".join(named[:-1]) + (" and " if named[:-1] else "") + named[-1]
+def listed(words: list[str], last: str = "and") -> str:
+    """Words as a list in a sentence: "a", "a and b", "a, b and c"."""
+    return ", ".join(words[:-1]) + (f" {last} " if words[:-1] else "") + words[-1]
+
+
+def listed_keys(keys: list[str], last: str = "and") -> str:
+    return listed([f'"{k}"' for k in keys], last)
 
 
 def target_parts(url) -> tuple[str, str, int | None]:
@@ -1620,6 +1932,183 @@ def claimed_outcome(section: str | None) -> str:
     return "unparsed"
 
 
+# ---------------------------------------------------------------- interview studies
+
+def _guide_id(value, what: str, where: str, seen: set, reserved: tuple = ()) -> str:
+    """One goal or topic id of a guide, checked: letters and digits, not a word of reserved, and
+    not one of seen, ignoring case. Exits naming what it is ("goal", "topic") and where."""
+    if not (isinstance(value, str) and GUIDE_ID.fullmatch(value)):
+        _fail(f'{where}: the {what} id {json.dumps(value)} must be letters and digits only, such as '
+              f'"{what[0].upper()}1", because the interviewer writes it in every reply')
+    if value.lower() in reserved:
+        _fail(f'{where}: the {what} id "{value}" is taken: an interviewer\'s reply writes '
+              f'{listed(list(reserved), "or")} where a {what} id goes. Give the {what} another id')
+    if value.lower() in seen:
+        _fail(f'{where}: two {what}s have the id "{value}". Ids must be unique, ignoring case')
+    seen.add(value.lower())
+    return value
+
+
+def check_guide(cfg: dict, block: str, keys: tuple = GUIDE_KEYS) -> dict:
+    """Validate a guide, cfg[block], and fill its defaults in place: its interviewer a normalised
+    model entry, and every topic with "goals", "turns" and "segments" (module docstring,
+    "Interview studies"). Returns it. A key of keys that the block may leave out is checked only
+    when it is there."""
+    guide = cfg.get(block)
+    if not isinstance(guide, dict):
+        _fail(f'"{block}" must be the guide, an object with {listed(list(keys))}: who interviews, what to learn, '
+              "and the topics in the order to open them")
+    if set(guide) - set(keys):
+        _fail(f"{block}: unknown keys: {', '.join(sorted(set(guide) - set(keys)))} (use {', '.join(keys)})")
+    if "about" in keys and not (isinstance(guide.get("about"), str) and guide["about"].strip()):
+        _fail(f'{block}.about must be one neutral sentence on the area of work, such as "how mortgage brokers run a '
+              'loan from first enquiry to settlement": the interviewer may state it when a participant asks what '
+              "this is for, so it names no idea and no product")
+
+    raw = guide.get("interviewer")
+    if raw is None:
+        _fail(f'{block}.interviewer is missing: the model entry of the interviewer, such as {{"runner": "claude", '
+              '"model": "<a model>"}. There is no default')
+    entry = model_entry(raw, cfg["runner"], f"{block}.interviewer")
+    if entry["runner"] is None:
+        _fail(f'{block}.interviewer needs a "runner": there is no default, and the launcher carries every turn '
+              'through one. Give it one, or set a study-level "runner"')
+    if not (isinstance(raw, dict) and raw.get("key")):
+        entry["key"] = "interviewer"
+    guide["interviewer"] = entry
+
+    goals, seen = guide.get("goals"), set()
+    if not isinstance(goals, list) or not goals or not all(isinstance(g, dict) for g in goals):
+        _fail(f'{block}.goals must be a list of {{"id", "learn"}} objects, at least one: what the user wants to '
+              "find out")
+    for g in goals:
+        gid = _guide_id(g.get("id"), "goal", f"{block}.goals", seen)
+        if set(g) - set(GOAL_FIELDS):
+            _fail(f"goal {gid}: unknown fields: {', '.join(sorted(set(g) - set(GOAL_FIELDS)))} (use "
+                  f"{', '.join(GOAL_FIELDS)})")
+        if not (isinstance(g.get("learn"), str) and g["learn"].strip()):
+            _fail(f'goal {gid}: it needs "learn": what to find out, written as a question to settle and never as '
+                  "something to prove")
+    goal_ids = [g["id"] for g in goals]
+
+    topics, seen = guide.get("topics"), set()
+    if not isinstance(topics, list) or not topics or not all(isinstance(t, dict) for t in topics):
+        _fail(f'{block}.topics must be a list of {{"id", "area", "opener"}} objects, at least one, in the order to '
+              "open them")
+    segments = {p.get("segment") for p in cfg.get("personas") or [] if p.get("segment")}
+    for t in topics:
+        tid = _guide_id(t.get("id"), "topic", f"{block}.topics", seen, NOT_TOPIC)
+        where = f"topic {tid}:"
+        if set(t) - set(TOPIC_FIELDS):
+            _fail(f"{where} unknown fields: {', '.join(sorted(set(t) - set(TOPIC_FIELDS)))} (use "
+                  f"{', '.join(TOPIC_FIELDS)})")
+        if not (isinstance(t.get("area"), str) and t["area"].strip()):
+            _fail(f'{where} it needs "area": a neutral name for the topic that the interviewer may say to raise it, '
+                  'such as "collecting documents from clients"')
+        if not (isinstance(t.get("opener"), str) and t["opener"].strip()):
+            _fail(f'{where} it needs "opener": the first question of the topic, which is sent as written')
+        served = t.setdefault("goals", [])
+        if not isinstance(served, list) or not all(isinstance(g, str) for g in served):
+            _fail(f'{where} "goals" must be a list of goal ids: the goals the topic serves')
+        for g in served:
+            if g not in goal_ids:
+                _fail(f'{where} "goals" names "{g}", which is not a goal id (ids: {", ".join(goal_ids)})')
+        if not _positive(t.setdefault("turns", DEFAULT_TOPIC_TURNS), whole=True):
+            _fail(f'{where} "turns" must be a whole number, 1 or more: the most exchanges the topic gets (default '
+                  f"{DEFAULT_TOPIC_TURNS})")
+        only = t.setdefault("segments", None)
+        if only is not None:
+            if not isinstance(only, list) or not only or not all(isinstance(x, str) for x in only):
+                _fail(f'{where} "segments" must be a list of segment names: the personas the topic is for. Leave it '
+                      "out for a topic every persona gets")
+            for name in only:
+                if name not in segments:
+                    _fail(f'{where} "segments" names "{name}", which no persona has'
+                          + (f" (segments: {', '.join(sorted(segments))})" if segments else ""))
+
+    turns = guide.setdefault("turns", DEFAULT_TURNS)
+    if not _positive(turns, whole=True):
+        _fail(f"{block}.turns must be a whole number, 1 or more: the most exchanges an interview gets (default "
+              f"{DEFAULT_TURNS})")
+    if turns < len(topics) + 2:
+        _fail(f"{block}.turns is {turns}, but {plural(len(topics), 'topic')} "
+              f"{agree(len(topics), 'needs', 'need')} at least {len(topics) + 2}: one exchange each, the opening and "
+              "the close")
+    return guide
+
+
+def check_interview(cfg: dict):
+    """Validate "interview", the guide of an interview study, and fill its defaults (module
+    docstring, "Interview studies"). What depends on files and runners being there is
+    interview_problems()'s to say."""
+    if any(e["runner"] is None for e in model_entries(cfg)):
+        _fail("an interview study cannot run in native mode: the launcher carries every turn between the two "
+              'sessions, each through its runner. Set a study-level "runner", or give every model entry one')
+    if "interview" not in cfg:
+        _fail('an interview study needs "interview": the guide, an object with '
+              f"{listed(list(GUIDE_KEYS[:4]))}, and {listed(list(GUIDE_KEYS[4:]))} when the defaults do not suit")
+    guide = check_guide(cfg, "interview")
+    if not isinstance(guide.setdefault("situation_card", True), bool):
+        _fail("interview.situation_card must be true or false: whether each participant writes its situation card "
+              "before the first question")
+    terms = cfg["leak_terms"]
+    if not isinstance(terms, list) or not all(isinstance(t, str) and t.strip() for t in terms):
+        _fail('"leak_terms" must be a list of words or phrases, none of them empty: every question is searched for '
+              "each before it is delivered, and an empty one is in every question")
+    taken = [p["id"] for p in cfg.get("personas") or [] if p["id"].lower() == "interviewer"]
+    if taken:
+        _fail(f'the persona id "{taken[0]}" is taken: the launcher names each interviewer\'s entry '
+              f'"{interviewer_id("<run id>")}". Give the persona another id')
+
+
+def guide(cfg: dict, pid: str, block: str = "interview") -> dict:
+    """The guide as one persona's interview has it, the one reading of it: {"about", "turns",
+    "card", "goals", "topics"}.
+
+    "topics" are the topics that persona gets, in the order written: every topic without
+    "segments", and one with it when the persona's segment is among them. Each is as
+    check_guide() left it, so it has its cap, "turns". "goals" are the goals those topics leave
+    the interviewer: every goal but one that only topics kept from this persona serve, since a
+    goal with no topic to pursue it under would be pursued anyway. "turns" is the interview's
+    cap, "card" whether the participant writes a situation card, and "about" the purpose the
+    interviewer may state. block is "interview", or "debrief" for the guide of a debrief, which
+    has no card and no "about".
+    """
+    held = cfg[block]
+    segment = next((p.get("segment") for p in cfg["personas"] if p["id"] == pid), None)
+    topics = [t for t in held["topics"] if t["segments"] is None or segment in t["segments"]]
+    kept = {g for t in topics for g in t["goals"]}
+    elsewhere = {g for t in held["topics"] for g in t["goals"]} - kept
+    return {"about": held.get("about"), "turns": held["turns"],
+            "card": block == "interview" and held["situation_card"],
+            "goals": [g for g in held["goals"] if g["id"] not in elsewhere], "topics": topics}
+
+
+def interview_problems(cfg: dict) -> list[str]:
+    """What would spoil an interview study's interviews as study.json stands, each a sentence: a
+    "leak_terms" entry, ignoring case, in something the interviewer is given to say (the purpose,
+    a goal, a topic's opener or its area), and a persona that "segments" leaves with no topic.
+    Empty for a study of another type. The scaffold, the plan and every command that starts an
+    interview ask this, so an archived study still loads. A runner that does not exist is said
+    by runners.get(), which exits, as for every study."""
+    if cfg["type"] != "interview":
+        return []
+    held, out = cfg["interview"], []
+    said = [("interview.about", "it", held["about"])]
+    said += [(f"goal {g['id']}", 'its "learn"', g["learn"]) for g in held["goals"]]
+    said += [(f"topic {t['id']}", f"its {part}", t[part]) for t in held["topics"] for part in ("opener", "area")]
+    for where, what, text in said:
+        found = next((term for term in cfg["leak_terms"] if term.lower() in text.lower()), None)
+        if found:
+            out.append(f'{where}: {what} holds the leak term "{found}". The interviewer would say it. Reword it.')
+    for p in cfg["personas"]:
+        if not guide(cfg, p["id"])["topics"]:
+            out.append(f'persona {p["id"]} (segment "{p.get("segment", "")}") is left with no topic: every topic is '
+                       'limited to other segments. Add its segment to a topic\'s "segments", or take the persona '
+                       "out.")
+    return out
+
+
 def concept_kind(c: dict) -> str:
     return c.get("kind", "site")
 
@@ -1991,7 +2480,10 @@ def ranked(cfg: dict) -> bool:
 
 def unit_order(cfg: dict, pid: str) -> list[str]:
     """The order a persona goes through the study's units in: its review order (review_order()),
-    or the tasks as study.json lists them, which may build on each other."""
+    the tasks as study.json lists them, which may build on each other, or the topics of its own
+    guide in the order written (guide())."""
+    if cfg["type"] == "interview":
+        return [t["id"] for t in guide(cfg, pid)["topics"]]
     units = study_units(cfg)
     return units if cfg["type"] == "usability" else review_order(cfg, pid, units)
 
@@ -2145,14 +2637,19 @@ def model_keys(cfg: dict) -> list[str]:
 def limits_for(cfg: dict, role: str = "panellist", key: str | None = None) -> dict:
     """{"minutes", "budget_usd"} in force: limits.run for a panellist run, with that model key's
     limits.overrides merged over it, where a usability run's "minutes" default to what its tasks
-    permit (usability_minutes()); the job's share of limits.synthesis (synthesis_share) for
+    permit (usability_minutes()) and an interview's participant has INTERVIEW_RUN where
+    study.json gives none; the job's share of limits.synthesis (synthesis_share) for
     an analyst or writer job; limits.followup for "followup", what each run asked a follow-up
-    question may use for that question, apart from its run limits."""
+    question may use for that question, apart from its run limits, and limits.debrief for
+    "debrief" the same way, for each side of a debrief; limits.interviewer for "interviewer",
+    each interviewer over its whole interview; and for "turn" {"minutes"} alone, limits.turn:
+    the most one turn of either side of a conversation may take."""
     limits = cfg.get("limits") or {}
-    if role == "followup":
-        return {**DEFAULT_LIMITS["followup"], **limits.get("followup", {})}
+    if role in ("followup", "debrief", "interviewer", "turn"):
+        return {**DEFAULT_LIMITS[role], **limits.get(role, {})}
     if role == "panellist":
-        timed = {"minutes": usability_minutes(cfg)} if cfg.get("type") == "usability" else {}
+        timed = ({"minutes": usability_minutes(cfg)} if cfg.get("type") == "usability"
+                 else INTERVIEW_RUN if cfg.get("type") == "interview" else {})
         return {**DEFAULT_LIMITS["run"], **timed, **limits.get("run", {}), **limits.get("overrides", {}).get(key, {})}
     if role in JOB_ROLES:
         return synthesis_share(cfg)
@@ -2191,7 +2688,8 @@ def synthesis_jobs(cfg: dict) -> list[dict]:
     ids = sorted((p["id"] for p in cfg["personas"]),
                  key=lambda pid: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", pid)])
     if len(ids) < n:
-        _fail(f"synthesis.analysts is {n}, but the study has {len(ids)} persona(s) to split between them")
+        _fail(f"synthesis.analysts is {n}, but the study has {plural(len(ids), 'persona')} to split between them"
+              + (": set it to 1, or add a persona" if ids else ": add its personas first"))
     cut = math.ceil(len(ids) / n)
     entry = {role: model_entry(syn[role], cfg.get("runner"), f"synthesis.{role}") if role in syn
              else dict.fromkeys(ENTRY_FIELDS) for role in JOB_ROLES}
@@ -2269,19 +2767,53 @@ def persona_file(study_dir: Path, p: dict, key: str, replicate: int = 1) -> Path
     return Path(study_dir) / "panel" / "personas" / f"{name}.md"
 
 
-def run_entry(study_dir: Path, p: dict, e: dict, replicate: int = 1) -> dict:
-    """The runs.json entry of persona p on model entry e, before anything has started the run."""
+def run_entry(study_dir: Path, p: dict, e: dict, replicate: int = 1, interview: bool = False) -> dict:
+    """The runs.json entry of persona p on model entry e, before anything has started the run.
+    interview: the entry of the participant of an interview, whose file is its turn log and
+    which starts in a room of its own (module docstring, "Interview entries")."""
     rid = run_id(p["id"], e["key"], replicate)
-    return {"run": rid, "persona": p["id"], "name": p["name"], "segment": p.get("segment", ""), **e,
-            "replicate": replicate, "role": "panellist",
-            "file": str(persona_file(study_dir, p, e["key"], replicate).relative_to(study_dir)),
+    entry = {"run": rid, "persona": p["id"], "name": p["name"], "segment": p.get("segment", ""), **e,
+             "replicate": replicate, "role": "panellist"}
+    if interview:
+        return {**entry, "interview": rid, "file": f"{INTERVIEWS}/{rid}.jsonl", "prompt": f"prompts/{rid}.md",
+                "workdir": f"{ROOMS}/{rid}"}
+    return {**entry, "file": str(persona_file(study_dir, p, e["key"], replicate).relative_to(study_dir)),
             "prompt": f"prompts/{rid}.md"}
 
 
+def interviewer_id(run: str) -> str:
+    """The id of the entry of the interviewer of a run."""
+    return f"interviewer-{run}"
+
+
+def interview_of(entry: dict) -> str:
+    """The run id of the conversation an entry is a side of: its "interview", or for a finished
+    run that is being debriefed, which has none, the run itself. It names the turn log."""
+    return entry.get("interview") or entry["run"]
+
+
+def interviewer_entry(cfg: dict, participant: dict) -> dict:
+    """The runs.json entry of the interviewer of an interview, from its participant's entry,
+    before anything has started it (module docstring, "Interview entries")."""
+    rid = participant["run"]
+    return {"run": interviewer_id(rid), "role": "interviewer", "interview": rid, "persona": participant["persona"],
+            "name": f"Interviewer of {rid}", "segment": participant["segment"], **cfg["interview"]["interviewer"],
+            "file": participant["file"], "prompt": f"prompts/{interviewer_id(rid)}.md",
+            "workdir": f"{INTERVIEWER_DIR}/{rid}"}
+
+
 def planned_runs(cfg: dict) -> list[dict]:
-    """Every panellist run study.json plans, in the order init_study.py writes them to runs.json."""
-    return [run_entry(cfg["_dir"], p, e, rep) for p in cfg["personas"] for e in model_entries(cfg)
-            for rep in range(1, cfg["replicates"] + 1)]
+    """Every panellist run study.json plans, in the order init_study.py writes them to runs.json.
+    In an interview study they are the participants' entries: planned_interviewers() has the
+    others."""
+    return [run_entry(cfg["_dir"], p, e, rep, cfg["type"] == "interview") for p in cfg["personas"]
+            for e in model_entries(cfg) for rep in range(1, cfg["replicates"] + 1)]
+
+
+def planned_interviewers(cfg: dict) -> list[dict]:
+    """The interviewer's entry of every interview study.json plans, in the order of
+    planned_runs(). Empty for a study of another type."""
+    return [interviewer_entry(cfg, e) for e in planned_runs(cfg)] if cfg["type"] == "interview" else []
 
 
 def render_template(name: str, **values) -> str:
@@ -2343,8 +2875,8 @@ def read_runs(study_dir: Path) -> list[dict]:
         raise SystemExit(f"No runs.json in {path.parent}: run init_study.py first")
     runs = json.loads(path.read_text())
     for r in runs:
-        if r.get("role") in JOB_ROLES:  # written whole by launch.py, with none of a panellist run's fields
-            continue
+        if r.get("role", "panellist") != "panellist":  # a job or an interviewer: written whole, with none of
+            continue                                   # a panellist run's fields to fill in
         r.setdefault("key", r.get("model"))
         for k, v in RUN_DEFAULTS.items():
             r.setdefault(k, v)
@@ -2403,10 +2935,16 @@ def file_hash(study_dir: Path, path: Path) -> str | None:
         return None
 
 
-def workdir(study_dir: Path, role: str) -> Path:
-    """The directory a run's or job's process works in: panel/ for a panellist, the study
-    directory for an analyst or the writer."""
-    return Path(study_dir) / "panel" if role == "panellist" else Path(study_dir)
+def workdir(study_dir: Path, of: dict | str) -> Path:
+    """The directory a run's or job's process works in. of is its runs.json entry, or a role.
+    An entry that names a "workdir" works there, as each side of an interview does, in a folder
+    of its own. Any other works where its role does, which is all a role alone can say: panel/
+    for a panellist, the study directory for an analyst or the writer."""
+    if isinstance(of, dict):
+        if of.get("workdir"):
+            return Path(study_dir) / of["workdir"]
+        of = of.get("role") or "panellist"
+    return Path(study_dir) / "panel" if of == "panellist" else Path(study_dir)
 
 
 def sessions_of(entry: dict) -> list[str]:
@@ -2420,7 +2958,7 @@ def held_sessions(study_dir: Path, runs: list[dict], now: float) -> list[dict]:
     """The sessions that runs.json entries record and that their harnesses still hold, neither
     purged nor lost nor found unsaved, each as an entry of the earlier-sessions record (module docstring)."""
     return [{"run": e["run"], "runner": e["runner"], "session": session,
-             "workdir": str(workdir(study_dir, e.get("role") or "panellist")), "replaced": round(now)}
+             "workdir": str(workdir(study_dir, e)), "replaced": round(now)}
             for e in runs if e.get("runner")
             for session in sessions_of(e)
             if session not in {**(e.get("purged") or {}), **(e.get("lost") or {}), **(e.get("unsaved") or {})}]
@@ -2490,6 +3028,16 @@ def asking(entry: dict) -> dict | None:
     or may have ended with no launcher alive to settle it. The run's "state" does not show it."""
     last = (entry.get("attempts") or [None])[-1]
     return last if last and last.get("kind") == "followup" and last.get("ended") is None else None
+
+
+def open_attempt(entry: dict) -> dict | None:
+    """The attempt of an entry that leaves its "state" alone and has no end in runs.json yet, if
+    there is one: the last attempt, of kind followup, turn or debrief. Its process may be at
+    work, or may have ended with no launcher alive to settle it. For an entry of a conversation,
+    which has no "state", this alone says that a process of it may be alive: an entry with no
+    attempt is never in flight. asking() is the same for a follow-up alone."""
+    last = (entry.get("attempts") or [None])[-1]
+    return last if last and last.get("kind") in ("followup", *TURN_KINDS) and last.get("ended") is None else None
 
 
 def as_text(content: bytes) -> str:
@@ -2601,16 +3149,20 @@ FILE_RE = re.compile(r"^(?P<pid>[^-]+)-(?P<slug>.+)--(?P<model>[^-]+)(?:-r(?P<re
 
 
 def unit_nouns(cfg: dict) -> tuple[str, str]:
-    """Singular and plural of what a run in this study works through: concept(s) or task(s)."""
+    """Singular and plural of what a run in this study works through: concept(s), task(s) or
+    topic(s)."""
     t = STUDY_TYPES[cfg["type"]]
     return t["unit"], t["units"]
 
 
 def study_units(cfg: dict) -> list[str]:
     """The units every run must cover, in section-heading form: the concept labels of a review,
-    or the task ids of a usability study in the order study.json lists them."""
+    the task ids of a usability study in the order study.json lists them, or every topic id of
+    an interview study's guide. One persona's interview may have fewer: guide()."""
     if cfg["type"] == "usability":
         return [t["id"] for t in cfg["tasks"]]
+    if cfg["type"] == "interview":
+        return [t["id"] for t in cfg["interview"]["topics"]]
     return list(label_map(cfg))
 
 
@@ -3190,8 +3742,11 @@ def persona_files(study_dir: Path) -> list[tuple[Path, dict | None]]:
 
 def load_runs(study_dir: Path, cfg: dict) -> list[dict]:
     """Every persona file in the study, parsed (read_persona()): of those persona_files() lists,
-    the ones that can be read as their run's own. For the runs.json entries, see read_runs()."""
+    the ones that can be read as their run's own. For the runs.json entries, see read_runs().
+    An interview study has no persona file, so none: run_records() reads its turn logs."""
     study_dir = Path(study_dir)
+    if cfg["type"] == "interview":
+        return []
     seg = {p["id"]: p.get("segment", "") for p in cfg["personas"]}
     runs = []
     for path, entry in persona_files(study_dir):
@@ -3202,7 +3757,7 @@ def load_runs(study_dir: Path, cfg: dict) -> list[dict]:
     return runs
 
 
-def run_records(study_dir: Path, cfg: dict) -> list[dict]:
+def run_records(study_dir: Path, cfg: dict, held: bool = False) -> list[dict]:
     """Every expected panellist run, with how far it got. Works on live and archived studies.
 
     Expected runs are the panellist entries of runs.json, then any persona file no entry names;
@@ -3211,9 +3766,26 @@ def run_records(study_dir: Path, cfg: dict) -> list[dict]:
     has no file, or none that can be read as its own), "progress" (run_progress), "state"
     (run_state) and "unsettled" (whether the file was read as it stood before a follow-up that
     is not settled: read_persona()).
+
+    In an interview study the expected runs are the participants' entries, or without a
+    runs.json the interviews study.json plans. A record has the same keys, with "parsed" None
+    and "unsettled" false, and one more: "turns", the records of the run's turn log. "progress"
+    is interview_progress() and "state" interview_state(). held is whether a launcher has the
+    study, which is what makes an entry's "carried" count (carried()): the caller asks the study
+    lock, a launcher passes true, and an archived round has none.
     """
     study_dir = Path(study_dir)
     seg = {p["id"]: p.get("segment", "") for p in cfg["personas"]}
+    if cfg["type"] == "interview":
+        entries = read_runs(study_dir) if (study_dir / "runs.json").exists() else planned_runs(cfg)
+        out = []
+        for e in (e for e in entries if e["role"] == "panellist"):
+            turns = read_turns(study_dir, e["run"])
+            out.append({"run": e["run"], "pid": e["persona"], "model": e["key"], "replicate": e["replicate"],
+                        "segment": seg.get(e["persona"], ""), "parsed": None, "turns": turns,
+                        "progress": interview_progress(cfg, e, turns),
+                        "state": interview_state(turns, carried(e, held)), "unsettled": False})
+        return out
     files = {r["file"]: r for r in load_runs(study_dir, cfg)}
     found = []  # (pid, key, replicate, run id, recorded state, parsed file)
     if (study_dir / "runs.json").exists():
@@ -3229,6 +3801,306 @@ def run_records(study_dir: Path, cfg: dict) -> list[dict]:
                     "parsed": parsed, "progress": prog, "state": run_state(prog, recorded),
                     "unsettled": bool(parsed and parsed["unsettled"])})
     return out
+
+
+# ---------------------------------------------------------------- the turn log
+
+def turn_log(study_dir: Path, run: str) -> Path:
+    """Where the turn log of an interview is (module docstring, "The turn log"), in a live study
+    and in an archived round alike."""
+    return Path(study_dir) / INTERVIEWS / f"{run}.jsonl"
+
+
+def _settled(data: bytes) -> int:
+    """How much of a turn log, given as its bytes, is on record: all of it up to the end of its
+    last finished settlement. What a killed writer left after that is not: a last line with no
+    line break, and before it the records of a settlement that never got its last one, each a
+    whole line marked "more": true (module docstring, "The turn log")."""
+    keep = data.rfind(b"\n") + 1
+    while keep:
+        start = data.rfind(b"\n", 0, keep - 1) + 1
+        try:
+            record = json.loads(data[start:keep - 1])
+        except ValueError:
+            break
+        if not (isinstance(record, dict) and record.get("more") is True):
+            break
+        keep = start
+    return keep
+
+
+def _turn_lines(study_dir: Path, run: str) -> tuple[list[str], str]:
+    """The lines of a turn log that are on record, and what follows them: the unfinished end a
+    writer was killed in the middle of (_settled()), "" when the log ends as it should. No log
+    reads as no line."""
+    try:
+        data = turn_log(study_dir, run).read_bytes()
+    except FileNotFoundError:
+        return [], ""
+    keep = _settled(data)
+    return data[:keep].decode("utf-8", "replace").split("\n")[:-1], data[keep:].decode("utf-8", "replace")
+
+
+def read_turns(study_dir: Path, run: str) -> list[dict]:
+    """The records of an interview's turn log, in order, [] when it has none. What a killed
+    writer left at its end is left out (turn_torn()): a last line with no line break, and the
+    records of a settlement whose last record never reached the disk, so a settlement is read
+    whole or not at all. A blank line is passed over.
+
+    This is where a log that is not as a launcher writes one is recognised, for every reader at
+    once. A line that is no JSON object with a "t", and a record that is not as a launcher
+    writes one (_unlike(): of no known type, or with a field of another kind than a launcher
+    writes), is given as {"t": "unread", "line": its text}, with the object under "record" when
+    the line was one. A line is judged as the object it holds and as nothing else: one that is
+    itself of the type "unread" is of no type a launcher writes, so it is set aside whole, and
+    what it has under "record" is never read as a record. No reading of the log counts such a
+    record, so whatever is worked out from a log (its state, its progress, the position and
+    what stands in its way) is worked out from its well-formed records alone and never fails
+    on a damaged one, and turn_lacking() names each."""
+    records = []
+    for line in _turn_lines(study_dir, run)[0]:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            record = None
+        if not (isinstance(record, dict) and isinstance(record.get("t"), str)):
+            records.append({"t": "unread", "line": line})
+        elif _unlike(record, 0):
+            records.append({"t": "unread", "line": line, "record": record})
+        else:
+            records.append(record)
+    return records
+
+
+def turn_torn(study_dir: Path, run: str) -> bool:
+    """Whether a turn log ends in a line or a settlement that was never finished, which
+    read_turns() leaves out and the next append_turns() cuts off: a launcher was killed while
+    it wrote."""
+    return bool(_turn_lines(study_dir, run)[1])
+
+
+def append_turns(study_dir: Path, run: str, records: list[dict]):
+    """Add records to an interview's turn log, making the log and its folder when they are not
+    there. The records are one settlement: every one but the last is written with "more": true,
+    and all go in a single write to a descriptor opened for append, which is then synced. A
+    launcher killed at any moment, in the middle of that write too, so leaves every record of
+    the settlement or, to every reader, none: records marked "more" with nothing after them
+    are not read (read_turns()). What an earlier writer left unfinished is cut off first, a
+    torn line and such records alike, so that the new settlement follows the last one that is
+    whole. Only a launcher that holds the study lock calls this.
+
+    A record that is not as TURN_FIELDS has its type is never written, and so none of the type
+    "unread", which is a reader's name for a record it set aside and no type of a record: that
+    is a mistake of the code that made it and no damage to a log, and read_turns() would set
+    the record aside, so no reading of the log would count it."""
+    wrong = [said for i, r in enumerate(records, start=1) for said in _unlike(r, i)]
+    if wrong:
+        raise ValueError(f"A record for the turn log of {run} is not as a launcher writes one, and nothing was "
+                         f"written. Of the records to add: {' '.join(wrong)}")
+    path = turn_log(study_dir, run)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = "".join(json.dumps({**r, "more": True} if r is not records[-1] else r) + "\n" for r in records).encode()
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC, 0o644)
+    try:
+        size = os.fstat(fd).st_size
+        keep = _settled(os.pread(fd, size, 0))
+        if keep != size:
+            os.ftruncate(fd, keep)
+        while data:  # one write, unless the system took only a part of it
+            data = data[os.write(fd, data):]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _of_kind(value, kind) -> bool:
+    """Whether a value read from a turn log is of the kind the format gives its field
+    (TURN_FIELDS, TURN_SOMETIMES): a type, or any type of a tuple, where true and false are no
+    numbers; [kind], a list of values of that kind; a list of several kinds, a list of exactly
+    that many values, each of its kind; {kind: kind}, an object whose keys and values are of
+    those kinds."""
+    if isinstance(kind, list):
+        kinds = kind * len(value) if len(kind) == 1 and isinstance(value, list) else kind
+        return isinstance(value, list) and len(value) == len(kinds) and all(map(_of_kind, value, kinds))
+    if isinstance(kind, dict):
+        [(key, held)] = kind.items()
+        return isinstance(value, dict) and all(_of_kind(k, key) and _of_kind(x, held) for k, x in value.items())
+    return isinstance(value, kind) and (kind is bool or not isinstance(value, bool))
+
+
+def _unlike(r: dict, i: int) -> list[str]:
+    """What makes one record, the i-th of its log, unlike any a launcher writes, each a sentence:
+    it is of no known type; it lacks a field every launcher writes on a record of its type
+    (TURN_FIELDS, and "at" on every one); it has another kind of value than a launcher writes in
+    a field it writes only sometimes (TURN_SOMETIMES). A field is lacking when it is not there,
+    or holds another kind of value than a launcher writes, a side that is none of SIDES, a
+    "halt" with a state that is none of HALTS and an "end-offered" that names no topic among
+    them. [] for a record every reader can count on.
+
+    The record is judged as it stands: the object a line of a log holds (read_turns()), or one
+    about to be written (append_turns()). "unread" is no type a launcher writes, so a record
+    that calls itself that is of no known type, whatever it holds under "record"."""
+    if r["t"] not in TURN_TYPES:
+        return [f"Record {i} is not a record of a known type."]
+    wanted = {"at": _NUMBER, **TURN_FIELDS[r["t"]]}
+    lacking = [f for f, kind in wanted.items() if not _of_kind(r.get(f), kind)]
+    lacking += ["side"] if "side" not in lacking and r.get("side", SIDES[0]) not in SIDES else []
+    lacking += ["state"] if r["t"] == "halt" and "state" not in lacking and r["state"] not in HALTS else []
+    lacking += ["unopened"] if r["t"] == "end-offered" and r.get("unopened") == [] else []
+    odd = [f for f, kind in {**TURN_SOMETIMES[""], **TURN_SOMETIMES.get(r["t"], {})}.items()
+           if f in r and f not in wanted and f not in lacking and not _of_kind(r[f], kind)]
+    out = []
+    if lacking:
+        out.append(f"Record {i} ({r['t']}) lacks {listed_keys(lacking)}, which a launcher always writes.")
+    if odd:
+        out.append(f"Record {i} ({r['t']}) holds another kind of value in {listed_keys(odd)} than a launcher "
+                   "writes.")
+    return out
+
+
+def turn_lacking(records: list[dict]) -> list[str]:
+    """The records of a turn log that are not as a launcher writes one, each a sentence (_unlike()
+    has the rules): one of no known type; one that lacks a field every launcher writes on a
+    record of its type; and one with another kind of value than a launcher writes in a field it
+    writes only sometimes. [] for a log every reader can count on: everything that interprets a
+    log (interview.py) reads those fields without asking, and what it reads there is of the kind
+    the format says, down to the items of a list.
+
+    records are as read_turns() gives them, which has judged each line and set aside the ones
+    that are named here ("unread", with the object under "record"). Such a one is named by
+    what that object is unlike a launcher's in, as the line was judged, so the sentences are
+    those of the log as it was written, and each still counts by its place in the log. An
+    "unread" record is always named, whatever it holds: it is unwrapped once and no further, so
+    an object under "record" that is itself called "unread" is of no known type."""
+    out = []
+    for i, r in enumerate(records, start=1):
+        said, aside = _unlike(r, i), r.get("record") if r["t"] == "unread" else None
+        if isinstance(aside, dict) and isinstance(aside.get("t"), str):
+            said = _unlike(aside, i) or said
+        out += said
+    return out
+
+
+def turn_problems(records: list[dict]) -> list[str]:
+    """What is wrong with the form of a turn log, each a sentence, [] for a log that is as a
+    launcher writes one (module docstring, "The turn log"). Records are counted from 1, as the
+    lines of the log are when none is blank. check_runs.py blocks on each. records are as
+    read_turns() gives them, so a settlement a killed writer left unfinished is not among
+    them, and "more" on a record is no problem: every settlement here has its last record.
+
+    A log with a record of no known type, or one that lacks a field a launcher always writes
+    (turn_lacking()), has those sentences and no other: what follows here, and every other
+    reading of the log, counts on the fields."""
+    out, kind = turn_lacking(records), (records[0].get("kind") if records else None)
+    if out:
+        return out
+    if records and records[0]["t"] != "start":
+        out.append('It does not begin with a "start" record.')
+
+    due = ("question", 1)  # questions and answers alternate, and their numbers run 1, 1, 2, 2
+    for i, r in enumerate(records, start=1):
+        if r["t"] not in ("question", "answer"):
+            continue
+        if (r["t"], r.get("n")) != due:
+            out.append(f"Record {i} is {r['t']} {r.get('n')} where {due[0]} {due[1]} was due: turns must "
+                       "alternate, and none may skip or repeat a number.")
+            break
+        due = ("answer", due[1]) if r["t"] == "question" else ("question", due[1] + 1)
+
+    opened = [i for i, r in enumerate(records) if r["t"] in ("card", "ready")]
+    first = next((i for i, r in enumerate(records) if r["t"] == "question"), None)
+    if kind == "debrief":
+        if opened:
+            out.append("It has a situation card or a \"Ready\", and a debrief has neither.")
+    else:
+        if len(opened) > 1:
+            out.append(f"It has {len(opened)} records of a situation card or a \"Ready\", and an interview has one.")
+        if first is not None and not (opened and opened[0] < first):
+            out.append("Its first question comes before the participant's situation card or \"Ready\".")
+
+    ends = [i for i, r in enumerate(records) if r["t"] == "end"]
+    if len(ends) > 1:
+        out.append(f'It has {len(ends)} "end" records, and an interview ends once.')
+    if ends and ends[0] != len(records) - 1:
+        out.append(f'Record {ends[0] + 2} follows the "end" record, and nothing may.')
+    answers = sum(r["t"] == "answer" for r in records)
+    if ends and records[ends[0]].get("exchanges") != answers:
+        out.append(f'Its "end" record says "exchanges": {json.dumps(records[ends[0]].get("exchanges"))}, and it has '
+                   f"{plural(answers, 'answer')}.")
+
+    seen = {}
+    for i, r in enumerate(records, start=1):
+        if r.get("side") is None or r.get("attempt") is None:
+            continue
+        who = (r["side"], r["attempt"])
+        if who in seen:
+            out.append(f"Records {seen[who]} and {i} are both of attempt {r['attempt']} of the {r['side']}: an "
+                       "attempt is recorded once.")
+        seen.setdefault(who, i)
+    return out
+
+
+def carried(entry: dict, held) -> bool:
+    """Whether a launcher carries the conversation an entry belongs to: the entry says that one
+    took it up ("carried"), and a launcher has the study (held: what the caller found of the
+    study lock, and true to a launcher asking of its own study). This is the one rule for it. A
+    launcher that was killed never took "carried" off, so with no launcher the mark is what it
+    left behind, and the conversation reads as its log reads: partial, or pending with no turn
+    on record, until the next command puts it down. Whether a process of it is still alive is
+    another question, asked of the attempts (open_attempt())."""
+    return bool(entry.get("carried")) and bool(held)
+
+
+def interview_state(records: list[dict], carried: bool) -> str:
+    """A conversation's lifecycle state, from its turn log and whether a launcher carries it
+    (carried(), never an entry's "carried" by itself), first match first: "done" with an "end"
+    record, whatever else is on record; "running" while it is carried, between two turns too;
+    the state of the last "halt" (HALTS) when no "resume" follows it; "partial" with a card, a
+    "Ready", a question or an answer on record; else "pending", which a log of nothing but
+    "start", "lost" and "resume" records is too. A "halt" with no state of HALTS is no launcher's
+    (turn_lacking()) and decides nothing."""
+    if any(r["t"] == "end" for r in records):
+        return "done"
+    if carried:
+        return "running"
+    last = next((r for r in reversed(records) if r["t"] in ("halt", "resume")), None)
+    if last and last["t"] == "halt" and last.get("state") in HALTS:
+        return last["state"]
+    return "partial" if any(r["t"] in SPOKEN for r in records) else "pending"
+
+
+def extensions(records: list[dict]) -> dict[str, int]:
+    """The allowances "resume --extend" has given each side of a conversation, {side: how many},
+    by its turn log, which is the truth of it: one for each "resume" record whose "extended"
+    names the side, and what the "start" record's "extended" says the side brought to a log
+    that began again (a fresh start gives no allowance back, and takes none away), which
+    counts one that the command that began the log gave, as "resume --extend" does when it
+    is what finds that the log must begin again. "extended"
+    on a runs.json entry is the launcher's copy of this, which it brings level before it
+    queues a turn (launch.Supervisor.level()): a launcher that died between the record and
+    runs.json so loses no grant, and none is counted twice."""
+    start = next((r for r in records if r["t"] == "start"), {})
+    brought = start.get("extended") if isinstance(start.get("extended"), dict) else {}
+    return {side: (brought.get(side) or 0) + sum(r["t"] == "resume" and r.get("extended") == side for r in records)
+            for side in SIDES}
+
+
+def interview_progress(cfg: dict, entry: dict, records: list[dict]) -> dict:
+    """How far an interview has got, from its turn log, with the keys run_progress() has: "units"
+    are the topic ids of the persona's guide, "written" and "scored" alike the ones a question
+    has carried, and "has_final" and "complete" alike whether the log has an "end" record. An
+    interview that ended with a topic unopened is complete: the unopened topic is a finding.
+    Two keys more: "exchanges", the answers on record, and "cap", the most the interview may
+    have."""
+    held = guide(cfg, entry["persona"])
+    carried = {r.get("topic") for r in records if r["t"] == "question"}
+    opened = [t["id"] for t in held["topics"] if t["id"] in carried]
+    ended = any(r["t"] == "end" for r in records)
+    return {"units": [t["id"] for t in held["topics"]], "written": opened, "scored": list(opened),
+            "has_final": ended, "complete": ended, "exchanges": sum(r["t"] == "answer" for r in records),
+            "cap": held["turns"]}
 
 
 # ---------------------------------------------------------------- secrets and evidence

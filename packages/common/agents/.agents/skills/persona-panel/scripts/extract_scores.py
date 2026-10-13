@@ -24,6 +24,8 @@ A run whose latest follow-up question is not settled yet is read as it stood bef
 (panel_lib.read_persona), so nothing a follow-up changed reaches a CSV before a launcher has
 accepted it. One line names each such run.
 
+An interview study has no persona file and no score, and is refused in one line.
+
 A usability study gets two files more, and three columns more in runs.csv, so that analyze.py
 still reads nothing but analysis/*.csv:
 
@@ -173,6 +175,10 @@ def main():
     ap.add_argument("study_dir", type=Path)
     cfg = pl.load_study(ap.parse_args().study_dir)
     sd = cfg["_dir"]
+    if cfg["type"] == "interview":
+        raise SystemExit("An interview study has no scores, rankings or sections for extract_scores.py to extract: "
+                         f"once check_runs.py {sd} passes, its transcripts go to the analysts with launch.py {sd} "
+                         "run --role analyst.")
     labels, unit = pl.study_units(cfg), pl.unit_nouns(cfg)[0]
     keys = pl.factor_keys(cfg)
     runs = pl.run_records(sd, cfg)

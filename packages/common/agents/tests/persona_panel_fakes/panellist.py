@@ -104,14 +104,22 @@ DOCUMENT = "I could not write the file, so here is the document.\n\n# Findings\n
 
 
 def log(**event):
+    """Add one event to $FAKE_CLI_LOG, as a line, in a single write to a descriptor opened for
+    append: a line with a whole prompt in it is longer than a buffer, and written in parts it
+    could be cut through by the line of a process that logs at the same moment."""
     if os.environ.get("FAKE_CLI_LOG"):
-        with open(os.environ["FAKE_CLI_LOG"], "a") as f:
-            f.write(json.dumps(event) + "\n")
+        fd = os.open(os.environ["FAKE_CLI_LOG"], os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, (json.dumps(event) + "\n").encode())
+        finally:
+            os.close(fd)
 
 
 def events():
+    """The events logged so far. What follows the last line break is a line still being written:
+    it is left for the next look."""
     path = os.environ.get("FAKE_CLI_LOG")
-    lines = Path(path).read_text().splitlines() if path and Path(path).exists() else []
+    lines = Path(path).read_text().split("\n")[:-1] if path and Path(path).exists() else []
     return [e for e in map(json.loads, lines) if "event" in e]
 
 
@@ -212,6 +220,43 @@ def block(until, what):
             sys.stderr.write(f"fake CLI: gave up waiting for {what}\n")
             sys.exit(3)
         time.sleep(0.01)
+
+
+def process_step(verb, arg, home, run, cut_off, end):
+    """Carry out a step that is about the process and not about what it writes: wait, starts,
+    deaf, spawn, hang, end, exit and fail, as the module docstring has them. False for any other
+    step. home is $FAKE_PANEL, run what the events are logged under, cut_off the lines of the
+    recorded run that was cut off, and end(mode) what prints a recorded run and exits. talker.py
+    plays these steps through here too, so a step means the same on both sides of an interview."""
+    if verb == "wait":
+        log(event="waiting", run=run, gate=arg)
+        block((home / "go" / arg).exists, f"gate {arg}")
+    elif verb == "starts":
+        block(lambda: sum(e["event"] == "start" for e in events()) >= int(arg), f"{arg} runs to start")
+    elif verb == "deaf":
+        signal.signal(signal.SIGTERM, lambda *_: log(event="term", run=run))
+    elif verb == "spawn":  # the last argument does nothing: it marks the process as this test's
+        left = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(600)", str(home)], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=lambda: signal.signal(signal.SIGTERM, signal.SIG_IGN))
+        log(event="spawn", run=run, pid=left.pid)
+    elif verb == "hang":
+        sys.stdout.write("".join(cut_off[1:]))
+        sys.stdout.flush()
+        time.sleep(600)
+    elif verb == "end":
+        end(arg)
+    elif verb == "exit":
+        log(event="end", run=run, pid=os.getpid(), code=int(arg))
+        sys.exit(int(arg))
+    elif verb == "fail":
+        sys.stderr.write(arg + "\n")
+        log(event="end", run=run, pid=os.getpid(), code=1)
+        sys.exit(1)
+    else:
+        return False
+    return True
 
 
 def play(cli, session, resumed, prompt, recording, modes, lost):
@@ -318,34 +363,8 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
             file.write_text(whole[:whole.rindex("### Concept ")])
         elif verb == "reply":
             said.append(DOCUMENT)
-        elif verb == "wait":
-            log(event="waiting", run=run, gate=arg)
-            block((home / "go" / arg).exists, f"gate {arg}")
-        elif verb == "starts":
-            block(lambda: sum(e["event"] == "start" for e in events()) >= int(arg), f"{arg} runs to start")
         elif verb == "stubborn":
             signal.signal(signal.SIGTERM, on_term)
-        elif verb == "deaf":
-            signal.signal(signal.SIGTERM, lambda *_: log(event="term", run=run))
-        elif verb == "spawn":  # the last argument does nothing: it marks the process as this test's
-            left = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(600)", str(home)], stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                preexec_fn=lambda: signal.signal(signal.SIGTERM, signal.SIG_IGN))
-            log(event="spawn", run=run, pid=left.pid)
-        elif verb == "hang":
-            sys.stdout.write("".join(cut_off[1:]))
-            sys.stdout.flush()
-            time.sleep(600)
-        elif verb == "end":
-            end(arg)
-        elif verb == "exit":
-            log(event="end", run=run, pid=os.getpid(), code=int(arg))
-            sys.exit(int(arg))
-        elif verb == "fail":
-            sys.stderr.write(arg + "\n")
-            log(event="end", run=run, pid=os.getpid(), code=1)
-            sys.exit(1)
-        else:
+        elif not process_step(verb, arg, home, run, cut_off, end):
             raise SystemExit(f"fake CLI: unknown step {step!r}")
     end("ok")

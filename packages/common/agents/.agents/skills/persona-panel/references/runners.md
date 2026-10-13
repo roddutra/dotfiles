@@ -121,6 +121,8 @@ The plan lists the browsing gaps only for a study whose panellists can browse on
 - **Session id.** Known once the process prints its first line, before any model call. A run killed earlier has no session, and `resume` starts it afresh only when it wrote nothing.
 - **Usage after a kill.** Read from the session file, best effort. It can miss the request that was in flight.
 - **Sessions.** `purge-sessions` deletes them with the CLI's own delete command.
+- **Connected apps, web search and image generation are off,** for every run and job of every study type, since 13 October 2026. Until then a Codex session had the tools of every app connected to the signed-in ChatGPT account, web search and image generation, whatever the runner's other options said: the session's own tool list held 293 tools, about 280 of them one for each action of a connected app, and a panellist could have searched the web for the product under review. The runner now passes `--disable apps`, `-c web_search="disabled"` and `--disable image_generation`, and the tool list shows none of the three (verified on codex-cli 0.162.1). A study run on `codex` before that date may hold answers that drew on the first two: `leak_terms` and `check_runs.py` are what would show it.
+- **What a session still has besides its shell** (verified on codex-cli 0.162.1): a script tool whose runtime reaches no file, network or process of its own, and inside it a patch tool that writes files in the working directory, a clock, three tools that read MCP resources, an image viewer and goal tools. Beside it, a tool to wait, tools that ask the user for input, and the sub-agent tools, which the switch for them did not remove.
 
 Not switched off for its runs:
 
@@ -129,6 +131,7 @@ Not switched off for its runs:
 - A run inside a git repository adds a trust entry for that repository to the user's Codex `config.toml`. Keep the study outside a git repository to avoid it.
 - The working directory path, the shell, the date and the timezone are in the model's context.
 - Sub-agent tools and their instructions stay available.
+- A script tool stays available, with the patch tool, the clock and the MCP resource tools inside it, and so do the tools to wait and to ask the user for input (above). No switch was found that removes them cleanly.
 - Commands run in a login shell that sources the user's shell profile. A profile that sets an `AGENT_BROWSER_*` variable would give it back to a browsing run's commands, and the session would restart blank (inferred, not run).
 - With browsing on, what every runner leaves open ([Browser sessions](#browser-sessions)), and the network: the run's shell can reach the internet, the pages under review without the browser and its policy, and any Unix socket the user can.
 - With browsing on, `agent-browser` commands that never reach a session are not refused. One lists the names of the user's own browser profiles.
@@ -242,6 +245,7 @@ The harness enforces what it has a switch for:
 | Git status and recent commit messages | excluded | none seen in context | none seen in context |
 | Reading files | working directory only | whole disk | working directory only, by the guard |
 | Writing files | working directory only | working directory and `/tmp`, or the working directory alone when the study browses | working directory only, by the guard |
+| Connected apps, web search, image generation | none: no MCP server loads, and no such tool exists | switched off (`--disable apps`, `web_search="disabled"`, `--disable image_generation`) | none: no MCP server loads, and no such tool exists |
 | Shell commands | none, or the panellist's `agent-browser` commands when the study browses | any, in a sandbox with no network, or with all of it when the study browses | none, or one `agent-browser` command at a time when the study browses, by the guard |
 | Something not allowed | denied at once, nothing waits for approval | fails at once, nothing waits for approval | refused at once, nothing waits for approval |
 

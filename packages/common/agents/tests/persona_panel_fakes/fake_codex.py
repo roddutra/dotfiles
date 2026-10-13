@@ -26,7 +26,9 @@ Steering, through the environment:
                    stderr), and a run ends its turn having had every shell command refused
                    the same way (codex/nested.jsonl)
     FAKE_PANEL     a directory with a plan: the fake then plays whole panellist runs and analyst
-                   and writer jobs, writing their files and logging events (see panellist.py)
+                   and writer jobs, writing their files and logging events (see panellist.py). Started
+                   in a folder of an interview it plays that side of it, one reply a process
+                   (see talker.py)
     FAKE_CLI_LOG   a file that gets one JSON line per invocation: cli, argv, stdin, cwd and
                    model_call (whether the real CLI would have called a model)
 """
@@ -40,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import panellist  # noqa: E402
+import talker  # noqa: E402
 
 RECORDED = Path(__file__).resolve().parent / "codex"
 MODE = os.environ.get("FAKE_CODEX", "ok")
@@ -116,9 +119,9 @@ def main():
             out = out.replace(json.dumps(REPLY)[1:-1], json.dumps(reply)[1:-1])
         return out.replace(json.loads(out.splitlines()[0])["thread_id"], thread)
 
-    panellist.play("codex", thread, bool(resumed), prompt, recording, RUNS,
-                   f"Error: thread/resume: thread/resume failed: no rollout found for thread id {thread} "
-                   "(code -32600)\n")
+    lost = f"Error: thread/resume: thread/resume failed: no rollout found for thread id {thread} (code -32600)\n"
+    talker.play("codex", thread, bool(resumed), prompt, recording, RUNS, lost)
+    panellist.play("codex", thread, bool(resumed), prompt, recording, RUNS, lost)
     name, code = RUNS.get(MODE.split(":")[0], RUNS["ok"])
     finish(code, recording(name), stdin=prompt, model_call=True)
 

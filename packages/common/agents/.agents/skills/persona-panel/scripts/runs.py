@@ -30,6 +30,9 @@ other counts for nothing.
 
 A follow-up question to a finished run goes through followup.py in either mode. In native mode
 it prints the message for you to send to the subagent that "mark" recorded.
+
+An interview study is refused in one line, whatever the command: it has no persona file to read
+a state from, its launcher carries every turn, and "launch.py <study-dir> status" shows it.
 """
 
 from __future__ import annotations
@@ -190,6 +193,9 @@ def main():
     args = ap.parse_args()
     cfg = pl.load_study(args.study_dir)
     sd = cfg["_dir"]
+    if cfg["type"] == "interview":
+        raise SystemExit("An interview study has no persona files for runs.py to track, and its launcher carries "
+                         f"every turn: launch.py {sd} status shows how far each interview has got.")
     states = run_states(sd, cfg)
     if args.cmd in ("next", "mark", "resume") and any(s["runner"] for s in states):
         raise SystemExit(f"This study runs through runners, so launch.py starts, tracks and resumes its runs: "

@@ -10,12 +10,17 @@ process itself starts in does not matter):
     codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules
       -c project_doc_max_bytes=0 -c skills.include_instructions=false -c approval_policy=never
       --disable plugins --disable tool_suggest
+      --disable apps -c web_search="disabled" --disable image_generation
       -s workspace-write [-c sandbox_workspace_write.network_access=true
       -c sandbox_workspace_write.exclude_slash_tmp=true
       -c sandbox_workspace_write.exclude_tmpdir_env_var=true]
+      [--disable shell_tool --disable unified_exec --disable view_image --disable multi_agent
+      --disable sleep_tool --disable browser_use --disable computer_use --disable goals]
       -C <workdir> [-m <model>] [-c model_reasoning_effort=<level>] -
 
-The three sandbox settings are there only for a run that may browse (see "Browsing").
+The three sandbox settings are there only for a run that may browse (see "Browsing"), and the
+eight `--disable` switches of the last group only for a run with "tools": "none" (see "No
+tools").
 
 Resume is the same options followed by `resume <thread id> -`. A bare `codex exec resume <id>`
 inherits nothing: it runs read-only, in the process's own directory, on the default model, and
@@ -40,6 +45,9 @@ What each option is for (all verified unless marked):
   waits for an approval. Already the value under `--ignore-user-config`; set to pin it
   (checked to parse, not run in the validation launch).
 - `--disable plugins --disable tool_suggest`: removes the recommended-plugins block.
+- `--disable apps -c web_search="disabled" --disable image_generation`: no tool of the
+  signed-in account's connected apps, no web search and no image generation (see "What was open
+  until 13 October 2026").
 - `-s workspace-write`: the sandbox. Writes are allowed in the working directory and /tmp,
   the network is off, and the whole disk stays readable. A run that may browse gets the
   network and loses /tmp (see "Browsing" under the decisions).
@@ -80,6 +88,52 @@ Decisions this runner implements:
   before `resume` on every resume. The key is undocumented and an unknown `-c` key is ignored
   without a message, so a renamed key would restore the default unnoticed. The record is
   "System prompt override" in docs/specs/persona-panel-expansion.md.
+
+What was open until 13 October 2026. Every run and job this runner started, of every study
+type, had three things its options did not show: the tools of the apps connected to the
+signed-in ChatGPT account, web search and image generation. `--ignore-user-config` does not
+touch them: they come from the account and the CLI's defaults, not from config.toml. Found and
+closed on 13 October 2026 with codex-cli 0.162.1, by asking a session for the tool list of its
+own script runtime (`ALL_TOOLS` inside the `exec` tool), which is the CLI's list and not the
+model's account of it (verified):
+
+- With the options as they stood: 293 tools. The shell, `apply_patch`, `view_image`, an image
+  generation tool, the goal tools, a `web` search tool, and about 280 tools named `mcp__...`,
+  one for each action of each app the account had connected. A panellist could have searched
+  the web for the product under review, or called a connected app.
+- With `--disable apps`: no `mcp__` tool is listed.
+- With `-c web_search="disabled"` and `--disable image_generation` as well, in the no-tools set
+  below: neither the `web` tool nor the image generation tool is listed. A panellist or a job
+  has no reason to make an image.
+
+All three are now in ISOLATION, so no run or job has any of them, and "isolation_gaps" has no
+line for them: nothing of them stays open. `web_search` is a `-c` key, and an unknown `-c` key
+is ignored without a message, so check() cannot tell if a later CLI renames it: look at
+`ALL_TOOLS` again when the CLI's version changes.
+
+What a session still has besides its shell (verified on codex-cli 0.162.1, listed with the
+shell and the apps off). The model is shown a script tool, `exec`, a tool to `wait`, two that
+ask the user for input (`request_user_input`) and six for sub-agents, which
+`--disable multi_agent` did not remove. Inside the script tool are `apply_patch`, which writes
+files in the working directory, a clock, three tools that read MCP resources, `view_image` and
+the goal tools. The script runtime itself has no `fs`, `process`, `fetch` or `require`: it
+reaches no file, network or process of its own. No switch was found that removes the script
+tool cleanly (`--disable code_mode_host` makes it fail, at the price of a warning item in every
+process, and is not passed), nor the wait, input and sub-agent tools: "isolation_gaps" lists
+them.
+
+No tools (run["tools"] == "none"), checked on 13 October 2026. The CLI has no switch for a
+session without tools. NO_TOOLS turns off the features that give it its shell (`exec_command`
+and `write_stdin`), `view_image`, the goal tools, the sleep tool, the browser and computer
+tools and the sub-agent feature. With it, and with ISOLATION as above, a session asked to run
+`pwd` replies that it cannot (verified), a session asked to read a file in its folder could not
+(verified), and its script runtime lists five tools: `apply_patch`, the clock and the three
+that read MCP resources. What stays is in the paragraph above, less `view_image` and the goal
+tools: above all `apply_patch`, which can still write a file in the working directory, and the
+sub-agent tools, whose sub-agent gets the same set as its parent. So "none" on this runner is
+no shell, no file read and no network, and not literally no tool. A participant and an
+interviewer of an interview run this way, each in a folder that holds nothing. Launch and
+resume were both run with the whole set.
 
 Results. Session id: `thread_id` on the first line, `thread.started`, printed before any model
 call and again on resume. Reply: the text of the last `item.completed` whose item type is
@@ -154,11 +208,17 @@ CLI = "codex"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 ISOLATION = ["--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
              "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
-             "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest"]
+             "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest",
+             "--disable", "apps", "-c", 'web_search="disabled"', "--disable", "image_generation"]
 # What a run that may browse gets on top of the sandbox: a way to the session's socket, and no
 # writable temporary directory to start a session of its own in.
 BROWSING = ["-c", "sandbox_workspace_write.network_access=true", "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
             "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true"]
+# What a run with "tools": "none" gets on top of ISOLATION: every other feature that gives a session
+# a tool to read, run or reach anything with is off (module docstring, "No tools", for what that leaves).
+NO_TOOLS = ["--disable", "shell_tool", "--disable", "unified_exec", "--disable", "view_image",
+            "--disable", "multi_agent", "--disable", "sleep_tool", "--disable", "browser_use",
+            "--disable", "computer_use", "--disable", "goals"]
 BILLING_ENV = ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME"]  # INFERRED: names in the binary
 
 # What a turn.failed message means: (text it contains, outcome, whether the plan's reset time
@@ -196,6 +256,12 @@ def capabilities() -> dict:
         "default_concurrency": 4,
         "provider": "OpenAI",
         "billing_env": list(BILLING_ENV),
+        "interview": True,
+        "no_tools": True,
+        "no_tools_note": "no shell, no file or image reading and no network. That is as few tools as the CLI "
+                         "allows, and not none: a patch tool can still write files in the process's own folder, "
+                         "and a clock, three tools that read MCP resources, a tool to wait, tools that ask the "
+                         "user for input and sub-agent tools with the same set stay.",
         "isolation_gaps": [
             "The user's global instruction file (~/.codex/AGENTS.md) is always loaded, because "
             "keeping it out would mean moving the login.",
@@ -205,6 +271,9 @@ def capabilities() -> dict:
             "The working directory path, the shell, the date and the timezone are always in the "
             "model's context.",
             "Sub-agent tools and their instructions stay available.",
+            "A script tool stays available. It reaches no file, network or process of its own, and "
+            "holds a patch tool that writes files in the working directory, a clock and three tools "
+            "that read MCP resources. So do a tool to wait and tools that ask the user for input.",
             "Commands run in a login shell that sources the user's shell profile.",
             "A run inside a git repository adds a trust entry for that repository to the "
             "user's Codex config.toml.",
@@ -221,8 +290,11 @@ def capabilities() -> dict:
 
 
 def _options(run: dict, workdir) -> list[str]:
+    bare = run.get("tools") == "none"
+    if bare and run.get("browse"):
+        raise ValueError("a run with no tools cannot browse")
     argv = [CLI, "exec", "--json", *ISOLATION, "-s", "workspace-write", *(BROWSING if run.get("browse") else []),
-            "-C", os.path.abspath(workdir)]
+            *(NO_TOOLS if bare else []), "-C", os.path.abspath(workdir)]
     if run.get("model"):
         argv += ["-m", run["model"]]
     effort = launch_effort(run, EFFORTS)
@@ -337,7 +409,8 @@ def parse_result(stdout, stderr, exit_code, session_id=None) -> dict:
 
 def check() -> dict:
     """Installed, signed in, and every launch option still parses. No model call: the last step
-    adds --help to the launch options, which the CLI prints only once the options are accepted."""
+    adds --help to the launch options, which the CLI prints only once the options are accepted.
+    It is run twice: as a run that may browse, and as one with no tools."""
     version = run_cli([CLI, "--version"])
     if version is None:
         return {"ok": False, "message": f"The {CLI} CLI is not on PATH"}
@@ -347,11 +420,12 @@ def check() -> dict:
     said = last_line(err) or last_line(out)  # the answer is the last line: warnings can come before it
     if code != 0:
         return {"ok": False, "message": said or f"{CLI} login status failed"}
-    probe = run_cli([*_options({"model": "default", "effort": EFFORTS[0], "browse": True}, "."), "--help"]) or (
-        1, "", "")
-    if probe[0] != 0:
-        return {"ok": False, "message": next((x for x in probe[2].splitlines() if x.strip()), "")
-                or f"{CLI} refused the launch options"}
+    for options in ({"browse": True}, {"tools": "none"}):
+        probe = run_cli([*_options({"model": "default", "effort": EFFORTS[0], **options}, "."), "--help"]) or (
+            1, "", "")
+        if probe[0] != 0:
+            return {"ok": False, "message": next((x for x in probe[2].splitlines() if x.strip()), "")
+                    or f"{CLI} refused the launch options"}
     return {"ok": True, "message": f"{version[1]}, {said}"}
 
 

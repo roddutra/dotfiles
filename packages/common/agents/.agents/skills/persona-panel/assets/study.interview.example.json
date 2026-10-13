@@ -1,0 +1,157 @@
+{
+  "study": "broker-discovery-interviews",
+  "type": "interview",
+  "context_notes": [
+    "You work in Australia: the lenders, the rules and the money are Australian."
+  ],
+  "runner": "claude",
+  "models": [
+    {
+      "key": "sonnet",
+      "runner": "claude",
+      "model": "sonnet"
+    },
+    {
+      "key": "codex",
+      "runner": "codex"
+    }
+  ],
+  "interview": {
+    "about": "how mortgage brokers run a loan from first enquiry to settlement",
+    "interviewer": {
+      "key": "interviewer",
+      "runner": "claude",
+      "model": "opus"
+    },
+    "goals": [
+      {
+        "id": "G1",
+        "learn": "What takes most of a broker's time and attention in a normal week, and what they have done about it"
+      },
+      {
+        "id": "G2",
+        "learn": "How documents are collected from clients, and what happens when that goes wrong"
+      },
+      {
+        "id": "G3",
+        "learn": "Who decides what software the business pays for, and what was last bought or dropped"
+      }
+    ],
+    "topics": [
+      {
+        "id": "T1",
+        "area": "the working week",
+        "goals": ["G1"],
+        "turns": 6,
+        "opener": "What has taken most of your attention at work over the last couple of weeks?"
+      },
+      {
+        "id": "T2",
+        "area": "collecting documents from clients",
+        "goals": ["G2"],
+        "turns": 8,
+        "opener": "Walk me through the last loan where you had to collect documents from a client."
+      },
+      {
+        "id": "T3",
+        "area": "tools and spending",
+        "goals": ["G3"],
+        "turns": 6,
+        "segments": ["solo", "principal"],
+        "opener": "What was the last piece of software the business started or stopped paying for?"
+      }
+    ],
+    "turns": 30,
+    "situation_card": true
+  },
+  "limits": {
+    "run": {
+      "minutes": 15,
+      "budget_usd": 0.5
+    },
+    "interviewer": {
+      "minutes": 15,
+      "budget_usd": 1.0
+    },
+    "turn": {
+      "minutes": 3
+    },
+    "synthesis": {
+      "minutes": 30,
+      "budget_usd": 10.0
+    }
+  },
+  "runners": {
+    "claude": {
+      "concurrency": 3
+    },
+    "codex": {
+      "concurrency": 2
+    }
+  },
+  "synthesis": {
+    "analysts": 2,
+    "analyst": {
+      "runner": "claude",
+      "model": "opus"
+    },
+    "critic": {
+      "runner": "codex"
+    },
+    "writer": {
+      "runner": "claude",
+      "model": "opus"
+    },
+    "decision_maker": "the product team"
+  },
+  "segments": {
+    "solo": "Sole operator",
+    "principal": "Principal of a firm",
+    "employed": "Broker employed by a firm"
+  },
+  "leak_terms": [
+    "LoanLoop",
+    "doc chase"
+  ],
+  "personas": [
+    {
+      "id": "P01",
+      "name": "Dana Whitlock",
+      "role": "Mortgage broker, sole operator",
+      "personality": "Blunt, short of time, suspicious of new software",
+      "segment": "solo",
+      "bio": [
+        "Eleven years broking, the last four on her own, from a spare room at home.",
+        "Writes four or five loans a month, mostly first home buyers sent by two local real estate agents.",
+        "Does everything herself, from the first phone call to the settlement gift, and has no assistant.",
+        "Pays for what her aggregator makes her use and very little else, and has cancelled most of what she has tried."
+      ]
+    },
+    {
+      "id": "P02",
+      "name": "Marcus Oyelaran",
+      "role": "Principal of a six-broker firm",
+      "personality": "Measured, delegates the detail, watches cost",
+      "segment": "principal",
+      "bio": [
+        "Runs the firm and signs off every subscription. Writes few loans himself now.",
+        "Has two loan processors who prepare and lodge the applications his brokers bring in.",
+        "Hears about problems when a client complains or a settlement is at risk, and not before.",
+        "Changed the firm's customer system three years ago, and still hears about it from his longest-serving broker."
+      ]
+    },
+    {
+      "id": "P03",
+      "name": "Jess Tran",
+      "role": "Mortgage broker in a twelve-broker firm, on commission",
+      "personality": "Friendly and quick, dislikes paperwork, takes the firm's systems as given",
+      "segment": "employed",
+      "bio": [
+        "Three years broking, after five in a bank branch. Most of her clients are refinancing.",
+        "Uses whatever the firm provides, and does not know what any of it costs.",
+        "Hands a file to the firm's processing team once the client has signed, and chases it when it stalls.",
+        "Keeps her own list of where each client is up to, in a notebook, because she trusts it more than the system."
+      ]
+    }
+  ]
+}

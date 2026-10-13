@@ -3,10 +3,12 @@
 
 Each run is one process of a harness CLI, started through its model entry's runner
 (scripts/runners/) under a watchdog of its own (run_watchdog.py). The analysts and the writer of
-the synthesis are jobs, started the same way. The launcher stays in the foreground until the
-runs it started have ended and prints one line per state change, so put it in the background
-with your shell tool, or run it in a terminal. Exit code 0 when every run it was asked for is
-done, 1 otherwise.
+the synthesis are jobs, started the same way. An interview is the one run that is many
+processes: a participant and an interviewer, each a session of its own, which the launcher
+carries turn by turn ("Interview studies", below). The launcher stays in the foreground until
+the runs it started have ended and prints one line per state change, so put it in the
+background with your shell tool, or run it in a terminal. Exit code 0 when every run it was
+asked for is done, 1 otherwise.
 
 Usage: launch.py <study-dir> <command> [options]
   plan [--json]                            # what would run, its limits, estimate and ceiling
@@ -33,6 +35,8 @@ States, recorded in runs.json (fields in panel_lib.py):
   blocked   the harness turned the run away: a usage limit,  next: resume, once it takes requests
             a rate limit or a capacity refusal
   failed    the process ended with nothing written           next: run
+An interview has the same states, read from its turn log and recorded nowhere ("Interview
+studies", below).
 
 How it behaves:
 - The persona file decides "done", never the exit code (panel_lib.run_state). Only a plain file
@@ -378,6 +382,143 @@ sections. What is added for them:
   assets/usability-synthesis-brief.md. Their follow-up notes are the two assets of those names
   with "-followups".
 
+Interview studies ("type": "interview", panel_lib.py). A run is a conversation between two
+sessions, a participant in panel/rooms/<run id> and an interviewer in interviewer/<run id>,
+each a runs.json entry with attempts, usage and limits of its own (panel_lib.py, "Interview
+entries"). Three modules divide the work: panel_lib.py owns the formats, interview.py every
+rule of the conversation, and this one the processes. What is added for them:
+- The role. The interviewer's entry has the role "interviewer", and both entries of a
+  conversation are asked about through the role class Interview, whatever their "role" says
+  (role_of()). No command takes --role interviewer: an interviewer starts and stops with its
+  interview, which is named by its participant's run id in every command and every line.
+- The turn log, interviews/<run id>.jsonl, is the only record of the conversation and of why it
+  stopped (panel_lib.py, "The turn log"). The state of an interview is read from it every time:
+    pending   no turn on record                                    next: run
+    running   a launcher carries it, between two turns too         next: wait
+    done      the log has an "end" record, whatever the exit code  next: nothing
+              of the process that wrote it
+    partial   it was put down with a turn on record: "stop", a     next: resume
+              killed launcher, a reply that could not be used
+              twice, or a turn of a side that had already replied
+              which was stopped at limits.turn, ended with an
+              error or lost its watchdog
+    limited   a side has used its time or budget                   next: resume --runs <ids> --extend
+    blocked   a side's harness is turning requests away            next: resume, later
+    failed    a side's first process left no usable reply          next: run
+  runs.json holds two facts about a conversation and no more. Whether a process of it may be
+  alive: an attempt with no end, on the entry of the side that speaks (in_flight()). Whether a
+  launcher carries it: "carried", on both entries (Supervisor.mark()). No "state", "reason",
+  "reset_at" or "limited_by" is ever written on an entry of a conversation. "carried" counts
+  only while a launcher has the study (panel_lib.carried(), held()): a launcher that was killed
+  never took it off, so with no launcher an interview it left reads as its log reads, partial
+  with a turn on record, to "status", the plan, check_runs.py and the usage record alike, and
+  the next step is "resume", never to wait. A log that is not as a launcher writes one
+  (panel_lib.py, "A malformed log") is carried by no command: its state is that of the records
+  that are left, "status" and the plan say which record is wrong, and "run" and "resume" leave
+  the interview alone, say what to do about the log and exit with 1.
+- The loop. A launcher takes an interview up (a "start" record on a new log, a "resume" record
+  on any other), then asks interview.py, turn after turn, what the log says comes next
+  (interview.fold(), next_step()): a record to append, a turn to start, or a reason to put the
+  interview down. So it holds no rule of its own, and a launcher that takes over from one that
+  was killed decides the same from the same log. One process is alive for an interview at any
+  moment. At most as many interviews are carried at once as the interviewer's runner has slots,
+  and each turn then waits for a slot on its own side's runner, so a runner's concurrency counts
+  processes, as it always did. While one is carried the launcher looks every 0.2 seconds at
+  most, whatever --poll says.
+- A turn is one process: an attempt of kind "turn" on the entry of the side that speaks, under
+  a watchdog, with the pid file, the lock and the end record every attempt has. A side's first
+  process is launched with its prompt in prompts/, and every later one resumes the side's
+  session with one message: for the participant the interviewer's words and nothing else, for
+  the interviewer the answer, a status line and any cap notice (interview.message()). Neither
+  side has a tool where its runner can start a process without (run["tools"]). The watchdog is
+  given limits.turn, or what is left of the side's allowance when that is less, and the attempt
+  says which ("bound") and how much ("allowed").
+- When a turn ends, its reply goes to the turn log first, in one synced write, and the
+  attempt's end to runs.json second (Supervisor.turn_over()). Each record made from a process
+  names its side and attempt, and nothing is added for a side and attempt the log already has,
+  so a launcher killed between the two records nothing twice. What a turn comes to is on the
+  log whole or not at all (panel_lib.append_turns()): a launcher killed while it wrote a turn
+  that was lost and why the interview stops for it leaves neither to be read, and the next one
+  writes both. An attempt whose reply is on the
+  log is then cut down to "n", "kind", "ended" and "seconds": the log has the rest. One that
+  left no reply stays whole, as evidence.
+- What is not used. An interviewer's reply that does not follow the reply format, holds a
+  "leak_terms" entry in its words for the participant, or is no close at the last exchange is
+  never delivered: it is sent back once, with every problem named, and a second such reply in
+  the same slot puts the interview down as partial, or at the last exchange ends it one
+  exchange short. An interviewer that ends with topics unopened is asked once whether it means
+  it. An empty answer is put to the participant once more. A participant whose first reply is
+  not its situation card (or "Ready", with the card off) leaves the interview failed, with the
+  reply on its log, and no interviewer is started for it. The launcher puts nothing else again
+  unasked: a turn that was stopped, hung until limits.turn, failed or lost its watchdog stays
+  on the log as lost until "resume", which puts that turn again and says that it does. "run"
+  and "pilot" launch a side afresh once for an interview when its first process left no usable
+  reply, as they retry a failed run.
+- "done" is decided by the "end" record: the interviewer ended the interview, or the last
+  exchange the cap allows has its answer. The launcher then writes both transcripts,
+  interviews/<run id>.md and the analysts' copy analysis/transcripts/<run id>.md
+  ("interview.py <study-dir> render" writes them again, for an unfinished interview too), and
+  the command's last lines say where they are. The usage record is written again whenever an
+  interview is put down, since that changes its state with no process ending.
+- Limits. Each side has an allowance of its own over all its turns: limits.run for the
+  participant, limits.interviewer for the interviewer, time and reported spend adding up as
+  they do for a run. A turn is given limits.turn, or what is left of its side's time when that
+  is less, and as its budget what is left of its side's. A turn stopped at limits.turn used no
+  allowance up: it is lost, the interview is partial (failed, at a side's first process), and
+  only "resume" puts it again. A side with nothing left, before a turn or in the middle of one,
+  makes the interview limited, with the side named on its log: "resume" leaves it alone, and
+  "resume --runs <ids> --extend" gives that side one more allowance and goes on at the turn
+  the log reached. Every turn on record is kept. The grant is the "resume" record that names
+  the side ("extended"), written before anything else: "extended" on that side's entry is a
+  copy, brought level with the log whenever an interview is taken up (Supervisor.level()), so
+  a launcher killed between the two loses no grant and none is counted twice. A log that begins
+  again takes every grant with it, in its "start" record: a fresh start gives no allowance
+  back and takes none away, and when "resume --extend" is the command that finds the log must
+  begin again, the allowance it gives is in that record too.
+- A runner that closes (a usage limit, a CLI that cannot do a run from this shell) starts no
+  further turn of either side of an interview that has a side on it, since neither side goes
+  on without the other (Supervisor.shut_out()): an interview waiting to be taken up keeps its
+  state, and one that is carried is put down, when its next turn falls due or at once when
+  that turn was queued. When the runner's harness is turning requests away the interview is
+  blocked: its log says which side's harness, in the harness's words, and when the limit
+  lifts. A runner that closed for another reason leaves it as its log reads, partial, and
+  either way "resume" goes on with it. A turn already running on the other runner ends as it
+  would, and is recorded first. So when the interviewer's runner is turned away every
+  interview stops, and the command ends.
+- A side that cannot be resumed (Supervisor.lacking()): its session was purged, a resume found
+  it gone from its harness, its harness did not keep it, or its runner cannot resume one. Only
+  a side with a reply on record counts, since one with none is launched anew anyway, and both
+  sides are asked before each turn and before an interview is queued, so none is spent on an
+  interview that cannot go on. With no answer on record the interview starts afresh: its turn
+  log is moved to logs/<run id>.interview-<k>.jsonl (with its transcripts, as .md and
+  .analysts.md, when "interview.py render" had written them), both entries lose their session
+  and keep their attempts, their usage and the time they have used, and a new log begins. A
+  command does that once for an interview. With an answer on record the interview is left
+  alone, as a run with sections written and no session is: the line says which side's session
+  is gone and why, the command exits with 1, and the next "resume" says so again without
+  starting a process. To hold such an interview again, move its turn log to logs/ and use
+  "run".
+- "stop" stops the turn in flight through its watchdog, and that turn is recorded as lost. Every
+  interview is put down: partial, or pending with no turn yet.
+- A launcher that takes over settles a turn that ended with no launcher alive from its files in
+  logs/, so the reply there becomes its turn, and adopts one still running: "resume" then goes
+  on with that interview, and any other command puts it down when the turn ends. An interview
+  on record as carried with no turn in flight was between two turns when its launcher was
+  killed: it is put down, and "resume" continues at the turn its log reached.
+- "status" has one row for each interview, on its participant's entry: the exchanges of the
+  cap, the topics opened, which side is awaited or is replying, the reason its log gives,
+  "between turns" or the process of the turn in flight, and for each side the turns it has
+  had, its time and its usage, with what became of its session. Under a launcher a turn whose
+  process has ended and is not recorded yet is "between turns" too: the launcher records it at
+  its next look. With no launcher, one line names the interviews a launcher left with a turn
+  in flight, which "resume" takes up. In --json the row's own figures are the participant's and
+  "interview" has "exchanges", "cap", "awaiting", "side" (the side with a turn in flight) and
+  "interviewer", that entry's figures. "check" and "release" are a usability study's, and
+  refuse.
+- "purge-sessions --runs <run id>" covers the sessions of both sides of that interview, each
+  deleted from the folder its side worked in. It is refused while a turn is in flight and
+  while the interview is on record as carried.
+
 The plan. "plan" starts no run, makes no model call and changes no file of the study. It asks
 each runner whether its CLI is signed in, and a harness may refresh its own login when asked.
 It also asks whether this shell can run each CLI, and tests the study directory with a write
@@ -417,6 +558,26 @@ It works before init_study.py and capture.py have run, and says what is missing.
 - for a usability study, in place of the materials: the target, each task with its step limit
   and success check, that the launcher is the backstop of a step limit, when the success checks
   run and what their exit codes say, the time rule and the accounts
+- for an interview study, in place of the materials: what an interview is, the guide, each cap
+  and limit with who enforces it, how many interviews are carried at once, the tools each side
+  has on each runner (none; what "none" leaves on a harness that cannot switch every tool off,
+  in its runner's words; or the file tools, on a runner that cannot start a process without),
+  one line on the tier of model both sides need, which names no model, and its notes: a
+  participant or the critic on the interviewer's runner and model, and topic caps that add up
+  to more than the interview's. In place of the runs, every interview: its participant's model
+  entry, what each of its two sides may use, the cap of each topic its persona gets, the
+  exchanges on record of its cap, and its state. The interviewer is a model entry with a row
+  and limits of its own. Each provider's line says what a side sends it: a participant's gets
+  its prompt and every question, the interviewer's its prompt, the guide and every answer. No
+  follow-up is said of: an interview that has ended is closed
+- its estimate: for a side with finished interviews what those reported, as for a run, and what
+  that came to for each exchange. For one with none, input tokens at the size of one process of
+  that side at each exchange, added up to the interview's cap: measured for a runner and a
+  side, never for a model, on the date and CLI versions the line names, and high, since few
+  interviews run to their cap. A runner with no such figure gets none
+- its ceiling: the cap of each side of each interview once, plus the pool. A side on a runner
+  without a cap is left out and makes it an estimate, and an allowance that --extend gave
+  either side breaks it
 - a problem when a run may browse and the agent-browser CLI is not on PATH: every such run
   would end as "could not be started"
 - the analyst and writer jobs with their share of the synthesis pool, or which of
@@ -443,8 +604,10 @@ It works before init_study.py and capture.py have run, and says what is missing.
 - dollar figures are list-price equivalents under a subscription login
 Exit code 1 when a runner cannot be used, when this shell cannot run it or write to the study
 directory, or when study.json asks a runner for something it cannot do: an effort it does not
-have, or a study with "materials": "full" on a runner that cannot open images. "run" refuses to
-start those runs for the same reasons. On a native-mode study it lists the runs and says that
+have, a study with "materials": "full" on a runner that cannot open images, or a side of an
+interview on a runner that is not verified for interviews or cannot resume a session. In an
+interview study also when the interviewer would say a leak term, or a persona is left with no
+topic. "run" refuses to start those runs for the same reasons. On a native-mode study it lists the runs and says that
 native mode has no limits, usage record or isolation.
 
 A text-only study ("materials": "text"). Its runs get no browser access, whatever "browse" says,
@@ -458,7 +621,9 @@ The usage record. After every process that ends, the launcher rewrites analysis/
 what the harnesses reported: per run, per role, per model key and in total, with "not reported"
 where a harness gave no figure, "not reported (process was stopped)" where the launcher stopped
 the process first, and "unallocated" where a follow-up reported one total for itself and for such
-a stopped process of its run. "usage" rewrites and prints it.
+a stopped process of its run. "usage" rewrites and prints it. In an interview study each side
+of an interview is a row, named by its interview and its side ("participant", "interviewer"),
+and the interviewer's model entry has a row by model key beside the panel's.
 
 Sessions. "purge-sessions" deletes the harness sessions recorded for the study's runs and jobs,
 through each runner's own delete command. Without --yes it prints each run, session id and
@@ -563,6 +728,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import accounts  # noqa: E402
 import browser_session as browser  # noqa: E402
+import interview  # noqa: E402
 import launch_plan as planning  # noqa: E402
 import panel_lib as pl  # noqa: E402
 import run_watchdog as watchdog  # noqa: E402
@@ -579,6 +745,7 @@ STATES = ("done", "running", "pending", "partial", "limited", "blocked", "failed
 STARTS = {"run": ("pending", "failed"), "pilot": ("pending", "failed"), "resume": ("partial", "blocked")}
 MIN_BUDGET = 0.000001  # in dollars: less than this left is nothing left, and no harness takes a smaller cap
 TURNED_AWAY = "the harness is turning requests away"  # a usage limit, a rate limit or a capacity refusal
+PURGED = "its session was purged (purge-sessions)"  # the lead had it deleted
 LOST = "its session no longer exists"  # a resume found it gone from the harness
 NOT_SAVED = "its session was not saved"  # its runner found that the harness had kept none when its process ended
 UNSAVED = "session not saved: this run cannot be resumed or asked a follow-up"  # what "status" shows of such a run
@@ -591,6 +758,13 @@ BROWSER_RESTARTED = (" Your browser was restarted: it is on a blank page again, 
                      "you act on it. The rules for the browser are unchanged.")
 REPLAY = 2.0  # seconds past the grace before a launcher repeats a stop request that an earlier one put on record
 VERDICTS = {True: "completed", False: "not completed"}  # what a success check's record says of its task
+# What "status" says an interview waits for, by what its turn log awaits (interview.fold()).
+AWAITED = {"card": "awaiting the participant's first reply", "opening": "awaiting the interviewer's first question",
+           "answer": "awaiting an answer", "question": "awaiting a question"}
+# The same in a row of "status" while the process of that turn is alive.
+REPLYING = {"card": "the participant is writing its first reply",
+            "opening": "the interviewer is writing its first question",
+            "answer": "the participant is answering", "question": "the interviewer is writing its next question"}
 NEXT = {"pending": "run", "failed": "run", "partial": "resume",
         "blocked": "resume, once the harness takes requests again",
         "limited": "resume --runs <ids> --extend, which gives one more allowance of the limits"}
@@ -1192,7 +1366,7 @@ class Panellist:
 
     @staticmethod
     def workdir(cfg: dict, entry: dict) -> Path:
-        return pl.workdir(cfg["_dir"], entry["role"])
+        return pl.workdir(cfg["_dir"], entry)
 
     @staticmethod
     def progress(cfg: dict, entry: dict) -> dict:
@@ -1218,6 +1392,14 @@ class Panellist:
     @staticmethod
     def collect(cfg: dict, entry: dict, result: dict, ending: str | None) -> str | None:
         return None  # a panellist's work is its persona file: nothing is taken from its reply
+
+    @staticmethod
+    def state(cfg: dict, entry: dict) -> str:
+        return pl.run_state(Panellist.progress(cfg, entry), entry.get("state"))
+
+    @staticmethod
+    def options(cfg: dict, entry: dict) -> dict:
+        return {}  # what an attempt's run gets besides the entry: nothing, so the file tools every run has
 
 
 class Synthesis:
@@ -1285,16 +1467,106 @@ class Synthesis:
             output.write_text(pl.with_notice(text))
         return note
 
+    @staticmethod
+    def state(cfg: dict, entry: dict) -> str:
+        return pl.run_state(Synthesis.progress(cfg, entry), entry.get("state"))
 
-ROLES = {"panellist": Panellist, "analyst": Synthesis, "writer": Synthesis}
+    @staticmethod
+    def options(cfg: dict, entry: dict) -> dict:
+        return {}
+
+
+def side_of(entry: dict) -> str:
+    """Which side of a conversation an entry speaks for, as a turn log names it (pl.SIDES): the
+    interviewer's entry is the interviewer, and any other the participant, the finished run of
+    a debrief included."""
+    return "interviewer" if entry["role"] == "interviewer" else "participant"
+
+
+def named(entry: dict) -> str:
+    """How a line to the lead names the entry a process belongs to: its id, and for an entry of a
+    conversation its interview and its side, "P01-cx, the interviewer's turn". Every command
+    takes an interview by its run id, and none takes an interviewer's entry, so no line names
+    one by itself."""
+    return f"{pl.interview_of(entry)}, the {side_of(entry)}'s turn" if "interview" in entry else entry["run"]
+
+
+class Interview:
+    """The same questions about an entry of a conversation: either side of an interview, each
+    with a session, attempts, usage and limits of its own (panel_lib.py, "Interview entries").
+    Every process of it is one turn, in a folder of its own, with no tool where its runner can
+    start one so (interview.tools()). Its progress and its state are read from the turn log
+    both entries name, every time: runs.json holds neither. What a turn is sent is the entry's
+    prompt for a side's first process and interview.message() for every later one, so it has
+    no resume_message()."""
+
+    noun = "interview"
+
+    @staticmethod
+    def workdir(cfg: dict, entry: dict) -> Path:
+        return pl.workdir(cfg["_dir"], entry)
+
+    @staticmethod
+    def progress(cfg: dict, entry: dict) -> dict:
+        return pl.interview_progress(cfg, entry, pl.read_turns(cfg["_dir"], pl.interview_of(entry)))
+
+    @staticmethod
+    def limits(cfg: dict, entry: dict) -> dict:
+        if side_of(entry) == "interviewer":
+            return pl.limits_for(cfg, "interviewer")
+        return pl.limits_for(cfg, "panellist", entry["key"])
+
+    @staticmethod
+    def prompt(cfg: dict, entry: dict) -> str:
+        return (cfg["_dir"] / entry["prompt"]).read_text()  # the side's whole launch prompt, verbatim
+
+    @staticmethod
+    def browse(cfg: dict, entry: dict) -> bool:
+        return False
+
+    @staticmethod
+    def collect(cfg: dict, entry: dict, result: dict, ending: str | None) -> str | None:
+        return None  # a turn's reply goes to the turn log (Supervisor.turn_ended())
+
+    @staticmethod
+    def state(cfg: dict, entry: dict) -> str:
+        return pl.interview_state(pl.read_turns(cfg["_dir"], pl.interview_of(entry)), pl.carried(entry, held(cfg)))
+
+    @staticmethod
+    def options(cfg: dict, entry: dict) -> dict:
+        return {"tools": interview.tools(side_of(entry), runners.get(entry["runner"]))}
+
+
+# An entry the launcher runs has its role here. An interviewer starts and stops with its interview, so
+# no command takes it as a --role (STARTABLE).
+ROLES = {"panellist": Panellist, "analyst": Synthesis, "writer": Synthesis, "interviewer": Interview}
+STARTABLE = [role for role in ROLES if role != "interviewer"]
+
+
+def role_of(entry: dict):
+    """The role class of an entry: Interview for an entry of a conversation, whatever its "role"
+    says (a participant is a panellist), and otherwise what ROLES has for its role."""
+    return Interview if "interview" in entry else ROLES[entry["role"]]
 
 
 def progress_of(cfg: dict, entry: dict) -> dict:
-    return ROLES[entry["role"]].progress(cfg, entry)
+    return role_of(entry).progress(cfg, entry)
 
 
 def state_of(cfg: dict, entry: dict) -> str:
-    return pl.run_state(progress_of(cfg, entry), entry.get("state"))
+    return role_of(entry).state(cfg, entry)
+
+
+def held(cfg: dict) -> bool:
+    """Whether a launcher has the study, which is what makes "carried" on an entry of a
+    conversation count (pl.carried()): asked of the study lock (Lock.holder()), which a
+    launcher's own process finds held as any other does, so the supervisor and "status" go by
+    one rule. Asked once for a command and kept on cfg, so that every state a command reads
+    is read against the same answer. A command that takes the study does so before it reads a
+    state, and holds it until it ends."""
+    if "_held" not in cfg:
+        cfg["_held"] = bool(Lock.holder(cfg["_dir"]))
+    return cfg["_held"]
 
 
 usage_of, sessions_of = planning.usage_of, pl.sessions_of
@@ -1317,7 +1589,7 @@ def record_usage(cfg: dict, runs: list[dict]) -> dict:
 
 def allowance(cfg: dict, entry: dict) -> dict:
     """The run's limits over all its attempts: one allowance, plus one for each --extend."""
-    limits, times = ROLES[entry["role"]].limits(cfg, entry), 1 + (entry.get("extended") or 0)
+    limits, times = role_of(entry).limits(cfg, entry), 1 + (entry.get("extended") or 0)
     return {"minutes": limits["minutes"] * times, "budget_usd": limits["budget_usd"] * times}
 
 
@@ -1331,6 +1603,30 @@ def left(cfg: dict, entry: dict) -> dict:
             "budget_usd": total["budget_usd"] - (usage_of(entry)["cost_usd"] or 0)}
 
 
+def used_up(remaining: dict, total: dict) -> list[str]:
+    """What an allowance (allowance()) has nothing left of, given what is left of it (left()):
+    "none of its 15 min left", "none of its $2 left", or neither. With either, nothing more is
+    started against it."""
+    return [f"none of its {allowed} left" for gone, allowed in (
+        (remaining["seconds"] <= 0, f"{total['minutes']:g} min"),
+        (remaining["budget_usd"] < MIN_BUDGET, f"${total['budget_usd']:g}")) if gone]
+
+
+def session_gone(e: dict, runner, whose: str = "its") -> str | None:
+    """Why an entry's session cannot be continued, None when it can: it was purged, a resume
+    found it gone from the harness, its harness never kept it, none was recorded, or the
+    entry's runner cannot resume one. Nothing is started to find out: each is on record.
+    whose is how the sentence names the session's owner: "its" of a run, "the participant's"
+    of a side of a conversation."""
+    session = e.get("session")
+    for why, noted in ((PURGED, "purged"), (LOST, "lost"), (NOT_SAVED, "unsaved")):
+        if session in (e.get(noted) or {}):
+            return whose + why[len("its"):]
+    if not session:
+        return "no session was recorded" if whose == "its" else f"{whose} session was never recorded"
+    return None if runner.capabilities()["resume"] else f"{e['runner']} cannot resume a session"
+
+
 # ---------------------------------------------------------------- the supervisor
 
 # What starting an attempt overwrites, or takes out of the entry.
@@ -1342,9 +1638,14 @@ asking = pl.asking  # the follow-up attempt of a run that is not settled yet
 
 
 def in_flight(e: dict) -> bool:
-    """Whether a process of the run may be alive: it is recorded as running, or has a follow-up
-    question that is not settled yet."""
-    return e.get("state") == "running" or bool(asking(e))
+    """Whether a process of the entry may be alive: it is recorded as running, or has an attempt
+    that leaves its state alone and has no end yet (pl.open_attempt()): a follow-up question
+    that is not settled, or a turn of a conversation. An entry of a conversation has no state
+    on record, so that attempt is all that says so of it: one with no attempt is never in
+    flight, and one that a launcher carries between two turns is not either ("carried")."""
+    if "interview" in e:
+        return bool(pl.open_attempt(e))
+    return e.get("state") == "running" or bool(pl.open_attempt(e))
 
 
 def at_work(study_dir: Path, runs: list[dict]) -> list[str]:
@@ -1414,14 +1715,32 @@ class Supervisor:
     A followup attempt puts the question in question, {"n": the follow-up's number, "message":
     a function from a run's entry to the message for its panellist}, to a finished run in its
     session. It has limits of its own, leaves the run's state alone, and is settled by
-    answered(): see "Follow-up questions" in the module docstring."""
+    answered(): see "Follow-up questions" in the module docstring.
+
+    A conversation is carried turn by turn: see "Interview studies" in the module docstring.
+    Two more kinds are queued for one. (participant entry, "interview") waits to be taken up
+    (take_up()). (entry of the side that speaks, "turn") is one process to start, and sending
+    has the step it carries out, by the entry's id. interviews has every conversation this
+    command carries, by its run id: {"p": the participant's entry, "i": the interviewer's,
+    "kind": "interview" or "debrief", "own": whether this command goes on with it, false for one
+    whose turn it only adopted}. Each of them has, at every moment, exactly one of: a queued
+    turn, a child, or a put_down() under way. drop() and sweep() hold that, so that no exit of
+    start() or ended() has to. by is the command as a "resume" record names it. What stops a
+    conversation short of its end is decided in three places and nowhere else: cannot_send()
+    before a turn is queued, shut_out() for a runner that starts nothing more, and no_session()
+    for a side that cannot be resumed."""
 
     def __init__(self, cfg: dict, runs: list[dict], grace: float, poll: float, retry: bool = False,
-                 stop: StopSignal | None = None, question: dict | None = None):
+                 stop: StopSignal | None = None, question: dict | None = None, by: str = "run"):
         self.cfg, self.sd, self.runs = cfg, cfg["_dir"], runs
         self.grace, self.poll, self.retry, self.stop = grace, poll, retry, stop or StopSignal()
-        self.question = question
+        self.question, self.by = question, by
         self.queue, self.children, self.adopted = [], [], []
+        self.interviews = {}    # run id -> the conversation this command carries
+        self.sending = {}       # entry id -> the step its queued turn carries out (interview.next_step())
+        self.turned_away = {}   # runner closed because its harness turns requests away -> {"lifts", "said"}
+        self.extend = set()     # the limited interviews "resume --extend" named: take_up() extends the side in need
+        self.restarted = set()  # the interviews this command has started afresh for want of a session: once each
         self.closed = {}        # runner -> why it starts nothing more in this command
         self.retried = set()    # runs already retried by this command
         self.refused = False    # a process could not be started at all
@@ -1446,7 +1765,7 @@ class Supervisor:
         process, so the processes alive between two snapshots are always the same ones."""
         record, at, moved = pl.read_modifications(self.sd), round(time.time()), False
         for e in self.runs:
-            if e["role"] != "panellist":
+            if e["role"] != "panellist" or "interview" in e:  # whose file is its turn log, which the launcher writes
                 continue
             digest = pl.file_hash(self.sd, self.sd / e["file"])
             if e["file"] in record["hashes"] and digest == record["hashes"][e["file"]]:
@@ -1477,6 +1796,13 @@ class Supervisor:
         its process started. Then every follow-up record that nothing in flight will settle is
         given its outcome (settle_followups()).
 
+        A turn of a conversation in flight is settled or adopted like any attempt, and an
+        adopted one has its conversation carried from here on, though not as this command's own
+        (interviews, "own"). Then every conversation on record as carried that has no attempt
+        in flight and was not adopted is put down: its launcher was killed between two turns,
+        or with a turn that has now been settled or taken back. One whose turn is still alive
+        under a command that adopts nothing stays carried, for the next launcher.
+
         adopt false is for a command that supervises nothing: an attempt still alive is left
         for the next launcher. final false leaves settle_final() to the caller, which has
         something to do first with the runs it would finish. commands false is for "stop", which
@@ -1491,8 +1817,11 @@ class Supervisor:
             n = e["attempts"][-1]["n"]
             pids = recorded(self.log(e, n, "pid"))
             if not pids:
+                turn = e["attempts"][-1]["kind"] in pl.TURN_KINDS
                 self.take_back(e, "an earlier launcher died before starting it")
-                say(f"{e['run']}: {state_of(self.cfg, e)} (an earlier launcher died before starting it)")
+                say(f"{pl.interview_of(e)}: a turn of the {side_of(e)} was never started (an earlier launcher died "
+                    "before starting it)" if turn else
+                    f"{e['run']}: {state_of(self.cfg, e)} (an earlier launcher died before starting it)")
                 continue
             child = Child(e, pids, self.log(e, n, "end"))
             record = self.outcome(child)
@@ -1506,12 +1835,22 @@ class Supervisor:
                 self.save()
             self.children.append(child)
             self.adopted.append(e)
+            if e["attempts"][-1]["kind"] in pl.TURN_KINDS:
+                run = pl.interview_of(e)
+                self.interviews[run] = {**self.pair(run), "own": False}
+                say(f"{run}: a turn of the {side_of(e)} is running, adopted from an earlier launcher (pid {e['pid']})")
+                continue
             say(f"{e['run']}: {'being asked a follow-up question' if asking(e) else 'running'}, adopted from an "
                 f"earlier launcher (pid {e['pid']})")
+        for run in dict.fromkeys(pl.interview_of(e) for e in self.runs if e.get("carried")):
+            pair = self.pair(run)
+            if run not in self.interviews and not (in_flight(pair["p"]) or in_flight(pair["i"])):
+                self.put_down(run)
         self.sweep_browsers()
         if final:
             self.settle_final()
         self.settle_followups()
+        self.sweep()
 
     def settle_followups(self):
         """Give an outcome to every record of followups.json that has none and that no attempt in
@@ -1547,10 +1886,27 @@ class Supervisor:
     # ---- starting
 
     def fill(self):
-        """Start whatever is queued and fits within its runner's concurrency."""
+        """Start whatever is queued and fits within its runner's concurrency. An interview that
+        waits is taken up when fewer are carried than its interviewer's runner has slots: started
+        all at once, half of them would always wait for that runner between two turns. Each turn
+        then waits for a slot on the runner of its own side like any other process, so a
+        runner's concurrency still counts processes. An item of a conversation is never left
+        waiting for a runner that starts nothing more, whichever of its two sides is on it: it
+        is dropped (drop()), by the rule close() goes by."""
         for item in list(self.queue):
+            if item not in self.queue:
+                continue
             name = item[0]["runner"]
-            if item not in self.queue or name in self.closed:
+            if self.runners_of(item) & self.closed.keys():
+                if item[1] == "interview" or item[1] in pl.TURN_KINDS:
+                    self.drop(lambda queued: queued is item)
+                continue
+            if item[1] == "interview":
+                host = self.pair(pl.interview_of(item[0]))["i"]["runner"]
+                most = pl.runner_concurrency(self.cfg, host, self.runner(host).capabilities()["default_concurrency"])
+                if sum(carried["i"]["runner"] == host for carried in self.interviews.values()) < most:
+                    self.queue.remove(item)
+                    self.take_up(item[0])
                 continue
             if self.cfg.get("sequential") and item[0]["role"] == "panellist" and any(
                     c.entry["role"] == "panellist" for c in self.children):
@@ -1561,16 +1917,33 @@ class Supervisor:
                 self.start(*item)
 
     def start(self, e: dict, kind: str):
-        role, runner = ROLES[e["role"]], self.runner(e["runner"])
+        """Start one attempt of an entry under a watchdog of its own, on record in runs.json
+        before its process exists. kind is the attempt's: launch, retry, resume or restart for
+        a run or job, followup for a follow-up question, and for one turn of a conversation
+        "turn", or "debrief" on a finished run (pl.TURN_KINDS), which carries out the step that
+        sending holds for the entry.
+
+        A turn's watchdog is given limits.turn, or what is left of its side's allowance when
+        that is less. The attempt records the figure as "allowed", and which of the two it was
+        as "bound": outcome() charges an attempt whose watchdog was killed up to "allowed", so
+        it must be what the watchdog was given and never the side's whole remainder. A turn
+        leaves its entry's state, reason and checks alone, as a follow-up does, and "was" keeps
+        every field undo() would take off, so taking the attempt back costs the entry nothing.
+        Every way this returns with no process leaves a carried conversation to sweep()."""
+        role, runner = role_of(e), self.runner(e["runner"])
         number = self.question["n"] if kind == "followup" else None
+        turn = kind in pl.TURN_KINDS
+        step = self.sending.pop(e["run"], None) if turn else None
         if number:  # an allowance of its own for each question: what the run has used does not count
             total = pl.limits_for(self.cfg, "followup")
             remaining = {"seconds": total["minutes"] * 60, "budget_usd": total["budget_usd"]}
+        elif turn:
+            remaining, total = self.allowed(pl.interview_of(e), e)
         else:
             remaining, total = left(self.cfg, e), allowance(self.cfg, e)
-        spent = [f"none of its {allowed} left" for gone, allowed in (
-            (remaining["seconds"] <= 0, f"{total['minutes']:g} min"),
-            (remaining["budget_usd"] < MIN_BUDGET, f"${total['budget_usd']:g}")) if gone]
+        spent = used_up(remaining, total)
+        if spent and turn:  # not reached: cannot_send() answered before the turn was queued, and wrote the "halt"
+            return
         if spent:
             e.update(state="limited", reset_at=None, reason=" and ".join(spent)
                      + f" after {plural(len(e.get('attempts') or []), 'attempt')}",
@@ -1579,19 +1952,27 @@ class Supervisor:
             say(f"{e['run']}: limited without starting: {e['reason']}")
             self.finish(e)
             return
+        # What the watchdog is given: all that is left, and for a turn no more than one turn may take.
+        most = pl.limits_for(self.cfg, "turn")["minutes"] * 60 if turn else None
+        bound = None if not turn else "turn" if most < remaining["seconds"] else "allowance"
+        given = most if bound == "turn" else remaining["seconds"]
         usability = self.cfg["type"] == "usability" and e["role"] == "panellist"
+        own = not number and not turn  # an attempt of the run itself: it has the account, the evidence and the steps
         had = (e.get("account") or {}).get("times")  # which provisioning its last attempt ran with
-        account = self.prepare(e, kind) if usability and not number else None
+        account = self.prepare(e, kind) if usability and own else None
         if account is False:
             return
         # Provisioned again for this attempt: the account its session knew was torn down (accounts.py).
         renewed = bool(account) and had is not None and account.get("times") != had
-        limits = {"minutes": remaining["seconds"] / 60,
+        limits = {"minutes": given / 60,
                   "budget_usd": remaining["budget_usd"] if runner.capabilities()["budget_cap"] else None}
         n = len(e.get("attempts") or []) + 1
         # A follow-up to a usability run answers from what it saw: its account is gone, and it opens nothing.
-        browse = role.browse(self.cfg, e) and runner.capabilities()["browser"] and not (usability and number)
-        run, workdir, hooks, session = {**e, "browse": browse}, role.workdir(self.cfg, e), None, None
+        # Nor does a turn of a conversation, which is words alone.
+        browse = (role.browse(self.cfg, e) and runner.capabilities()["browser"] and not (usability and number)
+                  and not turn)
+        run, workdir = {**e, "browse": browse, **role.options(self.cfg, e)}, role.workdir(self.cfg, e)
+        hooks, session = None, None
         if browse:  # the attempt's own browser session: its watchdog starts it before the CLI and stops it after
             session = browser.plan(self.base(e, n).resolve(), e["run"])
             run["browser_env"] = browser.changes(session)
@@ -1600,6 +1981,8 @@ class Supervisor:
         try:
             if number:
                 command = runner.resume_command(run, e["session"], self.question["message"](e), workdir, limits)
+            elif turn:
+                command = self.turn_command(e, step, runner, run, workdir, limits)
             elif kind == "resume":  # a usability run's own message says what became of its browser (runs.py)
                 command = runner.resume_command(run, e["session"],
                                                 role.resume_message(self.cfg, {**e, "new_account": renewed})
@@ -1609,7 +1992,7 @@ class Supervisor:
                 command = runner.launch_command(run, role.prompt(self.cfg, e), workdir, limits)
         except ValueError as err:
             self.refused = True
-            say(f"{e['run']}: not started, {e['runner']} cannot build its command: {err}")
+            say(f"{named(e)}: not started, {e['runner']} cannot build its command: {err}")
             if number:
                 pl.record_followup(self.sd, number, e["run"], outcome="could not start",
                                    reason=f"{e['runner']} cannot build its command: {err}")
@@ -1627,7 +2010,7 @@ class Supervisor:
                      "after": browser.stop_command(session), "log": str(self.log(e, n, "hooks").resolve()),
                      "seconds": {"before": browser.START, "after": browser.STOP}}
         aside = None
-        if usability and not number and kind != "resume":  # a new session: no step or screenshot of an earlier one
+        if usability and own and kind != "resume":  # a new session: no step or screenshot of an earlier one
             try:
                 aside = self.set_aside(e)
             except OSError as err:
@@ -1644,6 +2027,7 @@ class Supervisor:
                 say(f"{e['run']}: follow-up {number} could not be asked: {why}.")
                 pl.record_followup(self.sd, number, e["run"], outcome="could not start", reason=why)
                 return
+        self.before_debrief_turn(e, n, kind)
         end.unlink(missing_ok=True)  # left by a process that never ran as the CLI: this attempt has its number
         # The attempt's lock file, which its watchdog locks for as long as it lives and nothing ever
         # writes (unseen()). Then the pid file, locked until the watchdog has recorded itself and the
@@ -1657,17 +2041,20 @@ class Supervisor:
             pass
         self.snapshot([c.entry["run"] for c in self.children])
         e["attempts"] = [*(e.get("attempts") or []), {
-            "n": n, "kind": kind, "started": round(time.time(), 3), "allowed": round(remaining["seconds"], 3),
-            "ended": None, "seconds": None, "exit_code": None, "outcome": None, "state": None,
+            "n": n, "kind": kind, "started": round(time.time(), 3), "allowed": round(given, 3),
+            "ended": None, "seconds": None, "exit_code": None, "outcome": None,
+            **({"bound": bound} if turn else {"state": None}),  # a turn decides no state: its turn log has it
             "session": command["session_id"], "was": {k: e[k] for k in UNDONE if k in e},
             **({"followup": number} if number else {}),
             **({"evidence_aside": aside} if aside else {}),
             # What its step log held already: the step limit is watched in what this attempt adds (over_steps()).
-            **({"steps": {"seen": "".join(marks(self.log_lines(e))), "begun": {}}} if usability and not number
-               else {})}]
+            **({"steps": {"seen": "".join(marks(self.log_lines(e))), "begun": {}}} if usability and own else {})}]
         e.update(pid=None, pid_identity=None)
         if number:  # the run stays as it is: asking() is what says a process is at work on it
             pl.record_followup(self.sd, number, e["run"], attempt=n, session=command["session_id"])
+        elif turn:  # the entry stays as it is too: a side's first process alone gives it a session, the one it names
+            if step["how"] == "launch":
+                e["session"] = command["session_id"]
         else:
             e.update(state="running", session=command["session_id"], reason=None, reset_at=None)
             # With a new account, the check of a task the run has written up, and so will not attempt
@@ -1697,7 +2084,7 @@ class Supervisor:
                 stdin.seek(0)
                 proc = subprocess.Popen(
                     [*WATCHDOG, *(["--hooks", json.dumps(hooks)] if hooks else []), str(handle), str(watch),
-                     str(end), f"{remaining['seconds']:.3f}", f"{self.grace:.3f}", *command["argv"]],
+                     str(end), f"{given:.3f}", f"{self.grace:.3f}", *command["argv"]],
                     stdin=stdin, stdout=out, stderr=err, cwd=workdir, env=command["env"],
                     start_new_session=True, pass_fds=(handle, watch))
         except OSError as err:
@@ -1726,8 +2113,31 @@ class Supervisor:
         e.update(pid=pids["cli"][0], pid_identity=pids["cli"][1])
         self.save()
         self.children.append(Child(e, pids, end, proc))
-        say(f"{e['run']}: asked follow-up {number} (attempt {n}, pid {e['pid']})" if number
-            else f"{e['run']}: running ({kind}, attempt {n}, pid {e['pid']})")
+        if not turn:  # a turn is one of many: its interview said that it is running, and says how it ends
+            say(f"{e['run']}: asked follow-up {number} (attempt {n}, pid {e['pid']})" if number
+                else f"{e['run']}: running ({kind}, attempt {n}, pid {e['pid']})")
+
+    def turn_command(self, e: dict, step: dict, runner, run: dict, workdir: Path, limits: dict) -> dict:
+        """The command of one turn, from the step it carries out (interview.next_step()): a
+        side's first process is launched with its prompt, as it is, and every later one resumes
+        the side's session with the message its frame makes of the turn log
+        (interview.message()). Raises ValueError as a runner does for a command it cannot build,
+        a session that is no session among them."""
+        if step["how"] == "launch":
+            return runner.launch_command(run, role_of(e).prompt(self.cfg, e), workdir, limits)
+        run_id = pl.interview_of(e)
+        said = interview.message(step, interview.fold(pl.read_turns(self.sd, run_id)), self.guide_of(run_id))
+        return runner.resume_command(run, e.get("session"), said, workdir, limits)
+
+    def before_debrief_turn(self, e: dict, n: int, kind: str):
+        """What a turn put to a finished run needs before its attempt is on record: nothing for a
+        turn of an interview, whose participant has no persona file. A debrief keeps a copy of
+        the persona file here, as a follow-up does, for after_debrief_turn() to put back."""
+
+    def after_debrief_turn(self, e: dict, attempt: dict):
+        """What a turn put to a finished run needs once its process has ended, before its reply
+        goes to the turn log: nothing for a turn of an interview. A debrief puts the persona
+        file back here when the turn changed it."""
 
     def unstarted(self, e: dict, argv: list[str], how: str, said: str, settling: bool = False,
                   closing: str = "its CLI could not be started"):
@@ -1737,7 +2147,7 @@ class Supervisor:
         settling is for an attempt of an earlier launcher: the runner stays open, since this
         launcher has not tried it."""
         self.take_back(e, f"{how} ({said})")
-        say(f"{e['run']}: could not be started. {how}: {shlex.join(argv[:4])} ... ({said}). Nothing was marked as "
+        say(f"{named(e)}: could not be started. {how}: {shlex.join(argv[:4])} ... ({said}). Nothing was marked as "
             f"failed. {pl.SANDBOX_HINT}")
         if not settling:
             self.refused = True
@@ -1942,9 +2352,9 @@ class Supervisor:
         failed, and start no further panellist run in this command: the next would fail the
         same way. Nothing is marked failed."""
         self.refused = True
-        held = [x["run"] for x, _ in self.queue if x["role"] == "panellist"]
-        self.queue = [item for item in self.queue if item[0]["role"] != "panellist"]
-        say(f"{e['run']}: could not be started: {why}. Nothing was marked as failed. No further run is started in "
+        held = [x["run"] for x, kind in self.drop(lambda item: item[0]["role"] == "panellist")
+                if kind not in pl.TURN_KINDS]
+        say(f"{named(e)}: could not be started: {why}. Nothing was marked as failed. No further run is started in "
             "this command"
             + (f", and {plural(len(held), 'queued run')} {agree(len(held), 'stays as it is', 'stay as they are')} "
                f"({', '.join(held)})." if held else "."))
@@ -2252,12 +2662,19 @@ class Supervisor:
     def session_lost(self, e: dict, settling: bool):
         """A resume found its session gone from the harness. The attempt is taken back and the
         session noted, as purge-sessions notes one it deleted. The run is then started afresh
-        when it has written nothing, and otherwise left for the lead to decide."""
-        session, asked = e["session"], asking(e)
+        when it has written nothing, and otherwise left for the lead to decide. A turn of a
+        conversation is taken back and noted the same way, and its conversation is put down by
+        the same rule (no_session()): started afresh with no answer on record, and otherwise
+        left alone. So the next command knows the session is gone, and tries it no more."""
+        session, asked, turn = e["session"], asking(e), e["attempts"][-1]["kind"] in pl.TURN_KINDS
         self.take_back(e, LOST)
         e.setdefault("lost", {})[session] = round(time.time())
         self.save()
-        if asked:
+        if turn:  # no record goes to the turn log: the attempt was taken back, and its number is used again
+            run = pl.interview_of(e)
+            self.put_down(run, self.no_session(run, e, session_gone(e, self.runner(e["runner"]),
+                                                                    f"the {side_of(e)}'s")))
+        elif asked:
             say(f"{e['run']}: follow-up {asked['followup']} could not be asked: {LOST}.")
         elif progress_of(self.cfg, e)["written"]:
             self.cannot_continue(e, LOST)
@@ -2269,16 +2686,355 @@ class Supervisor:
 
     def close(self, name: str, why: str, how_long: str, then: str = ""):
         """Start nothing more on a runner in this command. Its queued runs keep their state.
-        then is what the user can do about it, said after the rest, once."""
+        then is what the user can do about it, said after the rest, once.
+
+        A conversation has two sides, and is on this runner when either is: an interview that
+        waits to be taken up keeps its state like a queued run, and one that is carried and
+        has a turn queued, for whichever side, is put down (drop()). The other side waits."""
         if name in self.closed:
             return
         self.closed[name] = why
-        held = [e["run"] for e, _ in self.queue if e["runner"] == name]
-        self.queue = [item for item in self.queue if item[0]["runner"] != name]
+        held = [e["run"] for e, kind in self.queue if name in self.runners_of((e, kind)) and kind not in pl.TURN_KINDS]
         stay = agree(len(held), "stays as it is", "stay as they are")
         say(f"{name}: {why}. No more launches on this runner {how_long}"
             + (f", and {plural(len(held), 'queued run')} {stay} ({', '.join(held)})" if held else "")
             + ". Other runners carry on." + (f" {then}" if then else ""))
+        self.drop(lambda item: name in self.runners_of(item))
+
+    def turn_away(self, name: str, lifts, said: str = ""):
+        """close() a runner whose harness is turning requests away, for now. lifts is when the
+        harness said its limit lifts, None when it did not say, and said the harness's own
+        message. That this is why it closed is kept (turned_away), with both: a conversation
+        with a side on it starts no further turn and reads blocked (shut_out())."""
+        self.turned_away.setdefault(name, {"lifts": lifts, "said": said})
+        self.close(name, TURNED_AWAY + (f", and said its limit lifts at {clock(lifts)}" if lifts else ""), "for now")
+
+    # ---- conversations, carried turn by turn. interview.py has every rule: these ask it what to do
+
+    def pair(self, run: str) -> dict:
+        """The conversation with that run id, as interviews holds one: the one this command
+        carries, or for one it does not carry the same made from runs.json. The kind is on the
+        interviewer's entry, which has none for an interview."""
+        if run in self.interviews:
+            return self.interviews[run]
+        host = next(e for e in self.runs if e["role"] == "interviewer" and e.get("interview") == run)
+        return {"p": next(e for e in self.runs if e["run"] == run), "i": host,
+                "kind": host.get("kind") or "interview", "own": True}
+
+    def guide_of(self, run: str) -> dict:
+        """The guide of a conversation as its persona has it (pl.guide()), by the conversation's kind."""
+        pair = self.pair(run)
+        return pl.guide(self.cfg, pair["p"]["persona"], pair["kind"])
+
+    def runners_of(self, item: tuple) -> set[str]:
+        """The runners a queue item needs: its entry's, and for an item of a conversation the
+        runner of each side, since neither side goes on without the other."""
+        e, kind = item
+        if kind != "interview" and kind not in pl.TURN_KINDS:
+            return {e["runner"]}
+        pair = self.pair(pl.interview_of(e))
+        return {pair["p"]["runner"], pair["i"]["runner"]}
+
+    def turn_kind(self, e: dict) -> str:
+        """The kind of an attempt that is one turn of entry e: "turn" for an entry of a
+        conversation. A finished run that is debriefed is none, and its turns are apart from its
+        own attempts (pl.APART_KINDS)."""
+        return "turn" if "interview" in e else "debrief"
+
+    def allowed(self, run: str, e: dict) -> tuple[dict, dict]:
+        """What a side of a conversation has left for its next turn, and its whole allowance:
+        (left(), allowance()) of its entry, which every turn of that side counts against."""
+        return left(self.cfg, e), allowance(self.cfg, e)
+
+    def mark(self, run: str, carried: bool):
+        """Write whether a launcher carries a conversation: "carried" on both entries of an
+        interview, in one save, and on the interviewer's entry alone in a debrief, whose
+        participant is a finished run that stays as it is. This is the one thing runs.json says
+        of a conversation as a whole: its state, and the reason for it, are read from its turn
+        log (interview.py). It is saved before the conversation's first attempt is recorded, and
+        taken off only when no attempt of either side is without an end."""
+        for e in self.own(run):
+            if carried:
+                e["carried"] = True
+            else:
+                e.pop("carried", None)
+        self.save()
+
+    def level(self, run: str):
+        """Bring "extended" on a conversation's own entries level with its turn log, which is the
+        truth of what "resume --extend" has given each side (pl.extensions()): the number the
+        log gives, neither more nor less, so a grant on the log that never reached runs.json
+        is applied, and one that did is not applied again. Called whenever a conversation is
+        taken up, after its "start" or "resume" record is written and before a turn is queued,
+        and before a log is moved out of the way of a fresh start (shelve()). Nothing is saved
+        here: mark() saves, and shelve()."""
+        given = pl.extensions(pl.read_turns(self.sd, run))
+        for e in self.own(run):
+            if given[side_of(e)]:
+                e["extended"] = given[side_of(e)]
+            else:
+                e.pop("extended", None)
+
+    def own(self, run: str) -> tuple:
+        """The entries that are a conversation's own: both of an interview, and the
+        interviewer's alone of a debrief, whose participant is a finished run."""
+        pair = self.pair(run)
+        return (pair["p"], pair["i"]) if pair["kind"] == "interview" else (pair["i"],)
+
+    def answers(self, run: str) -> int:
+        """The answers a conversation has on record: its exchanges."""
+        return sum(r["t"] == "answer" for r in pl.read_turns(self.sd, run))
+
+    def take_up(self, e: dict):
+        """Begin to carry the conversation whose participant's entry is e, or carry it again: a
+        "start" record on a log that has none, a "resume" record on any other, which is what
+        clears a "halt", a "lost" record and a count that is used up (interview.fold()). The
+        log is written first and runs.json second, as everywhere.
+
+        Two things are settled first. One that "resume --extend" named (extend) and that reads
+        limited gives the side its "halt" names one more allowance: the "resume" record says
+        which side, and that record is the grant. "extended" on the entries is then brought
+        level with the log (level()), in the save that marks the conversation carried, and so
+        it is for a grant that an earlier launcher recorded and was killed before it saved. A
+        log that begins again says in its "start" record what each side had been given, with
+        what this command gives it: the grant of a "resume --extend" that finds the log must
+        begin again is in that record, since there is no "resume" record to hold it. And
+        one with a side that has replied and cannot be resumed
+        (lacking()) starts afresh while it has no answer on record: its log is moved to logs/
+        (shelve(), which first brings the entries level with it, so that no grant it holds goes
+        with it), and a new one begins. With an answer on record it is taken up as it is, and
+        cannot_send() leaves it alone at its first turn: launch() does not queue such a one.
+
+        So in every order of events each side's "extended" is the grants it was ever given: the
+        old log's are on the entries before that log goes, the new log's "start" record takes
+        them from the entries with the one this command gives, and level() then reads the
+        entries off the new log. A launcher killed before the "start" record is written gave
+        nothing that was announced, and one killed after it has the grant on the log."""
+        run = pl.interview_of(e)
+        pair = self.interviews[run] = {**self.pair(run), "own": True}
+        had, lacks = pl.read_turns(self.sd, run), self.lacking(run)
+        halt = interview.fold(had)["halt"] if run in self.extend else None
+        side = halt["side"] if halt and halt["state"] == "limited" else None
+        if lacks and not self.answers(run):
+            kept, had = self.shelve(run), []
+            self.restarted.add(run)
+            say(f"{run}: {lacks[1]} and no answer is on record, so the {pair['kind']} starts afresh. The turn log "
+                f"it had is {kept.relative_to(self.sd)}.")
+        at = round(time.time(), 3)
+        if had:
+            record = {"t": "resume", "at": at, "by": self.by, **({"extended": side} if side else {})}
+        else:  # no log, so the entries are all that says what each side was given: shelve() saw to it that they do
+            brought = {side_of(x): x["extended"] for x in self.own(run) if x.get("extended")}
+            brought.update({side: brought.get(side, 0) + 1} if side else {})
+            record = {"t": "start", "at": at, "v": 1, "kind": pair["kind"], "run": run,
+                      **({"extended": brought} if brought else {})}
+        pl.append_turns(self.sd, run, [record])
+        self.level(run)
+        if side:
+            say(f"{run}: extended, one more allowance of the {side}'s limits. The plan's ceiling no longer holds "
+                "for this study.")
+        self.mark(run, True)
+        answers = sum(r["t"] == "answer" for r in had)
+        say(f"{run}: running ({pair['kind']}, " + (f"taken up again after {plural(answers, 'exchange')}" if had else
+                                                  f"participant on {pair['p']['runner']}, interviewer on "
+                                                  f"{pair['i']['runner']}") + ")")
+        self.advance(run)
+
+    def advance(self, run: str):
+        """Do what a conversation's log says comes next (interview.next_step()), until that is a
+        turn to start, which is queued, or a reason to put it down. A turn goes ahead of
+        everything queued that is no turn, so an interview under way is served before another
+        is taken up, and behind the turns already queued, so that where the carried interviews
+        share a runner with fewer slots than there are of them, each gets its turn in the order
+        it fell due and none waits until the others have ended. One side is queued or running
+        at any moment, never both: an interview has one process alive."""
+        pair, guide = self.interviews[run], self.guide_of(run)
+        while True:
+            pos = interview.fold(pl.read_turns(self.sd, run))
+            step = interview.next_step(pos, guide, time.time())
+            if step["do"] == "append":
+                pl.append_turns(self.sd, run, [step["record"]])
+                continue
+            if step["do"] == "stop":
+                return self.put_down(run)
+            if self.stop.asked:
+                return self.put_down(run)
+            e = pair["i"] if step["side"] == "interviewer" else pair["p"]
+            refusal = self.cannot_send(run, e, step)
+            if refusal:
+                return self.put_down(run, refusal)
+            self.sending[e["run"]] = step
+            ahead = next((i for i, (_, kind) in enumerate(self.queue) if kind not in pl.TURN_KINDS), len(self.queue))
+            self.queue.insert(ahead, (e, self.turn_kind(e)))
+            return
+
+    def cannot_send(self, run: str, e: dict, step: dict) -> str | None:
+        """Why the turn a step asks of entry e cannot be started, None when it can: the sentence
+        put_down() says. First match first. The side has nothing left of its time or budget: a
+        "halt" is appended first, so the log reads limited. A runner of either side starts
+        nothing more in this command (shut_out()): blocked when its harness is turning requests
+        away, and otherwise put down as the log reads. A side that has replied cannot be
+        resumed (lacking()): the conversation starts afresh or is left alone (no_session())."""
+        remaining, total = self.allowed(run, e)
+        spent = used_up(remaining, total)
+        if spent:
+            side = side_of(e)
+            reason = f"the {side} has {' and '.join(spent)} after {plural(len(e.get('attempts') or []), 'turn')}"
+            pl.append_turns(self.sd, run, [{"t": "halt", "at": round(time.time(), 3), "state": "limited", "side": side,
+                                            "reason": reason,
+                                            "limited_by": "time" if remaining["seconds"] <= 0 else "budget"}])
+            return reason
+        shut = self.shut_out(run, e)
+        if shut:
+            return shut
+        lacks = self.lacking(run)
+        return self.no_session(run, *lacks) if lacks else None
+
+    def shut_out(self, run: str, e: dict) -> str | None:
+        """Why a conversation starts no further turn once a runner starts nothing more in this
+        command (closed), None while the runners of both its sides do. This is the one rule for
+        a turn about to be queued (cannot_send()) and for one taken out of the queue (drop(),
+        which close() and fill() come through). e is the entry whose turn it would be, and its
+        runner is looked at first, then the interviewer's, then the participant's: neither side
+        goes on without the other.
+
+        When the runner closed because its harness is turning requests away (turn_away()), a
+        "halt" is appended first, so the log reads blocked: it names the side that is on that
+        runner, which need not be the side that was about to speak, with what the harness said
+        and when it said its limit lifts. A runner that closed for any other reason (its CLI
+        could not be started, or cannot do a run from this shell) leaves the log as it is:
+        nothing turned the conversation away, and "resume" goes on with it."""
+        pair = self.pair(run)
+        shut = next((x for x in (e, pair["i"], pair["p"]) if x["runner"] in self.closed), None)
+        if not shut:
+            return None
+        side, name = side_of(shut), shut["runner"]
+        if name not in self.turned_away:
+            return f"{name} starts nothing more in this command, and the {side} is on it"
+        away = self.turned_away[name]
+        reason = (f"the {side}'s harness is turning requests away ({name}"
+                  + (f": {away['said']}" if away["said"] else "") + ")")
+        pl.append_turns(self.sd, run, [{"t": "halt", "at": round(time.time(), 3), "state": "blocked", "side": side,
+                                        "reason": reason, **({"reset_at": away["lifts"]} if away["lifts"] else {})}])
+        return reason
+
+    def lacking(self, run: str) -> tuple[dict, str] | None:
+        """The side of a conversation that cannot be resumed, as (its entry, why), None when
+        both can: its session was purged, is gone from its harness, was not kept by it or was
+        never recorded, or its runner cannot resume one (session_gone()). Only a side with a
+        reply on record is asked: one with none is launched anew whatever became of an earlier
+        session of it. Both sides are asked whichever speaks next, so a conversation that
+        cannot go on is found before another turn is spent on it."""
+        pair, spoke = self.pair(run), interview.fold(pl.read_turns(self.sd, run))["spoke"]
+        for e in (pair["p"], pair["i"]):
+            why = spoke[side_of(e)] and session_gone(e, self.runner(e["runner"]), f"the {side_of(e)}'s")
+            if why:
+                return e, why
+        return None
+
+    def no_session(self, run: str, e: dict, why: str) -> str:
+        """What becomes of a conversation whose entry e cannot be resumed (lacking()), as the
+        sentence put_down() says. With an answer on record it is left for the lead to decide,
+        as a run with sections written is (cannot_continue()): nothing of it is moved, and the
+        command exits with 1. With none it starts afresh, since nothing would be lost: at once
+        when this command goes on with it, by queueing it to be taken up again (take_up()), and
+        otherwise by the next "resume". A command starts a conversation afresh once: a harness
+        that keeps no session would lose the next one too."""
+        answers, pair = self.answers(run), self.interviews.get(run)
+        if answers:
+            self.left_alone = True
+            return (f"{why}, so it cannot be continued. Left alone, with {plural(answers, 'answer')} on record. To "
+                    f"hold it again from the start, move {pl.INTERVIEWS}/{run}.jsonl into logs/ and use run")
+        again = run in self.restarted
+        if (pair and pair["own"] and not again and not self.stop.asked
+                and not self.runners_of((e, "interview")) & self.closed.keys()):
+            self.queue.insert(0, (pair["p"], "interview"))
+            return why
+        return (f"{why} and no answer is on record"
+                + (f", though this command had started the {self.pair(run)['kind']} afresh" if again else "")
+                + ". Next: resume, which starts it afresh")
+
+    def shelve(self, run: str) -> Path:
+        """Move a conversation's turn log out of the way of a fresh start, and return where it is
+        now: logs/<run id>.interview-<k>.jsonl, k counting from 1. Its two transcripts, when
+        "interview.py render" had written them, go beside it as .md and .analysts.md, first, so
+        that none is left to be read as the new interview's. Nothing is deleted: a turn log is
+        the only record of what was said. Each entry of the conversation loses "session", so
+        its side is launched anew, and keeps its attempts, the usage its sessions reported and
+        the time it has used: a fresh start gives no new allowance, and takes none away that
+        "resume --extend" gave. Those are counted on the log that is about to go
+        (pl.extensions()), and "extended" on an entry is only a copy, which a launcher that was
+        killed after it recorded a grant never brought level. So the entries are brought level
+        with the log and saved first (level()): once the log is moved they are the only record
+        of the grants, and the new log's "start" record is written from them (take_up()). The
+        log then goes before runs.json loses the sessions, as everywhere: a launcher killed
+        between the two leaves a conversation that reads pending, which "run" starts."""
+        self.level(run)
+        self.save()
+        logs, k = self.sd / "logs", 1
+        moved = ((self.sd / pl.INTERVIEWS / f"{run}.md", ".md"),
+                 (self.sd / pl.TRANSCRIPTS / f"{run}.md", ".analysts.md"), (pl.turn_log(self.sd, run), ".jsonl"))
+        while any((logs / f"{run}.interview-{k}{ext}").exists() for _, ext in moved):
+            k += 1
+        logs.mkdir(exist_ok=True)
+        for was, ext in moved:
+            if was.exists():
+                os.replace(was, logs / f"{run}.interview-{k}{ext}")
+        for e in self.own(run):
+            e.pop("session", None)
+        self.save()
+        return logs / f"{run}.interview-{k}.jsonl"
+
+    def put_down(self, run: str, why: str | None = None):
+        """Stop carrying a conversation, which has no process alive: "carried" comes off, its
+        transcripts are written when its log has an "end", and one line says the state the log
+        reads as and why: the reason the caller gives, else the one the log holds
+        (interview.standing()), else that a stop was asked, which is no reason for one that
+        is done. Nothing is appended here and no state is written: whatever stops it for good
+        is on the log before this is called.
+
+        The usage record is written again, since this is where an interview stops reading
+        running with no process ending: the record a turn's end wrote (turn_over()) still has
+        it so, and for an interview that ends at its cap the "end" is appended after that."""
+        self.interviews.pop(run, None)
+        self.mark(run, False)
+        records = pl.read_turns(self.sd, run)
+        if any(r["t"] == "end" for r in records):
+            interview.write_transcripts(self.cfg, run)
+        record_usage(self.cfg, self.runs)
+        state = pl.interview_state(records, False)
+        why = (why or interview.standing(records, self.guide_of(run))["reason"]
+               or ("stopped by the stop command" if self.stop.asked and state != "done" else None))
+        say(f"{run}: {state} after {plural(sum(r['t'] == 'answer' for r in records), 'exchange')}"
+            + (f": {why}" if why else ""))
+
+    def drop(self, match) -> list[tuple]:
+        """Take out of the queue every item that match(item) is true of, without starting it,
+        and return them. This is the only code that does: close(), hold(), fill() and a request
+        to stop come through it, so a carried conversation can never lose its queued turn
+        unnoticed. One that does is put down, for the reason shut_out() gives when a runner of
+        either side starts nothing more: blocked, with a "halt" on its log, when that runner's
+        harness is turning requests away, and as its log reads otherwise. A request to stop
+        leaves the log as it is too. An interview that was waiting to be taken up was not
+        carried: it keeps its state, as a queued run does."""
+        gone = [item for item in self.queue if match(item)]
+        self.queue = [item for item in self.queue if not any(item is taken for taken in gone)]
+        for e, kind in gone:
+            if kind not in pl.TURN_KINDS:
+                continue
+            self.sending.pop(e["run"], None)
+            run = pl.interview_of(e)
+            self.put_down(run, self.shut_out(run, e))
+        return gone
+
+    def sweep(self):
+        """Put down every conversation this command carries that has neither a queued turn nor a
+        process: what is left of one whose turn could not be started (a command its runner
+        cannot build, a process the system refused) or was taken back when it ended."""
+        busy = {pl.interview_of(e) for e, kind in self.queue if kind in pl.TURN_KINDS}
+        busy |= {pl.interview_of(c.entry) for c in self.children if pl.open_attempt(c.entry)}
+        for run in [run for run in self.interviews if run not in busy]:
+            self.put_down(run)
 
     # ---- watching
 
@@ -2297,7 +3053,7 @@ class Supervisor:
                 self.ended(child, record)
             elif self.stop.asked and child.asked < 1 + self.stop.force:
                 if not child.asked:
-                    say(f"{child.entry['run']}: stopping")
+                    say(f"{named(child.entry)}: stopping")
                 child.asked += 1
                 try:
                     os.kill(child.pids["watchdog"][0], signal.SIGTERM)
@@ -2351,15 +3107,20 @@ class Supervisor:
 
     def ended(self, child: Child, record: dict, settling: bool = False):
         """Record how an attempt ended and what state that leaves its run in. settling is for an
-        attempt that ended under an earlier launcher: its run is classified and nothing more."""
-        e, role, runner = child.entry, ROLES[child.entry["role"]], self.runner(child.entry["runner"])
+        attempt that ended under an earlier launcher: its run is classified and nothing more.
+
+        One turn of a conversation shares the head of this with every attempt: what a killed
+        watchdog left, a process that was never executed, the runner's reading of the output, a
+        session that is gone, a CLI that never ran, and the usage. From there it is turn_over()'s:
+        a turn decides no state, and its reply goes to the turn log."""
+        e, role, runner = child.entry, role_of(child.entry), self.runner(child.entry["runner"])
         attempt, code, why = e["attempts"][-1], record.get("exit_code"), record.get("stopped")
         if record.get("leftover"):
-            say(f"{e['run']}: its watchdog was killed, and {leftover(record['leftover'])}")
+            say(f"{named(e)}: its watchdog was killed, and {leftover(record['leftover'])}")
         if record.get("unchecked"):
-            say(f"{e['run']}: its watchdog was killed, and {unchecked(record['unchecked'])}")
+            say(f"{named(e)}: its watchdog was killed, and {unchecked(record['unchecked'])}")
         if record.get("elsewhere"):
-            say(f"{e['run']}: its watchdog was killed, and {unlooked(record['elsewhere'])}")
+            say(f"{named(e)}: its watchdog was killed, and {unlooked(record['elsewhere'])}")
         # After the CLI has gone, as its watchdog would, and after a "before" command it left (outcome()).
         left_browser = self.browser_left(e, attempt["n"])
         if record.get("refused"):  # the launcher that started it died before it could say so
@@ -2371,7 +3132,7 @@ class Supervisor:
         # The same of what shows that no run of this CLI can work from this shell (parse_result() "cannot_run").
         cause = self.repeated(e, attempt["n"], res["cannot_run"]).strip()
         number = attempt.get("followup")
-        if attempt["kind"] in ("resume", "followup") and res["session_lost"]:
+        if res["session_lost"] and (attempt["kind"] in ("resume", "followup") or self.resumes(e, attempt)):
             self.session_lost(e, settling)
             return
         if code and code > 0 and not why and not wrote.strip() and res["session_id"] is None:
@@ -2380,15 +3141,16 @@ class Supervisor:
             self.unstarted(e, record["argv"], f"Its CLI exited with code {code} before printing anything",
                            res["message"].strip() or "no message", settling)
             return
-        stopped = bool(why or record.get("killed"))  # the CLI did not end by itself
         session = res["session_id"] or e.get("session")
         own = usage_of(e) if number else {}  # the run's own usage, before this process is counted
-        spend = any(res["usage"].get(f) is not None for f in runners.USAGE_FIELDS if f != "duration_s")
         before = {}  # what the session had reported before this process
         if session or any(res["usage"].get(f) is not None for f in runners.USAGE_FIELDS):
             sessions, key = e.setdefault("sessions", {}), session or f"attempt {attempt['n']}"
             before = sessions.get(key) or {}
             sessions[key] = runners.merge_usage(before, res["usage"])
+        if attempt["kind"] in pl.TURN_KINDS:
+            self.turn_over(e, record, {**res, "cannot_run": cause}, session, left_browser, settling)
+            return
         ending = ("it was stopped at its time limit" if why == "time"
                   else "it was stopped by the stop command" if why == "stop"
                   else None if res["outcome"] == "ok" else ENDINGS[res["outcome"]])
@@ -2435,25 +3197,8 @@ class Supervisor:
                       else "stopped by the stop command" if why == "stop"
                       else f"the process ended before the run was complete{detail}" if state == "partial"
                       else f"the process ended with nothing written{detail}")
-        attempt.pop("was", None)
-        (attempt.get("steps") or {}).pop("seen", None)  # the backstop's place in the step log: no use from here on
-        attempt.update(ended=round(record["ended"], 3),
-                       seconds=round(max(0.0, record["ended"] - attempt["started"]), 3), exit_code=code,
-                       outcome=res["outcome"], state=state, session=session)
-        if record.get("lost"):
-            attempt["end_record"] = False  # its watchdog was killed: the end time is the most it can have been
-            if record.get("leftover"):
-                attempt["leftover"] = record["leftover"]
-        if left_browser:
-            attempt["browser_left"] = left_browser
-        if spend and res["usage"].get("scope") == "session":  # a running total: it holds what earlier
-            for earlier in e["attempts"][:-1]:                # processes of the session never reported
-                if session and earlier.get("session") == session and earlier.get("usage_reported") is False:
-                    earlier["usage_reported"] = True
-        elif stopped and not spend:
-            attempt["usage_reported"] = False  # stopped before it reported: unknown, and not none
-        e.update(pid=None, pid_identity=None, session=session, seconds_used=round(
-            sum(a["seconds"] or 0 for a in e["attempts"] if a["kind"] != "followup"), 3))
+        attempt["state"] = state
+        self.close_attempt(e, record, res, session, left_browser)
         # Its process did its work in a session that its harness did not keep: nothing can continue it.
         # Not noted for a failed run, which "run" starts afresh in a session of its own.
         unsaved = res["session_saved"] is False and bool(session) and (bool(number) or state != "failed")
@@ -2506,14 +3251,165 @@ class Supervisor:
             say(f"{e['run']}: {UNSAVED}. {e['runner']} kept no session for it, so purge-sessions has nothing of "
                 "it to delete either.")
         if res["outcome"] == "usage_limit" and not settling:
-            self.close(e["runner"], TURNED_AWAY
-                       + (f", and said its limit lifts at {clock(res['reset_at'])}" if res["reset_at"] else ""),
-                       "for now")
+            self.turn_away(e["runner"], res["reset_at"], said)
         elif shut:
             self.close(e["runner"], NO_RUN_HERE, "in this command", pl.SANDBOX_HINT)
         elif retry:
             self.retried.add(e["run"])
             self.queue.insert(0, (e, "retry"))
+
+    def close_attempt(self, e: dict, record: dict, res: dict, session: str | None, left_browser: dict | None):
+        """Put the end of an entry's last attempt on the attempt, while it is whole, and on the
+        entry: when it ended and how long it ran, its exit code, outcome and session, what a
+        killed watchdog or a browser session left, and whether its usage is on record. A total
+        for the session marks the earlier attempts of that session reported, and a process
+        that was stopped before it reported any is marked as not having. The entry has no
+        process from here on, and its time used is the sum over its own attempts: the ones that
+        leave its limits alone (pl.APART_KINDS) are not in it. Nothing is saved here."""
+        attempt = e["attempts"][-1]
+        stopped = bool(record.get("stopped") or record.get("killed"))  # the CLI did not end by itself
+        spend = any(res["usage"].get(f) is not None for f in runners.USAGE_FIELDS if f != "duration_s")
+        attempt.pop("was", None)
+        (attempt.get("steps") or {}).pop("seen", None)  # the backstop's place in the step log: no use from here on
+        attempt.update(ended=round(record["ended"], 3),
+                       seconds=round(max(0.0, record["ended"] - attempt["started"]), 3),
+                       exit_code=record.get("exit_code"), outcome=res["outcome"], session=session)
+        if record.get("lost"):
+            attempt["end_record"] = False  # its watchdog was killed: the end time is the most it can have been
+            if record.get("leftover"):
+                attempt["leftover"] = record["leftover"]
+        if left_browser:
+            attempt["browser_left"] = left_browser
+        if spend and res["usage"].get("scope") == "session":  # a running total: it holds what earlier
+            for earlier in e["attempts"][:-1]:                # processes of the session never reported
+                if session and earlier.get("session") == session and earlier.get("usage_reported") is False:
+                    earlier["usage_reported"] = True
+        elif stopped and not spend:
+            attempt["usage_reported"] = False  # stopped before it reported: unknown, and not none
+        e.update(pid=None, pid_identity=None, session=session, seconds_used=round(
+            sum(a["seconds"] or 0 for a in e["attempts"] if a["kind"] not in pl.APART_KINDS), 3))
+
+    # ---- when a turn of a conversation ends
+
+    def resumes(self, e: dict, attempt: dict) -> bool:
+        """Whether an attempt in flight is a turn that resumes its side's session. The attempt
+        does not say: the turn log has not moved since it was started, so the step it carries
+        out is the one the log gives now (interview.next_step())."""
+        if attempt["kind"] not in pl.TURN_KINDS:
+            return False
+        run = pl.interview_of(e)
+        step = interview.next_step(interview.fold(pl.read_turns(self.sd, run)), self.guide_of(run), time.time())
+        return step.get("how") == "resume"
+
+    def logged(self, e: dict, attempt: dict) -> list[dict]:
+        """The records a turn log has of one attempt of a side: none until its end is settled.
+
+        A record that pl.read_turns() set aside as malformed ("unread") is one of them when the
+        object its line held names this side and attempt, and is given as it was set aside. The
+        attempt is then on the log, so nothing is added for it again (turn_ended()). That is
+        all its side and attempt are read for: what the record says is still read by nothing,
+        so it is no reply the log has (turn_over())."""
+        side, records = side_of(e), pl.read_turns(self.sd, pl.interview_of(e))
+
+        def of_it(r: dict) -> bool:
+            held = r.get("record", r) if r["t"] == "unread" else r
+            return held.get("side") == side and held.get("attempt") == attempt["n"]
+
+        return [r for r in records if of_it(r)]
+
+    def turn_over(self, e: dict, record: dict, res: dict, session: str | None, left_browser: dict | None,
+                  settling: bool):
+        """Settle a turn that ran as the CLI, in the one order that a launcher killed at any
+        point leaves for the next to finish: what the reply comes to on the turn log first, in
+        one synced write (turn_ended()); then the attempt's end, whole; then the attempt cut
+        down to {"n", "kind", "ended", "seconds"} when its reply is on the log, which has the
+        rest; then one save. So the log is never behind runs.json, and an attempt that is still
+        open with its record already on the log is settled without a second record, whether
+        that record can be read or was set aside as malformed (logged()). An attempt that left
+        no reply stays whole, as evidence, and so does one whose record cannot be read, which
+        is no reply the log has. Then the usage record, the runner closed when its harness
+        turned the request away or showed that no run of it can work here, and what the
+        conversation does next (carry_on())."""
+        attempt, run = e["attempts"][-1], pl.interview_of(e)
+        self.after_debrief_turn(e, attempt)
+        appended = self.turn_ended(e, attempt, res, record, record.get("stopped"))
+        self.close_attempt(e, record, res, session, left_browser)
+        logged = self.logged(e, attempt)
+        spoke = interview.fold(pl.read_turns(self.sd, run))["spoke"][side_of(e)]
+        # A session its harness did not keep cannot be resumed. A side with no reply on record is launched afresh
+        # whatever became of its session, so nothing is noted for it.
+        unsaved = res["session_saved"] is False and bool(session) and spoke
+        if unsaved:
+            e.setdefault("unsaved", {})[session] = round(time.time())
+        replied = any(r["t"] not in ("lost", "unread") for r in logged)
+        if replied:
+            kept = {k: attempt[k] for k in ("n", "kind", "ended", "seconds")}
+            attempt.clear()
+            attempt.update(kept)
+        self.save()
+        self.snapshot([*(c.entry["run"] for c in self.children), e["run"]])
+        record_usage(self.cfg, self.runs)
+        for line in filter(None, map(interview.remark, appended)):
+            say(f"{run}: {line}")
+        if unsaved:
+            say(f"{run}: the {side_of(e)}'s session was not saved by {e['runner']}, so its next turn cannot resume it.")
+        if res["outcome"] == "usage_limit" and not settling:
+            self.turn_away(e["runner"], res["reset_at"], res["message"].strip())
+        elif res["cannot_run"] and not replied and not settling:
+            self.close(e["runner"], NO_RUN_HERE, "in this command", pl.SANDBOX_HINT)
+        self.carry_on(run, appended, res, settling)
+
+    def turn_ended(self, e: dict, attempt: dict, res: dict, record: dict, why: str | None) -> list[dict]:
+        """Add to the turn log what an ended turn comes to, and return the records added: none
+        when the log has a record of this side and attempt already, in any form (logged()),
+        from a launcher that was killed between the log and runs.json. interview.taken() decides
+        the records. This says only how the process ended: by the stop command; at the limit
+        its watchdog was given, which was limits.turn or the last of its side's allowance
+        ("bound"); as its harness reported it; or with its watchdog killed, the end record then
+        being made up (outcome()). A process that finished its turn left a reply, whatever its
+        exit code."""
+        if self.logged(e, attempt):
+            return []
+        run = pl.interview_of(e)
+        ending = ("stop" if why == "stop" else
+                  ("time" if attempt.get("bound") == "turn" else "limit") if why == "time" else
+                  res["outcome"] if res["outcome"] in ("budget", "usage_limit") else
+                  "killed" if record.get("lost") else None if res["outcome"] == "ok" else "error")
+        said = (res["cannot_run"] or res["message"].strip()) if ending in ("budget", "usage_limit", "error") else ""
+        result = {"reply": res["reply"] if ending is None else None, "ending": ending, "reason": said or None,
+                  "reset_at": res["reset_at"] if ending == "usage_limit" else None,
+                  "seconds": round(max(0.0, record["ended"] - attempt["started"]), 3)}
+        added = interview.taken(interview.fold(pl.read_turns(self.sd, run)), self.guide_of(run), side_of(e),
+                                attempt["n"], result, self.cfg["leak_terms"], time.time())
+        pl.append_turns(self.sd, run, added)
+        return added
+
+    def carry_on(self, run: str, appended: list[dict], res: dict, settling: bool):
+        """What a conversation does once a turn of it is settled. A turn that ended under an
+        earlier launcher is settled and no more: reconcile() puts its conversation down. One
+        this command does not go on with, or any once a stop was asked, is put down. Otherwise
+        the log decides (advance()), and nothing is put again unasked: after a turn that left
+        no reply it stops there, but for an empty answer, which is put once more.
+
+        The one exception is run's and pilot's, as for a run that failed: a side's first process
+        that left no usable reply (a "halt" with the state failed) is launched afresh once for
+        an interview in a command, whichever side it was, unless its runner starts nothing more
+        or its CLI showed that no run of it can work here. The "resume" record is what lets the
+        log go on."""
+        pair = self.interviews.get(run)
+        if settling or not pair:
+            return
+        if not pair["own"] or self.stop.asked:
+            return self.put_down(run)
+        last = appended[-1] if appended else {}
+        failed = last if (last.get("t"), last.get("state")) == ("halt", "failed") else None
+        side = pair["i"] if failed and failed["side"] == "interviewer" else pair["p"]
+        if (failed and self.retry and run not in self.retried and side["runner"] not in self.closed
+                and not res["cannot_run"]):
+            self.retried.add(run)
+            pl.append_turns(self.sd, run, [{"t": "resume", "at": round(time.time(), 3), "by": "run"}])
+            say(f"{run}: failed: {failed['reason']}; launching the {failed['side']} afresh, once")
+        self.advance(run)
 
     def answered(self, e: dict, attempt: dict, res: dict, ending: str | None, said: str) -> tuple[str, str | None]:
         """Settle what a follow-up attempt left in its run's persona file: (outcome, reason), the
@@ -2610,31 +3506,43 @@ class Supervisor:
             return None
 
     def supervise(self):
-        """Run until nothing is queued and no process is alive."""
+        """Run until nothing is queued and no process is alive. While a conversation is carried
+        the launcher looks every interview.TURN_POLL seconds at most: each of its turns waits for
+        that look, and at a second a look an interview of sixty turns would wait a minute in all.
+        After everything that can take a turn out of the queue or a process out of the children,
+        a carried conversation left with neither is put down (sweep()). On a request to stop,
+        whatever is queued goes through drop(), which puts down the conversations that were
+        waiting for a slot: one with a process alive is put down when that process ends."""
         while self.queue or self.children:
             if self.stop.asked and self.queue:
-                say(f"Stopping: {plural(len(self.queue), 'queued run')} "
-                    f"{agree(len(self.queue), 'stays as it is', 'stay as they are')}.")
-                self.queue.clear()
+                waiting = [e for e, kind in self.drop(lambda item: True) if kind not in pl.TURN_KINDS]
+                if waiting:
+                    say(f"Stopping: {plural(len(waiting), 'queued run')} "
+                        f"{agree(len(waiting), 'stays as it is', 'stay as they are')}.")
             self.fill()
+            self.sweep()
             if self.children:
-                time.sleep(self.poll)
+                time.sleep(min(self.poll, interview.TURN_POLL) if self.interviews else self.poll)
                 self.watch()
+                self.sweep()
 
 
 # ---------------------------------------------------------------- commands
 
 def select(runs: list[dict], role: str, ids: list[str] | None) -> list[dict]:
-    """The runs a command is about: every run of the role, or the ones --runs names."""
-    pool, noun = [e for e in runs if e["role"] == role], ROLES[role].noun
+    """The runs a command is about: every run of the role, or the ones --runs names. In an
+    interview study the panellist runs are the participants' entries, one for each interview."""
+    pool = [e for e in runs if e["role"] == role]
+    noun = role_of(pool[0]).noun if pool else ROLES[role].noun
+    what = noun if noun == Interview.noun else f"{role} {noun}"  # an interview is named by itself, not by a side
     if not pool:
-        raise SystemExit(f"This study has no {role} {noun}s in runs.json." + (
+        raise SystemExit(f"This study has no {what}s in runs.json." + (
             f' "run --role {role}" plans and starts them.' if role in pl.JOB_ROLES else ""))
     if ids is None:
         return pool
     unknown = [i for i in ids if i not in {e["run"] for e in pool}]
     if unknown:
-        raise SystemExit(f"No {role} {noun} called {', '.join(unknown)}. There {agree(len(pool), 'is', 'are')}: "
+        raise SystemExit(f"No {what} called {', '.join(unknown)}. There {agree(len(pool), 'is', 'are')}: "
                          f"{', '.join(e['run'] for e in pool)}")
     return [e for e in pool if e["run"] in ids]
 
@@ -2799,12 +3707,13 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
             f"The {'analysts wait' if role == 'analyst' else 'writer waits'} for the follow-up questions: the one put "
             f"to {planning.listed(out)} is not settled, so {files} may still be put back as before the question. "
             f"Wait for the follow-up to finish, or settle one that was cut short with: followup.py {sd} list")
-    records = pl.run_records(sd, cfg)
+    records = pl.run_records(sd, cfg, held(cfg))
     if role == "analyst":
         waiting = [r for r in records if r["state"] in ("pending", "running", "blocked")]
         if waiting and not allow_incomplete:
+            unit = "interview" if cfg["type"] == "interview" else "panellist run"
             raise SystemExit(
-                f"Analysts wait for the panel: {plural(len(waiting), 'panellist run')} of {len(records)} "
+                f"Analysts wait for the panel: {plural(len(waiting), unit)} of {len(records)} "
                 f"{agree(len(waiting), 'has', 'have')} not finished ("
                 + ", ".join(f"{r['run']} {r['state']}" for r in waiting) + "). Finish them with launch.py run and "
                 "resume, or pass --allow-incomplete to analyse what there is: the analysts are then told which "
@@ -2880,11 +3789,14 @@ def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list
     what study.json asks of each (fitness()), before any process starts. Returns the targets
     that may start, and why nothing may when that is the case. The plan command reports the
     same things (planning.build), so what it refuses, this refuses. Only a panellist run reads
-    the materials: analysts and the writer start without them."""
+    the materials: analysts and the writer start without them, and so do both sides of an
+    interview, which are given their words and nothing to open. An interview is refused for
+    what would spoil it as study.json stands (pl.interview_problems()), and through fitness()
+    for a side on a runner that cannot carry one (planning.no_interview())."""
     locked = planning.unwritable_study(cfg) if targets else None
     if locked:
         return [], f"Nothing was started: {locked}"
-    if any(e["role"] == "panellist" for e in targets):
+    if any(e["role"] == "panellist" and "interview" not in e for e in targets):  # an interview reads and opens nothing
         uncaptured = planning.no_materials(cfg, planning.materials(cfg))
         if uncaptured:
             return [], f"Nothing was started: {uncaptured}"
@@ -2894,6 +3806,9 @@ def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list
         no_browser = planning.no_browser(cfg, {e["runner"] for e in targets if e["role"] == "panellist"})
         if no_browser:
             return [], f"Nothing was started: {no_browser}."
+    spoilt = pl.interview_problems(cfg) if any("interview" in e for e in targets) else []
+    if spoilt:  # a leak term the interviewer would say, a persona with no topic: study.json changed since the scaffold
+        return [], "Nothing was started: " + " ".join(spoilt)
     unusable, unfit, notes = fitness(cfg, targets)
     for name, message in unusable.items():
         say(f"{name}: cannot be used: {message}")
@@ -2907,7 +3822,9 @@ def preflight(cfg: dict, targets: list[dict], allow_missing: bool) -> tuple[list
             f"({', '.join(skipped)}).")
     for note in notes:
         say(f"Note: {note}.")
-    errors = [f"{e['run']}: {error}" for e in ready for error in unfit[e["run"]]]
+    # Every interview has the one interviewer's model entry: what refuses it is said once, not for each interview.
+    errors = list(dict.fromkeys(f"{'interviewer' if e['role'] == 'interviewer' else e['run']}: {error}"
+                                for e in ready for error in unfit[e["run"]]))
     if errors:
         return [], "Nothing was started: fix these model entries in study.json.\n" + "\n".join(errors)
     return ready, None
@@ -2917,7 +3834,7 @@ def summary(cfg: dict, entries: list[dict]) -> bool:
     """Print the closing line and what to do next. True when every run is done."""
     states = [state_of(cfg, e) for e in entries]
     say("Finished: " + ", ".join(f"{s} {states.count(s)}" for s in STATES if s in states) + ".")
-    for s, role in ((s, role) for s in STATES if s in NEXT for role in ROLES):
+    for s, role in ((s, role) for s in STATES if s in NEXT for role in STARTABLE):
         ids = [e["run"] for e, st in zip(entries, states) if st == s and e["role"] == role and not e.get("released")]
         if ids:
             say(f"  {s}: {', '.join(ids)}. Next: {NEXT[s]}"
@@ -2930,7 +3847,16 @@ def summary(cfg: dict, entries: list[dict]) -> bool:
 
 
 def launch(args, cfg: dict) -> int:
-    """run, pilot and resume: queue the runs the command owns, then supervise them."""
+    """run, pilot and resume: queue the runs the command owns, then supervise them. An interview
+    is queued by its participant's entry, as one item that the supervisor takes up and then
+    carries turn by turn (Supervisor.take_up()): "run" and "pilot" take the ones that read
+    pending or failed, and "resume" the ones that read partial or blocked, and goes on with one
+    whose turn it found alive and adopted. "resume --runs <ids> --extend" also takes the ones
+    named that read limited. One with a side that cannot be resumed and an answer on record is
+    not queued: it is left alone, as a run with sections written and no session is. Nor is one
+    whose turn log is not as a launcher writes one (interview.malformed()): what is left of
+    such a log is no account of the interview, so nothing is added to it, the line says which
+    record is wrong and what to do, and the command exits with 1."""
     sd, command = cfg["_dir"], args.cmd
     if args.extend and not (command == "resume" and args.runs):
         raise SystemExit("--extend goes with resume --runs <ids>: name the limited runs to give one more allowance.")
@@ -2954,7 +3880,8 @@ def launch(args, cfg: dict) -> int:
     lock.acquire(command, args.grace)
     try:
         runs = pl.read_runs(sd)
-        sup = Supervisor(cfg, runs, args.grace, args.poll, retry=command != "resume", stop=stop)
+        sup = Supervisor(cfg, runs, args.grace, args.poll, retry=command != "resume", stop=stop,
+                         by="resume" if command == "resume" else "run")
         sup.reconcile()
         if args.role in pl.JOB_ROLES:
             plan_jobs(cfg, runs, args.role, command, args.allow_incomplete)
@@ -2969,6 +3896,25 @@ def launch(args, cfg: dict) -> int:
         for e in chosen:
             state = state_of(cfg, e)
             extend = state == "limited" and args.extend
+            if "interview" in e:  # carried turn by turn from wherever its log stands
+                wrong = interview.malformed(pl.read_turns(sd, e["run"])) if state != "done" else None
+                adopted = command == "resume" and e["run"] in sup.interviews
+                lacks = sup.lacking(e["run"]) if state in STARTS[command] or extend else None
+                if wrong and (state in STARTS[command] or extend or adopted or ids):
+                    sup.left_alone = True  # an adopted turn is settled and its interview put down (carry_on())
+                    say(f"{e['run']}: {wrong}, so {command} leaves it alone. Put {pl.INTERVIEWS}/{e['run']}.jsonl "
+                        "right, or to hold the interview again from its start move that file into logs/ and use "
+                        f"launch.py {sd} run --runs {e['run']}.")
+                elif lacks and sup.answers(e["run"]):  # with none it starts afresh when it is taken up
+                    say(f"{e['run']}: {state} after {plural(sup.answers(e['run']), 'exchange')}: "
+                        f"{sup.no_session(e['run'], *lacks)}.")
+                elif state in STARTS[command] or extend:
+                    plan.append((e, "interview", extend))
+                elif command == "resume" and e["run"] in sup.interviews:
+                    sup.interviews[e["run"]]["own"] = True  # its turn was adopted: this command goes on with it
+                elif ids and state not in ("done", "running"):
+                    say(f"{e['run']}: {state}, so {command} leaves it alone. Next: {NEXT[state]}.")
+                continue
             if e.get("released") and not args.released:  # the lead let its account go: started only when asked to
                 if state in STARTS[command] or extend:
                     say(f"{e['run']}: released by the lead {clock(e['released'])}, so {command} leaves it alone: "
@@ -2981,34 +3927,45 @@ def launch(args, cfg: dict) -> int:
                 continue
             kind = "launch"
             if command == "resume":
-                gone = ("its session was purged (purge-sessions)" if e.get("session") in (e.get("purged") or {})
-                        else LOST if e.get("session") in (e.get("lost") or {})
-                        else NOT_SAVED if e.get("session") in (e.get("unsaved") or {}) else None)
-                can_resume = e.get("session") and not gone and sup.runner(e["runner"]).capabilities()["resume"]
-                kind = "resume" if can_resume else "restart"
-                if not can_resume and progress_of(cfg, e)["written"]:
-                    sup.cannot_continue(e, gone or ("no session was recorded" if not e.get("session")
-                                                    else f"{e['runner']} cannot resume a session"))
+                lacks = session_gone(e, sup.runner(e["runner"]))
+                kind = "restart" if lacks else "resume"
+                if lacks and progress_of(cfg, e)["written"]:
+                    sup.cannot_continue(e, lacks)
                     continue
             plan.append((e, kind, extend))
-        ready, refusal = preflight(cfg, [e for e, _, _ in plan], args.allow_missing)
+        # Both sides of an interview are judged, and it starts only when both may.
+        hosts = {e["run"]: sup.pair(e["run"])["i"] for e, kind, _ in plan if kind == "interview"}
+        ready, refusal = preflight(cfg, [e for e, _, _ in plan] + list(hosts.values()), args.allow_missing)
         if refusal:
             say(refusal)
         ready = {e["run"] for e in ready}
         for e, kind, extend in plan:
-            if e["run"] not in ready:
+            if e["run"] not in ready or (e["run"] in hosts and hosts[e["run"]]["run"] not in ready):
                 continue
-            if extend:
+            # When its harness said its limit lifts: on its entry, or for an interview on its turn log.
+            lifts = (interview.standing(pl.read_turns(sd, e["run"]), sup.guide_of(e["run"]))["reset_at"]
+                     if kind == "interview" else e.get("reset_at"))
+            if extend and kind == "interview":
+                sup.extend.add(e["run"])  # the side at its limit is known when it is taken up, which says so
+            elif extend:
                 e["extended"] = (e.get("extended") or 0) + 1
                 sup.save()
                 say(f"{e['run']}: extended, one more allowance of its limits. The plan's ceiling no longer "
                     "holds for this study.")
-            elif e.get("reset_at") and e["reset_at"] > time.time():
-                say(f"{e['run']}: its harness said its limit lifts at {clock(e['reset_at'])}; trying anyway.")
+            elif lifts and lifts > time.time():
+                say(f"{e['run']}: its harness said its limit lifts at {clock(lifts)}; trying anyway.")
             sup.queue.append((e, kind))
         sup.supervise()
-        covered = chosen + [e for e in sup.adopted if e["run"] not in {c["run"] for c in chosen}]
+        # An adopted turn stands for its interview, which the participant's entry names.
+        adopted = [sup.pair(e["interview"])["p"] if "interview" in e else e for e in sup.adopted]
+        covered = chosen + [e for e in adopted if e["run"] not in {c["run"] for c in chosen}]
         done = summary(cfg, covered)
+        ended = [e["run"] for e in covered if "interview" in e and state_of(cfg, e) == "done"]
+        if ended:
+            say(f"  Transcripts of the {plural(len(ended), 'interview')} that {agree(len(ended), 'is', 'are')} done: "
+                f"{sd / pl.INTERVIEWS}/<run id>.md, and the analysts' copies in {pl.TRANSCRIPTS}/."
+                + (" Read them before the rest: the next plan estimates from what the pilot used."
+                   if command == "pilot" else ""))
         if done and args.role == "analyst":
             say(f"Next: read {', '.join(e['file'] for e in chosen)}, then launch.py {sd} run --role writer.")
         return 0 if done and not (refusal or sup.left_alone or sup.refused) else 1
@@ -3037,6 +3994,10 @@ def stop_launcher(args, cfg: dict) -> int:
     sd = cfg["_dir"]
     done = (f"Stopped. Runs that wrote sections are partial: continue them with launch.py {sd} resume. Runs that "
             f"wrote nothing are pending again: start them with launch.py {sd} run.")
+    if cfg["type"] == "interview":
+        done = (f"Stopped. Interviews with a turn on record are partial: continue them with launch.py {sd} resume, "
+                "which puts the turn that was stopped again. Interviews with none are pending: start them with "
+                f"launch.py {sd} run.")
     held = Lock.holder(sd)
     if held and not held["seen"]:
         raise SystemExit(f"A launcher has this study{Lock.who(held)}, and \"stop\" could not ask it to stop. {UNSEEN}, "
@@ -3125,7 +4086,8 @@ def check_runs(args, cfg: dict) -> int:
     was checked."""
     sd = cfg["_dir"]
     if cfg["type"] != "usability":
-        raise SystemExit("check runs the success checks of a usability study's tasks, and this is a review study.")
+        raise SystemExit("check runs the success checks of a usability study's tasks, and this is "
+                         f"{'an interview' if cfg['type'] == 'interview' else 'a review'} study.")
     if not any("success_check" in t for t in cfg["tasks"]):
         raise SystemExit('No task of this study has a "success_check" in study.json, so there is nothing to run.')
     missing = [p for p in pl.usability_problems(cfg) if "success_check" in p]
@@ -3153,6 +4115,39 @@ def check_runs(args, cfg: dict) -> int:
         lock.release()
 
 
+def side_facts(e: dict, current: float = 0) -> dict:
+    """What "status" says of the interviewer's entry of a conversation, under its row's
+    "interview": the model entry, the turns it has had, its time and usage, and what became of
+    its session, under the keys a row has for its own entry. current is how long its turn in
+    flight has run, which is not in "seconds_used" yet."""
+    return {"run": e["run"], "key": e["key"], "runner": e["runner"], "model": e["model"],
+            "attempts": len(e.get("attempts") or []), "seconds_used": round((e.get("seconds_used") or 0) + current, 1),
+            "usage": usage_of(e), "unreported_attempts": planning.unreported(e), "extended": e.get("extended") or 0,
+            "session": e.get("session"), "purged": sorted(e.get("purged") or {}), "lost": sorted(e.get("lost") or {}),
+            "unsaved": sorted(e.get("unsaved") or {})}
+
+
+def side_used(side: str, facts: dict) -> str:
+    """One side of an interview in its row of "status": "interviewer: 4 turns, 38s, 21,480 in
+    and 912 out tokens, $0.11", then what is out of the usual course with it: usage a stopped
+    process never reported, an allowance it was given with --extend, and a session that
+    cannot be continued. Nothing of a side that has had no turn. facts is a row, for the
+    participant, or side_facts()."""
+    u, session = facts["usage"], facts["session"]
+    said = [plural(facts["attempts"], "turn") if facts["attempts"] else "",
+            duration(facts["seconds_used"]) if facts["attempts"] else "",
+            f"{u['input_tokens']:,} in and {u['output_tokens'] or 0:,} out tokens" if u["input_tokens"] is not None
+            else "",
+            f"${u['cost_usd']:.2f}" if u["cost_usd"] is not None else "",
+            f"usage of {planning.attempts_named(facts['unreported_attempts'])} not reported (process was stopped)"
+            if facts["unreported_attempts"] else "",
+            f"extended {facts['extended']}x" if facts["extended"] else "",
+            "session purged" if session in facts["purged"] else "session lost" if session in facts["lost"] else
+            "session not saved" if session in facts["unsaved"] else "earlier sessions purged" if facts["purged"]
+            else ""]
+    return f"{side}: " + ", ".join(x for x in said if x) if any(said) else ""
+
+
 def status(args, cfg: dict) -> int:
     """Print every run and job as it is on record, with what can be seen of its process. Starts
     nothing, holds no lock and changes nothing.
@@ -3162,40 +4157,69 @@ def status(args, cfg: dict) -> int:
     place of "alive" or "gone", nothing is said of its browser session, and no run is called
     gone for a launcher to settle. One line says so. With no launcher, the same is said of each
     run that is alive where this shell cannot look: its watchdog holds its lock and is not to
-    be seen (unseen()). A run whose watchdog has let go of its lock is "gone", wherever it ran."""
+    be seen (unseen()). A run whose watchdog has let go of its lock is "gone", wherever it ran.
+
+    An interview has one row, on its participant's entry: its interviewer's has none. Its state
+    and its reason are read from its turn log (interview.standing()), and a log that is not as
+    a launcher writes one is the reason, with each such record named, whatever the rest of the
+    log reads as, "done" too. "scored" and "of" count
+    the topics a question has opened, and "interview" has the exchanges, the cap, which side
+    is awaited, which has a turn in flight ("side") and, under "interviewer", what that entry
+    has used (side_facts()): the row's own "attempts", "seconds_used", "usage", "extended" and
+    "session" are the participant's. Its process is that of whichever side has a turn in
+    flight. While a launcher has the study it is "between turns" with none, and also with one
+    whose process has ended and is not recorded yet, which the launcher sees to at its next
+    look: neither is a process gone missing. With no launcher nothing is carried (pl.carried()):
+    an interview that one left reads as its log reads, its process is that of the turn it left
+    in flight, alive or gone, and one line under the rows names those, for "resume" to take up."""
     sd, now = cfg["_dir"], time.time()
     held = Lock.holder(sd)
+    cfg["_held"] = bool(held)  # the one answer every state below is read against (held())
     blind = bool(held) and not held["seen"]
     rows = {"run": [], "job": []}  # panellist runs, then analyst and writer jobs
-    for e in pl.read_runs(sd):
-        if e["role"] not in ROLES:
+    entries = pl.read_runs(sd)
+    hosts = {e["interview"]: e for e in entries if e["role"] == "interviewer" and "interview" in e}
+    for e in entries:
+        if e["role"] not in ROLES or e["role"] == "interviewer":
             continue
-        prog, attempts, running = progress_of(cfg, e), e.get("attempts") or [], in_flight(e)
+        prog, attempts = progress_of(cfg, e), e.get("attempts") or []
+        talk = "interview" in e
+        # The entry whose attempt is in flight: of an interview, the side that has a turn out.
+        live = next((x for x in ((e, hosts[e["run"]]) if talk else (e,)) if in_flight(x)), None)
+        running, turns = bool(live), (live or e).get("attempts") or []
         asked = planning.followup_attempts(e)
         own = ({"scored": len(prog["scored"]), "of": len(prog["units"])} if e["role"] == "panellist"
                else {"model": e["model"], "file": e["file"], "note": e.get("note")})
-        state = pl.run_state(prog, e.get("state"))
+        state = state_of(cfg, e)
+        stands = interview.standing(pl.read_turns(sd, e["run"]), pl.guide(cfg, e["persona"])) if talk else {}
         # The attempt's own files say where its processes are, and whether it has ended: runs.json
         # lacks the pid when a launcher died early, and says "running" until a launcher settles it.
-        log = str(sd / "logs" / f"{e['run']}.{attempts[-1]['n']}") if running and attempts else None
+        log = str(sd / "logs" / f"{live['run']}.{turns[-1]['n']}") if running and turns else None
         pids = (recorded(Path(log + ".pid")) if log else None) or {}
         record = end_record(Path(log + ".end")) if pids else None
         over = not pids or record or not living(pids)
         hidden = blind or unseen(pids)
-        current = ((record or {}).get("ended") or now) - attempts[-1]["started"] if log else 0
-        rows[ROLES[e["role"]].noun].append({
+        current = ((record or {}).get("ended") or now) - turns[-1]["started"] if log else 0
+        # A launcher carries it and no turn is at work: none is in flight, or one has ended and is not recorded yet.
+        between = talk and state == "running" and (not running or (bool(over) and not hidden))
+        host = side_facts(hosts[e["run"]], current if live is hosts[e["run"]] else 0) if talk else None
+        rows["job" if role_of(e).noun == "job" else "run"].append({
             "run": e["run"], "role": e["role"], "name": e.get("name", ""), "key": e["key"], "runner": e["runner"],
             "state": state, **own,
-            "process": ("unseen" if hidden else "gone" if over else "alive") if running else None,
+            **({"interview": {"exchanges": prog["exchanges"], "cap": prog["cap"], "awaiting": stands["awaiting"],
+                              "side": live and side_of(live), "interviewer": host}} if talk else {}),
+            "process": "between turns" if between else ("unseen" if hidden else "gone" if over else "alive")
+            if running else None,
             "pid": pids["cli"][0] if pids else None, "attempts": len(attempts) - len(asked),
             "followups": sorted({a["followup"] for a in asked if a.get("ended") is not None}),  # the settled ones
             "asking": asking(e)["followup"] if asking(e) else None,
             # Its file was read as it stood before that follow-up: nothing is taken from it until it is settled.
             "unsettled": bool(asking(e)) and pl.read_copy(Path(log + ".before")) is not None,
-            "seconds_used": round((e.get("seconds_used") or 0) + (0 if asking(e) else current), 1),
+            "seconds_used": round((e.get("seconds_used") or 0) + (current if live is e and not asking(e) else 0), 1),
             "usage": usage_of(e), "unreported_attempts": planning.unreported(e),
             "unallocated": planning.unallocated(e),
-            "reason": e.get("reason") if state != "done" else None,
+            # Of an interview that is done, only that its log is not as a launcher writes one (standing()).
+            "reason": stands["reason"] if talk else e.get("reason") if state != "done" else None,
             "leftover": still_left(attempts[-1].get("leftover")) if attempts else None,
             # The browser session of the attempt now running (browser_session.state()), and what was found or
             # left of the session of its last attempt (Supervisor.browser_left()).
@@ -3204,13 +4228,17 @@ def status(args, cfg: dict) -> int:
             "account": e.get("account"),  # a usability run's test account (panel_lib.py), with no identifier or secret
             "checks": e.get("checks"),    # what the success check of each of its tasks said (accounts.py)
             "released": e.get("released"),  # when the lead let its account go with "release", unfinished
-            "reset_at": e.get("reset_at"),
+            "reset_at": stands["reset_at"] if talk else e.get("reset_at"),
             "extended": e.get("extended") or 0, "session": e.get("session"),
             "purged": sorted(e.get("purged") or {}), "lost": sorted(e.get("lost") or {}),
             "unsaved": sorted(e.get("unsaved") or {})})  # the sessions its harness did not keep (ended())
     every = rows["run"] + rows["job"]
-    extended = [r["run"] for r in every if r["extended"]]
-    gone = [r["run"] for r in every if r["process"] == "gone"]
+    extended = [r["run"] for r in every if r["extended"] or (r.get("interview") or {"interviewer": {}})[
+        "interviewer"].get("extended")]
+    gone = [r["run"] for r in every if r["process"] == "gone" and "interview" not in r]
+    # With no launcher, the interviews one left with a turn in flight: nothing carries them, and "resume" does.
+    left = [f"{r['run']} ({'still running' if r['process'] == 'alive' else 'ended since'})"
+            for r in every if "interview" in r and r["process"] in ("alive", "gone")] if not held else []
     followups, earlier = pl.read_followups(sd), len(pl.read_earlier_sessions(sd))
     if args.json:
         print(json.dumps({"launcher": held, "runs": rows["run"], "jobs": rows["job"], "extended": extended,
@@ -3226,33 +4254,45 @@ def status(args, cfg: dict) -> int:
                 [f"{shared['input_tokens']:,} in and {shared['output_tokens'] or 0:,} out tokens"]
                 if shared["input_tokens"] is not None else []) + (
                 [planning.money(shared["cost_usd"])] if shared["cost_usd"] is not None else [])
-            facts = [", ".join(x for x in ("" if r["process"] == "unseen" else f"process {r['process']}",
-                                           f"pid {r['pid']}" if r["pid"] else "") if x) if r["process"] else "",
+            talk = r.get("interview") or {}
+            replying = bool(talk.get("side")) and r["process"] in ("alive", "unseen")
+            facts = [f"{talk['exchanges']} of {talk['cap']} exchanges" if talk else "",
+                     f"{r['scored']} of {plural(r['of'], 'topic')} opened" if talk else "",
+                     (REPLYING if replying else AWAITED).get(talk.get("awaiting"), "") if r["state"] != "done" else "",
+                     ", ".join(x for x in ("" if r["process"] == "unseen" else
+                                           r["process"] if r["process"] == "between turns" else
+                                           f"process {r['process']}",
+                                           f"pid {r['pid']}" if r["pid"] and r["process"] != "between turns"
+                                           else "") if x) if r["process"] else "",
                      {"up": "browser session up", "starting": "browser session starting",
                       "down": "browser session not running"}.get(r["browser"], ""),
                      (f"being asked follow-up {r['asking']}" if r["process"] == "alive"
                       else f"follow-up {r['asking']} not settled") if r["asking"] else "",
-                     plural(r["attempts"], "attempt") if r["attempts"] else "",
-                     f"asked follow-up {planning.listed([str(n) for n in r['followups']])}" if r["followups"] else "",
-                     duration(r["seconds_used"]) if r["attempts"] else "",
-                     f"{u['input_tokens']:,} in and {u['output_tokens'] or 0:,} out tokens" if u["input_tokens"] is not None
-                     else "",
-                     f"${u['cost_usd']:.2f}" if u["cost_usd"] is not None else "",
-                     f"usage of {planning.attempts_named(r['unreported_attempts'])} not reported (process was "
-                     "stopped)" if r["unreported_attempts"] else "",
-                     f"{' and '.join(lump)} unallocated between the run and a follow-up" if lump else "",
-                     f"extended {r['extended']}x" if r["extended"] else "",
+                     *([side_used("participant", r), side_used("interviewer", talk["interviewer"])] if talk else [
+                         plural(r["attempts"], "attempt") if r["attempts"] else "",
+                         f"asked follow-up {planning.listed([str(n) for n in r['followups']])}" if r["followups"]
+                         else "",
+                         duration(r["seconds_used"]) if r["attempts"] else "",
+                         f"{u['input_tokens']:,} in and {u['output_tokens'] or 0:,} out tokens"
+                         if u["input_tokens"] is not None else "",
+                         f"${u['cost_usd']:.2f}" if u["cost_usd"] is not None else "",
+                         f"usage of {planning.attempts_named(r['unreported_attempts'])} not reported (process was "
+                         "stopped)" if r["unreported_attempts"] else "",
+                         f"{' and '.join(lump)} unallocated between the run and a follow-up" if lump else "",
+                         f"extended {r['extended']}x" if r["extended"] else ""]),
                      "" if not r["account"] else "test account torn down" if r["account"]["torn_down"]
                      else "test account in force",
                      f"released by the lead {clock(r['released'])}" if r["released"] else "",
                      "checked: " + ", ".join(
                          f"{task} {'failed to run' if c['error'] else 'completed' if c['checked'] else 'not completed'}"
                          for task, c in r["checks"].items()) if r["checks"] else "",
+                     "" if talk else  # of an interview each side's session is said with that side (side_used())
                      "session purged" if r["session"] in r["purged"] else
                      "session lost" if r["session"] in r["lost"] else
                      "earlier sessions purged" if r["purged"] else ""]
             lost = r["browser_left"]
-            why = [r["reason"] or "", r.get("note") or "", UNSAVED if r["session"] in r["unsaved"] else "",
+            why = [r["reason"] or "", r.get("note") or "",
+                   UNSAVED if r["session"] in r["unsaved"] and not talk else "",
                    leftover(r["leftover"]) if r["leftover"] else "",
                    f"TEARDOWN OF ITS TEST ACCOUNT FAILED: {r['account']['teardown_error']}"
                    if (r["account"] or {}).get("teardown_error") else "",
@@ -3264,8 +4304,8 @@ def status(args, cfg: dict) -> int:
                     + ("found it running and stopped it" if lost["found"] else "found none running"))
                    + (f", but {remainder(lost)}" if lost["left"] or lost.get("kept") else ""),
                    f"limit lifts {clock(r['reset_at'])}" if r["reset_at"] else ""]
-            print(f"{r['run']:<16} {r['state']:<8} " + (f"{r['scored']}/{r['of']}  {r['name']}" if noun == "run"
-                                                         else f"{r['file']}  {r['name']}")
+            print(f"{r['run']:<16} {r['state']:<8} " + (r["name"] if talk else f"{r['scored']}/{r['of']}  {r['name']}"
+                                                         if noun == "run" else f"{r['file']}  {r['name']}")
                   + (f"  [{', '.join(x for x in facts if x)}]" if any(facts) else "")
                   + (f"  {'; '.join(x for x in why if x)}" if any(why) else ""))
         states = [r["state"] for r in group]
@@ -3281,6 +4321,11 @@ def status(args, cfg: dict) -> int:
               + ("The launcher above settles them within its next poll." if held else
                  "The next launch.py run, resume or stop settles them"
                  + (", from a shell that sees the runs this one cannot." if unseen_here else ".")))
+    if left:
+        print(f"A launcher that is gone left a turn in flight in {planning.listed(left)}. launch.py {sd} resume "
+              "records what each turn came to and goes on with its interview, and stop records it and leaves the "
+              "interview partial"
+              + (", from a shell that sees the runs this one cannot." if unseen_here else "."))
     for line in pl.unsettled_lines(rows["run"]):
         print(line)
     if extended:
@@ -3296,10 +4341,13 @@ def status(args, cfg: dict) -> int:
 def plan(args, cfg: dict) -> int:
     """Print the plan. Starts no run, holds no lock and writes nothing to the study: whether a
     launcher has it is asked of the lock, which says so from any shell (Lock.holder()). A
-    runner's sign-in check may let its harness refresh its own login."""
+    runner's sign-in check may let its harness refresh its own login. An interview study's
+    plan is of its interviews, each with both its sides: its interviewers' entries are given to
+    planning.build() with its participants', and exit code 1 says, as for any study, that
+    something stops "run", a side on a runner that cannot carry an interview among it."""
     sd = cfg["_dir"]
     scaffolded = (sd / "runs.json").exists()
-    entries = pl.read_runs(sd) if scaffolded else pl.planned_runs(cfg)
+    entries = pl.read_runs(sd) if scaffolded else pl.planned_runs(cfg) + pl.planned_interviewers(cfg)
     on_record = {e["run"]: e for e in entries if e["role"] in pl.JOB_ROLES}
     jobs = []
     for job in pl.synthesis_jobs(cfg):
@@ -3308,7 +4356,9 @@ def plan(args, cfg: dict) -> int:
             jobs.append(seen)  # as it ran: "run" plans afresh only a job that is pending or failed
         else:
             jobs.append({**(seen or {}), **job})
-    panel = [e for e in entries if e["role"] == "panellist"]
+    # Both sides of an interview are the plan's: each has a model entry, limits and a budget cap of its own.
+    panel = [e for e in entries if e["role"] == "panellist" or (e["role"] == "interviewer" and "interview" in e
+                                                                and cfg["type"] == "interview")]
     facts = planning.build(cfg, panel, jobs, {e["run"]: state_of(cfg, e) for e in panel + jobs}, scaffolded,
                            Lock.holder(sd))
     print(json.dumps(facts, indent=2) if args.json else "\n".join(planning.render(facts)))
@@ -3330,7 +4380,12 @@ def purge_sessions(args, cfg: dict) -> int:
     """Delete the study's harness sessions through each runner's own command, or, without
     --yes, print what would be deleted. Every delete command comes from a runner. Without --runs
     that includes the sessions of an earlier scaffold (the earlier-sessions record, panel_lib.py),
-    each taken off the record once it is deleted."""
+    each taken off the record once it is deleted.
+
+    A conversation is named by its run id, which covers the entries of both its sides, each
+    with the folder its own processes worked in. It is refused while a turn of either is in
+    flight, and while it is on record as carried: between two turns a launcher that was killed
+    left it so, and "stop" settles it."""
     sd = cfg["_dir"]
     lock = Lock(sd)
     if args.yes:
@@ -3339,14 +4394,14 @@ def purge_sessions(args, cfg: dict) -> int:
         lock.refuse()
     try:
         runs = pl.read_runs(sd)
-        running = [e["run"] for e in runs if in_flight(e)]
+        running = list(dict.fromkeys(pl.interview_of(e) for e in runs if in_flight(e) or e.get("carried")))
         if running:
             raise SystemExit(
                 f"{plural(len(running), 'run')} recorded as running ({', '.join(running)}): a running process needs "
                 f"its session. Nothing was deleted. Stop and settle them first: launch.py {sd} stop")
         known = [e for e in runs if e["role"] in ROLES]
         ids = [x.strip() for x in args.runs.split(",") if x.strip()] if args.runs else None
-        unknown = [i for i in ids or [] if i not in {e["run"] for e in known}]
+        unknown = [i for i in ids or [] if i not in {pl.interview_of(e) for e in known}]
         if unknown:
             raise SystemExit(f"No run or job called {', '.join(unknown)}.")
         # The sessions of the runs a --force replaced (panel_lib.py), which only a purge of the whole study covers.
@@ -3354,7 +4409,7 @@ def purge_sessions(args, cfg: dict) -> int:
         # (runs.json entry or earlier session, session id, argv, is it an earlier one); why a session stays -> [whose]
         doomed, kept, total = [], {}, 0
         for e in known:
-            if ids is not None and e["run"] not in ids:
+            if ids is not None and pl.interview_of(e) not in ids:  # an interview's id names both its entries
                 continue
             runner = runners.get(e["runner"]) if e["runner"] else None
             for session in sessions_of(e):
@@ -3365,7 +4420,7 @@ def purge_sessions(args, cfg: dict) -> int:
                 elif not runner.capabilities()["purge"]:
                     why = f"{e['runner']} cannot delete a session"
                 else:
-                    command = runner.purge_command(session, ROLES[e["role"]].workdir(cfg, e))
+                    command = runner.purge_command(session, role_of(e).workdir(cfg, e))
                     why = f"{e['runner']} found no session to delete"
                 if command:
                     doomed.append((e, session, command, False))
@@ -3446,7 +4501,7 @@ def main():
                                     "purge-sessions"])
     ap.add_argument("--runs", help="comma-separated run or job ids (run, resume, check, release, purge-sessions; "
                                    "not pilot)")
-    ap.add_argument("--role", choices=list(ROLES), default="panellist",
+    ap.add_argument("--role", default="panellist", metavar="{" + ",".join(STARTABLE) + "}",
                     help="what to start (run, resume): panellist runs (the default), the analyst jobs, or the "
                          "writer job once the analysts are done")
     ap.add_argument("--allow-incomplete", action="store_true",
@@ -3473,6 +4528,11 @@ def main():
                     help="with purge-sessions: delete the sessions. Without it they are only listed")
     ap.add_argument("--json", action="store_true", help="plan, status or usage as JSON")
     args = ap.parse_args()
+    if args.role == "interviewer":  # a role of runs.json that no command starts by itself
+        ap.error("argument --role: no command takes interviewer. An interviewer starts and stops with its "
+                 "interview: leave --role out, and name the interview by its run id with --runs.")
+    if args.role not in STARTABLE:
+        ap.error(f"argument --role: invalid choice: {args.role!r} (choose from {', '.join(STARTABLE)})")
     if args.force and args.cmd != "check":
         raise SystemExit("--force goes with check: it runs a success check again for a run whose test account is "
                          "gone, and replaces the verdict on record.")
