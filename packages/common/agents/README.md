@@ -10,6 +10,10 @@ Skills that invoke the Claude Code CLI, including `claude-reviewer`, `delegate-t
 
 This maintainer file is excluded through `.stow-local-ignore`.
 
+## Persona panel
+
+The `persona-panel` skill (`.agents/skills/persona-panel/`) was extended on the branch `persona-panel-expansion`, merged to `main` in pull request 3. Work on it is paused. What is built, what is not built and what is not tested is under "Implementation status" in `docs/specs/persona-panel-expansion.md`. Its tests are in `tests/test_persona_panel.py`.
+
 ## 1Password approval alerts
 
 `op-approval-blocked` and its library `.agents/lib/op-approval/` run on Omarchy and macOS. The library's per-OS parts are in `.agents/lib/op-approval/platform/`, and the watchers that share it live in `packages/{common,omarchy,macos}/op-approval-watcher`. See `docs/op-approval.md`.

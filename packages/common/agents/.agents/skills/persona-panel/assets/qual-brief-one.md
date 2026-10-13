@@ -1,0 +1,1 @@
+- This study reviewed one concept, so nothing was ranked or compared: `quant.md` has scores and no leaderboard. Section 2 covers the one concept. Report no winner, no ranking and no comparison between concepts, and treat a panellist's comparison with something outside the study as an opinion, not a finding.

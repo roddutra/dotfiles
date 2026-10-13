@@ -1,0 +1,2 @@
+After their reviews were finished, some panellists were asked follow-up questions, each in its original session. The answers are the `## Follow-up <n>` sections at the end of their persona files, and the analysts' files quote them. They are qualitative evidence only: they changed no score or ranking, and they are in no table or tally. When you use one, cite the run and the follow-up number and say that the answer was prompted by a question, so it is never read as something the panellist raised unasked. The questions asked:
+<QUESTIONS>

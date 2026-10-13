@@ -1,0 +1,80 @@
+{
+  "study": "sales-deck-check",
+  "product": "Acme Books",
+  "product_phrase": "a bookkeeping product called **Acme Books**",
+  "artefact": "draft sales deck",
+  "artefact_plural": "draft sales decks",
+  "arrival": "a sales rep emailed it to you after a first call",
+  "context_notes": [
+    "The deck shows a made-up example business called \"Harbour Cafe\". Its people and numbers are fictitious."
+  ],
+  "concepts": [
+    {
+      "id": "deck-v2",
+      "kind": "files",
+      "files": [
+        "../decks/acme-books-deck-v2.pdf",
+        "../decks/pricing-slide-mobile.png"
+      ]
+    }
+  ],
+  "runner": "claude",
+  "models": [
+    "opus",
+    {
+      "key": "sol",
+      "runner": "codex",
+      "model": "gpt-6.1-sol"
+    }
+  ],
+  "replicates": 2,
+  "synthesis": {
+    "analyst": {
+      "runner": "claude",
+      "model": "opus"
+    },
+    "writer": {
+      "runner": "claude",
+      "model": "opus"
+    }
+  },
+  "seed": 20261013,
+  "find_the_answer": [
+    "What does it cost to start?",
+    "Who owns my data and where is it kept?"
+  ],
+  "leak_terms": [
+    "internal-codename"
+  ],
+  "forbidden_terms": [
+    "todo",
+    "lorem ipsum"
+  ],
+  "capture": {
+    "max_pdf_pages": 20
+  },
+  "personas": [
+    {
+      "id": "P01",
+      "name": "Dana Kowalski",
+      "role": "Owner of a 2-site cafe, does the books on Sunday nights",
+      "personality": "Curious sceptic: open to new tools but burned before, needs proof and specifics",
+      "segment": "owner",
+      "bio": [
+        "Age 41. Runs two cafes with 14 staff; their partner handles rostering.",
+        "Reads on their phone between services and will close a deck that doesn't say what it does on the first page."
+      ]
+    },
+    {
+      "id": "P02",
+      "name": "Marcus Lee",
+      "role": "Accountant with 30 small-business clients, recommends their software",
+      "personality": "Brand-protective gatekeeper: won't put a tool in front of clients until it has earned it",
+      "segment": "gatekeeper",
+      "bio": [
+        "Age 52. Sole practitioner with one part-time bookkeeper.",
+        "Will pass a deck on only if it says who owns the data and how to export it."
+      ]
+    }
+  ]
+}

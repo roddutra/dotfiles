@@ -1,0 +1,2 @@
+- This was a text-only study: panellists read the text of each page, never saw the design, and scored no visual or mobile factor. Report nothing under visual design or mobile in section 3. Where a panellist commented on the design anyway, it is a guess: name the run in section 7 and count the comment nowhere.
+- The text was a flattened page, so navigation labels repeat and some labels lose the layout that explains them. Those are artefacts of the capture. Do not report them as defects of a concept, and say which runs did.

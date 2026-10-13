@@ -1,0 +1,7 @@
+   - Optional: open a page in a real browser with the `agent-browser` CLI, only to try an interactive element or follow the navigation like a visitor.
+     - A browser session is already open for you, and it is closed for you when you finish. Run `agent-browser <command>` with nothing between the two: no `--session` and no other option. Never close the session or start another.
+${page_addresses}     - The commands: `open <address>`, `snapshot -i` (lists what you can act on, each with a ref such as `@e3`), `click @e3`, `fill @e3 "text"`, `select @e3 "option"`, `press Enter`, `scroll down 600`, `back`, `wait 1000`, `get url`, `get title` and `screenshot <file>`. Anything else is refused: you cannot run scripts in a page or read its source, cookies or storage.
+     - Take a snapshot before you act. Refs change whenever the page does.
+     - Run one `agent-browser` command per shell call, never chained to anything. Any other shell command (`mkdir`, `ls`, `sleep`) can be refused, and a line that chains one to an `agent-browser` command is then refused whole.
+     - Take each screenshot in a call of its own, to a relative path in your own folder: `agent-browser screenshot scratch/<your run id>/<name>.png`. That folder exists already, in `${panel_dir}/`. Then open the image. If it still shows the page before, run `agent-browser wait 1000` and take it again.
+     - Judge from what the screenshot shows. The snapshot also lists text a visitor cannot see and elements further down the page: use it to act, not to find things out.

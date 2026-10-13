@@ -1,0 +1,3 @@
+     - `desktop-sheet-NN.png`: the page on a ${desktop_size} laptop screen. Each sheet holds four screens in order: top-left, top-right, bottom-left, bottom-right.
+     - `mobile-first-screens.png`: the first screens on a phone, left to right.
+     - `raw/d-NN.png`: full-size single screens, to zoom in on something.

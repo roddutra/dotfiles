@@ -1,0 +1,1 @@
+- <CONCEPTS> supplied as images and documents, not as pages. Panellists could not click or scroll, and saw a phone version only if a file showed one. Name this as a limitation. A Mobile score for such a concept is a judgement from what was shown.

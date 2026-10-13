@@ -1,0 +1,1 @@
+- <CONCEPTS> captured from a live page. The capture is one moment, and the page may have changed since. Name this as a limitation. Where a panellist reports that the browser showed something the materials did not, report it as a change in the page, never as a defect of the concept.

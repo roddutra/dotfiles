@@ -1,0 +1,2 @@
+- This was a text-only study: panellists read the text of each page and never saw the design. Section 2 must say so, and must name the artefact of flattened pages as a known limitation in place of static screenshots: navigation labels repeat, and some labels lose the layout that explains them, so a complaint about either is not a defect of the concept. Say there too that these scores do not compare with a full panel's.
+- No visual or mobile factor was scored. Section 8 covers structure and order only, and a panellist's comment on the design is a guess, never a finding.

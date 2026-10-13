@@ -1,0 +1,4 @@
+   - ${items_intro} An item folder has one of:
+     - `image.<type>`: one image, exactly as supplied. It can be any size, so do not take it for one laptop or phone screen. When it is much taller than a screen the folder also has `part-NN.png`: the same image cut into pieces from top to bottom, each overlapping the next a little. Review the image from its parts, opened in order: whatever opens the whole image shrinks it until the text cannot be read, so open that only for the overall shape. An image has no text file, so what it says is only in the picture.
+     - `page-NN.png`: the pages of one document, in order, with `page-text.txt`: the document's text, set out as on the page (columns side by side), with a `[Page N]` line before each page.
+     - Nothing in an item can be clicked or scrolled, and it may show no phone version. Where a factor asks about something the items do not show, score it on what you can see and say so in your researcher notes.

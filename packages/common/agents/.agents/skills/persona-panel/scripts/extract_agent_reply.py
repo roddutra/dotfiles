@@ -5,15 +5,25 @@ Some harnesses block subagents from writing report files and they return the doc
 their reply instead. This pulls the last assistant text from the transcript and writes
 everything from the first line matching --start (default: the first "# " heading).
 
-Usage: extract_agent_reply.py <transcript.jsonl|reply.txt> --out <file.md> [--start "# Round 2"] [--contains "text"]
+The saved file carries the synthetic panel notice (panel_lib.NOTICE): when the document lacks
+the line it is added under the title, as launch.py and archive.py add it (panel_lib.with_notice).
+
+For native mode. In a study that runs through runners, launch.py saves each analyst's and the
+writer's reply itself, by the same rules (panel_lib.reply_document).
+
+Usage: extract_agent_reply.py <transcript.jsonl|reply.txt> --out <file.md> [--start "# Round 2"]
+                              [--contains "text"]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import panel_lib as pl  # noqa: E402
 
 
 def assistant_texts(path: Path) -> list[str]:
@@ -50,13 +60,9 @@ def main():
     if not texts:
         raise SystemExit("No assistant text found")
     text = max(texts[-3:], key=len)  # the document is usually the longest of the final replies
-    lines = text.splitlines()
-    pat = re.compile(args.start) if args.start else re.compile(r"^# ")
-    start = next((i for i, l in enumerate(lines) if pat.search(l)), 0)
-    body = "\n".join(lines[start:]).strip()
-    body = re.sub(r"\n```\s*$", "", body)
+    body = pl.with_notice(pl.reply_document(text, args.start))
     args.out.write_text(body + "\n")
-    dashes = sum(body.count(d) for d in ("\u2013", "\u2014"))
+    dashes = sum(body.count(d) for d in pl.DASHES)
     print(f"Wrote {args.out} ({len(body)} chars, {dashes} em/en dashes)")
 
 

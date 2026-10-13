@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"01a12fa6-8436-7830-b4c3-6bccc10a0754"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: rollout_budget. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /home/user/.codex/config.toml."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I’ll run the three commands separately, in order.\n"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/bash -lc 'echo one'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/bash -lc 'echo one'","aggregated_output":"one\n","exit_code":0,"status":"completed"}}
+{"type":"error","message":"shared rollout token budget exhausted"}
+{"type":"turn.failed","error":{"message":"shared rollout token budget exhausted"}}
