@@ -389,6 +389,9 @@ class PersonaPanelTest(unittest.TestCase):
             "a follow-up allowance in an interview study": (
                 self.interview(limits={"followup": {"minutes": 5}}),
                 '"limits" must be an object with any of run, interviewer, turn, synthesis and overrides'),
+            "a transcript as a file for the writer of an interview study": (
+                self.interview(synthesis={"context_files": ["analysis/transcripts/P01-opus.md"]}),
+                '"analysis/transcripts/P01-opus.md" is under analysis/transcripts/, where an interview study keeps'),
             # What the interviewer would say aloud, and whom the guide leaves out: found when the study is scaffolded.
             "a leak term in a topic's opener": (
                 self.interview({"topics": [{**topic, "opener": "What do you make of Secret Codename?"}]}),
@@ -3413,6 +3416,21 @@ class LauncherTest(unittest.TestCase):
         tracked = run("runs.py", self.sd, "status").stdout
         self.assertEqual(("done: 6" in tracked, "analyst" in tracked or "writer" in tracked), (True, False))
         self.assertIn("18 score rows from 6 runs", run("extract_scores.py", self.sd).stdout)
+        # A job is done again by deleting its file and running its role again, and it then spends from the share
+        # its earlier attempts spent from. The plan says what a job with attempts on record has used and has
+        # left, and estimates a job that is to go again from the attempts that finished.
+        self.sd.joinpath("analysis/qual-1.md").unlink()
+        plan = self.plan()
+        again = next(j for j in plan["synthesis"]["jobs"] if j["run"] == "analyst-1")
+        estimate = next(e for e in plan["estimate"]["entries"] if e["entry"] == "analyst")
+        self.assertEqual(([again[k] for k in ("state", "attempts", "finished", "used_usd", "left_usd")],
+                          [estimate[k] for k in ("basis", "measured_runs", "measured_of", "to_go")]),
+                         (["pending", 1, 1, 0.00046504, 1.666201], ["measured", 2, 2, 1]))
+        self.assertIn("$1.6667 cap, $0.0005 used, $1.6662 left  pending", self.launch("plan").stdout)
+        before = len(self.starts())
+        self.launch("run", "--role", "analyst")
+        self.assertEqual([(e["run"], option(e, "--max-budget-usd")) for e in self.starts(before)],
+                         [("analyst-1", "1.666201")])  # what the plan showed as left is what its process may spend
 
     def test_analysts_wait_for_the_panel_unless_allowed_and_are_told_which_runs_did_not_finish(self):
         self.study({"P01-cx": [["write:1"]], "P02-opus": [["end:usage_limit"]]},
@@ -3548,14 +3566,14 @@ if what == "provision":
         calls = log.read_text().splitlines() if log.exists() else []
         return [c.split()[0] for c in calls if c.endswith(f" {run_id}")] if run_id else calls
 
-    def interview(self, plan=None, personas=1, models=None, guide=None, **settings):
+    def interview(self, plan=None, personas=1, models=None, guide=None, segments=(), **settings):
         """Scaffold an interview study and set the plan the fakes follow (persona_panel_fakes/talker.py).
         Becomes self.sd. One interview for each persona and model entry, P01-opus and P01-cx unless models
         says otherwise, each with an interviewer on claude, entry interviewer-<run id>. The guide has two
         topics, T1 and T2, a cap of 6 exchanges and the situation card on, and guide changes keys of it.
         Planted, for a test to look for where it must not be: ZQGOAL in the goal, ZQAREA and ZQOPENER in
         each topic, ZQBIO in each persona's bio. An interview nobody plans runs to its end: T1, T2, a
-        close, then the interviewer ends it."""
+        close, then the interviewer ends it. segments gives each persona its segment, in their order."""
         self.sd = self.tmp / "interview"
         self.sd.mkdir()
         held = {"about": "how a cafe is run from day to day", "interviewer": {"runner": "claude", "model": "opus"},
@@ -3569,7 +3587,8 @@ if what == "provision":
             "type": "interview", "study": "i", "models": models or [self.CLAUDE, self.CODEX], "interview": held,
             "leak_terms": ["secret codename"],
             "personas": [{"id": f"P{i:02d}", "name": f"Person {i}", "role": "Owner", "personality": "Sceptic",
-                          "bio": ["Keeps the books in a notebook, under the name ZQBIO."]}
+                          "bio": ["Keeps the books in a notebook, under the name ZQBIO."],
+                          **({"segment": segments[i - 1]} if segments else {})}
                          for i in range(1, personas + 1)], **settings})
         subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd)], check=True,
                        capture_output=True, text=True)
@@ -5138,6 +5157,225 @@ if what == "provision":
         self.assertIn(f"P01-local: {refusal}", started.stdout)
         self.assertIn(f"interviewer: {refusal}", started.stdout)
 
+    def test_jobs_of_an_interview_study_share_the_pool_wait_for_what_they_read_and_are_given_only_their_own(self):
+        # Four personas in two halves. P02's interview stops with its card and one question on record, and
+        # P04's is not held until the jobs are done: one unfinished with a transcript, one pending with none.
+        # The writer's first synthesis has words in quotation marks that nobody said, and its second a
+        # quotation that is in the exchange it names.
+        self.interview({"P02-opus": [[], ["exit:1"], []],
+                        "writer": [['text:They call it "nobody said this" among themselves.'],
+                                   ['text:All it came to was "Answer 1." (P01-opus, 1)']]},
+                       personas=4, models=[self.CLAUDE], limits={"synthesis": {"budget_usd": 5}},
+                       synthesis={"analysts": 2, "analyst": {"runner": "claude", "model": "sonnet"},
+                                  "critic": {"runner": "claude", "model": "fable"},
+                                  "writer": {"runner": "claude", "model": "opus", "effort": "high"}})
+        self.launch("run", "--runs", "P01-opus,P02-opus")
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P02-opus": "partial", "P03-opus": "pending",
+                                        "P04-opus": "pending"})
+
+        def step(args, expected, code, says, then=None, planned=False):
+            """A command, the job processes it starts, its exit code, what it says, and the script that is
+            run after it. A job that is refused is not planned either, unless it was planned before."""
+            before = len(self.starts())
+            r = self.launch(*args)
+            with self.subTest(" ".join(args)):
+                self.assertEqual(sorted(e["run"] for e in self.starts(before)), expected, r.stdout + r.stderr)
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertIn(says, r.stdout + r.stderr)
+                if code and not expected and not planned:
+                    self.assertFalse([e for e in self.entries().values() if e["role"] == args[2]], args)
+            if then:
+                run(then, self.sd)
+            return r
+
+        step(["run", "--role", "writer"], [], 1, "The writer waits for the analysts, the critics and the themes job: "
+                                                 "analyst-1 is pending")
+        step(["run", "--role", "themes"], [], 1, "The themes job waits for the analysts: analyst-1 is pending")
+        step(["run", "--role", "critic"], [], 1, "Critics wait for the panel: 2 interviews of 4 have not finished "
+                                                 "(P03-opus pending, P04-opus pending)")
+        # A name that is no job of the role is refused before any job is planned.
+        step(["run", "--role", "critic", "--allow-incomplete", "--runs", "P01-opus"], [], 1,
+             "No critic job called P01-opus. There are: critic-1, critic-2")
+        # With part of the panel held, the half with no interview has nothing to read: named by itself it
+        # is refused, and among the role's jobs it is passed over while the one with a transcript runs.
+        step(["run", "--role", "critic", "--allow-incomplete", "--runs", "critic-2"], [], 1,
+             "critic-2 would have nothing to read: no interview of personas P03 to P04 has a turn on record")
+        r = step(["run", "--role", "critic", "--allow-incomplete"], ["critic-1"], 0,
+                 "critic-2: passed over, as it would have nothing to read: no interview of personas P03 to P04 has a "
+                 f"turn on record. Start it once one is held: launch.py {self.sd} run --role critic\n")
+        self.assertEqual([e["run"] for e in self.entries().values() if e["role"] == "critic"], ["critic-1"])
+        # What comes next names the critic that is still to run, and when it can: the role is not finished.
+        self.assertIn("Next: read analysis/critique-1.md. critic-2 is still to run, once an interview of personas "
+                      f"P03 to P04 is held: launch.py {self.sd} run --role critic. The writer waits for it.", r.stdout)
+        self.launch("run", "--runs", "P03-opus")
+        step(["run", "--role", "critic", "--allow-incomplete"], ["critic-2"], 0,
+             "The analysts are still to run (analyst-1, analyst-2)")
+        step(["run", "--role", "analyst"], [], 1, "Analysts wait for the panel")
+        step(["run", "--role", "analyst", "--allow-incomplete"], ["analyst-1", "analyst-2"], 0,
+             f"then extract_notes.py {self.sd}")
+        step(["run", "--role", "themes"], [], 1, "The themes job waits for analysis/notes.csv, which is not there: "
+                                                 f"extract_notes.py {self.sd} writes it", "extract_notes.py")
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}")
+        step(["run", "--role", "writer"], [], 1, "The writer waits for analysis/quant.md, which is not there: "
+                                                 f"analyze.py {self.sd} writes it", "analyze.py")
+        # The quotations of the synthesis are checked when the writer ends: one that nobody said is listed and
+        # is the exit code, and the writer stays done.
+        step(["run", "--role", "writer"], ["writer"], 1, '"nobody said this"')
+        jobs = {e["run"]: e for e in self.starts()
+                if e["run"].split("-")[0] in ("analyst", "critic", "themes", "writer")}
+
+        def option(e, name):
+            return e["argv"][e["argv"].index(name) + 1]
+
+        # Every job has one sixth of the pool as its cap, $5 between six, and runs on its role's model entry:
+        # the critics on synthesis.critic, the themes job on the analysts'.
+        self.assertEqual({k: (option(e, "--model"), option(e, "--max-budget-usd")) for k, e in jobs.items()}, {
+            "analyst-1": ("sonnet", "0.833333"), "analyst-2": ("sonnet", "0.833333"),
+            "critic-1": ("fable", "0.833333"), "critic-2": ("fable", "0.833333"),
+            "themes": ("sonnet", "0.833333"), "writer": ("opus", "0.833333")})
+        self.assertEqual({e["cwd"] for e in jobs.values()}, {str(self.sd)})
+        # Each brief is the prompt, verbatim and with nothing left to fill in. A critic has the personas its
+        # analyst has. An analyst is given the analysts' copies and a critic the full transcripts, each of
+        # the interviews with a turn on record alone, and the themes job and the writer no transcript.
+        given = {}
+        for job, e in jobs.items():
+            self.assertEqual(e["stdin"], self.sd.joinpath(f"prompts/{job}.md").read_text())
+            self.assertNotRegex(e["stdin"], r"<[A-Z][A-Z0-9_]*>")
+            given[job] = (re.findall(r"/analysis/transcripts/(P\d+-\w+)\.md`", e["stdin"]),
+                          re.findall(r"/interviews/(P\d+-\w+)\.md`", e["stdin"]))
+        halves = (["P01-opus", "P02-opus"], ["P03-opus"])
+        self.assertEqual(given, {"analyst-1": (halves[0], []), "analyst-2": (halves[1], []),
+                                 "critic-1": ([], halves[0]), "critic-2": ([], halves[1]),
+                                 "themes": ([], []), "writer": ([], [])})
+        # What each is given of the study: the guide (ZQGOAL, ZQOPENER) and who the personas are (ZQBIO).
+        self.assertEqual({job: [mark for mark in ("ZQGOAL", "ZQOPENER", "ZQBIO") if mark in e["stdin"]]
+                          for job, e in jobs.items()}, {
+            "analyst-1": ["ZQBIO"], "analyst-2": ["ZQBIO"], "critic-1": ["ZQGOAL", "ZQOPENER", "ZQBIO"],
+            "critic-2": ["ZQGOAL", "ZQOPENER", "ZQBIO"], "themes": [], "writer": ["ZQGOAL", "ZQOPENER"]})
+        # An analyst is told which of its interviews did not finish. The one that stopped had its transcripts
+        # written before the brief that names them, though no launcher ever saw it end.
+        self.assertIn("Unfinished interviews:\n- `P02-opus.md` (P02-opus): partial, 0 exchanges\n",
+                      jobs["analyst-1"]["stdin"])
+        self.assertIn("Unfinished interviews:\n- P04-opus: pending, with no turn on record, so it has no transcript\n",
+                      jobs["analyst-2"]["stdin"])
+        self.assertNotIn("Unfinished interviews", jobs["critic-1"]["stdin"])
+        self.assertEqual([self.sd.joinpath(folder, "P02-opus.md").is_file()
+                          for folder in ("analysis/transcripts", "interviews")], [True, True])
+        self.assertEqual({j["run"]: (j["state"], j["file"]) for j in self.status()["jobs"]}, {
+            "analyst-1": ("done", "analysis/qual-1.md"), "analyst-2": ("done", "analysis/qual-2.md"),
+            "critic-1": ("done", "analysis/critique-1.md"), "critic-2": ("done", "analysis/critique-2.md"),
+            "themes": ("done", "analysis/themes.md"), "writer": ("done", "analysis/SYNTHESIS.md")})
+        # A synthesis written again, whose one quotation is in the exchange it names, passes.
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done")
+        # An interview held after a job read its half is not in that job's file. The role says so in place
+        # of what comes next, with what puts it right, and so does the plan: by the attempts on record and
+        # the turn log, since the file is there and the job reads done.
+        self.launch("run", "--runs", "P04-opus")
+        short = ("analyst-2: done, but analysis/qual-2.md was written before P04-opus was held, so it does not cover "
+                 "that interview as it stands now: to put that right, delete analysis/qual-2.md and run launch.py "
+                 f"{self.sd} run --role analyst again.\n")
+        started = len(self.starts())
+        r = self.launch("run", "--role", "analyst")
+        self.assertEqual((r.returncode, self.starts(started), r.stdout), (1, [], f"Finished: done 2.\n{short}"))
+        self.assertIn(f"  {short}", self.launch("plan").stdout)
+        self.sd.joinpath("analysis/qual-2.md").unlink()
+        step(["run", "--role", "analyst"], ["analyst-2"], 0, f"then extract_notes.py {self.sd}")
+
+        # An analyst run again leaves every step after it out of date, though each file is there and each
+        # job reads done. Each command refuses or says so, with what puts it right, and starts nothing: by
+        # the attempts on record for a job, and for a file a script writes by what the script would write now.
+        def stale(job, file, since):
+            return (f"{job}: done, but {file} was written before {since}, so it is not built on what "
+                    f"{'those jobs have' if ' and ' in since else 'that job has'} written since: to put that right, "
+                    f"delete {file} and run launch.py {self.sd} run --role {job} again.")
+
+        themes = stale("themes", "analysis/themes.md", "analyst-2 was run again")
+        tallies = self.sd.joinpath("analysis/quant.json").read_bytes()
+        # A note put into an analyst's file by hand: notes.csv is no longer what the files give.
+        self.analysis("qual-1.md", "## P01-opus\n\n" + self.coded("P01-opus/1", 1, "PAIN", "Answer 1"))
+        notes = ("analysis/notes.csv is not what analysis/qual-1.md and analysis/qual-2.md now give: run "
+                 "extract_notes.py")
+        step(["run", "--role", "themes"], [], 1, f"The themes job waits, because {notes} {self.sd} again, then "
+                                                 f"launch.py {self.sd} run --role themes again.", planned=True)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stderr), (1, f"{notes} {self.sd} again.\n"), r.stdout)
+        run("extract_notes.py", self.sd)
+        r = step(["run", "--role", "themes"], [], 1, themes, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{themes}\n")
+        step(["run", "--role", "writer"], [], 1, f"The writer waits, because a job it reads is out of date. {themes}",
+             planned=True)
+        r = run("analyze.py", self.sd, check=False)  # nor are the tallies written from themes that are out of date
+        self.assertEqual((r.returncode, r.stderr, self.sd.joinpath("analysis/quant.json").read_bytes()),
+                         (1, f"{themes} Then analyze.py {self.sd} again.\n", tallies), r.stdout)
+        plan = self.launch("plan").stdout
+        self.assertEqual((f"  {themes}\n" in plan, plan.count("done, 1 job run again since")), (True, 2), plan)
+        self.assertEqual({j["run"]: j["out_of_date"] for j in self.plan()["synthesis"]["jobs"] if j["out_of_date"]},
+                         {"critic-2": {"P04-opus": "was held"},  # the one critic that was not run again
+                          "themes": {"analyst-2": "was run again"}, "writer": {"analyst-2": "was run again"}})
+        self.sd.joinpath("analysis/themes.md").unlink()
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}")
+        step(["run", "--role", "writer"], [], 1,
+             "The writer waits, because analysis/quant.md is no longer the tallies of the analysis as it stands: run "
+             f"analyze.py {self.sd} again", "analyze.py", planned=True)
+        # The writer stays done on the synthesis it wrote, which is not checked again: it is to be written again.
+        r = step(["run", "--role", "writer"], [], 1,
+                 stale("writer", "analysis/SYNTHESIS.md", "analyst-2 and themes were run again"),
+                 planned=True)
+        self.assertNotIn("# Quote check", r.stdout)
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done")
+        self.assertEqual([j["run"] for j in self.plan()["synthesis"]["jobs"] if j["out_of_date"]], ["critic-2"])
+        # A command that finds its jobs done says that it started nothing, and how one is done again.
+        step(["run", "--role", "writer"], [], 0,
+             "writer was done already, and nothing was started. To have it done again, delete its file "
+             f"(analysis/SYNTHESIS.md) and run launch.py {self.sd} run --role writer again.\n")
+
+        # A file a done job was given may change with no job run again, which no attempt's time shows: a note
+        # put right by hand and extracted again. The launch of a themes job and of a writer recorded a
+        # fingerprint of each file its brief named, so the job names the file that changed, with the same
+        # remedy, and nothing goes on from it: not the role that reads it, and not the tallies.
+        def altered(job, file, since):
+            return (f"{job}: done, but {file} was written before {since}, so it is built on what "
+                    f"{'those files' if ' and ' in since else 'that file'} held then: to put that right, delete "
+                    f"{file} and run launch.py {self.sd} run --role {job} again.")
+
+        self.assertEqual({job: sorted(self.entries()[job]["attempts"][-1].get("read", {}))
+                          for job in ("analyst-1", "themes", "writer")}, {
+            "analyst-1": [], "themes": ["analysis/notes.csv"],
+            "writer": ["analysis/critique-1.md", "analysis/critique-2.md", "analysis/qual-1.md",
+                       "analysis/qual-2.md", "analysis/quant.json", "analysis/themes.md"]})
+        self.analysis("qual-1.md", "## P01-opus\n\n" + self.coded("P01-opus/1", 1, "MONEY", "Answer 1"))
+        run("extract_notes.py", self.sd)
+        themes = altered("themes", "analysis/themes.md", "analysis/notes.csv changed")
+        r = step(["run", "--role", "themes"], [], 1, themes, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{themes}\n")
+        step(["run", "--role", "writer"], [], 1, f"The writer waits, because a job it reads is out of date. {themes}",
+             planned=True)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stderr), (1, f"{themes} Then analyze.py {self.sd} again.\n"), r.stdout)
+        plan = self.launch("plan").stdout
+        self.assertEqual((f"  {themes}\n" in plan, plan.count("done, 1 file changed since")), (True, 2), plan)
+        self.assertEqual({j["run"]: j["out_of_date"] for j in self.plan()["synthesis"]["jobs"]
+                          if j["role"] in ("themes", "writer")},
+                         {"themes": {"analysis/notes.csv": "changed"}, "writer": {"analysis/qual-1.md": "changed"}})
+        # The lead does what it says. The writer then names the job that was run again, as above, and once
+        # it is written again every job is good: also after both scripts run again with nothing changed.
+        self.sd.joinpath("analysis/themes.md").unlink()
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}", "analyze.py")
+        step(["run", "--role", "writer"], [], 1, stale("writer", "analysis/SYNTHESIS.md", "themes was run again"),
+             planned=True)
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done", "extract_notes.py")
+        run("analyze.py", self.sd)
+        step(["run", "--role", "writer"], [], 0, "writer was done already, and nothing was started.")
+        # The writer says the same of what it read: a critic's file edited by hand, which changes no tally.
+        critique = self.sd / "analysis/critique-1.md"
+        critique.write_text(critique.read_text().replace("\n", ", read again by hand\n", 1))
+        writer = altered("writer", "analysis/SYNTHESIS.md", "analysis/critique-1.md changed")
+        r = step(["run", "--role", "writer"], [], 1, writer, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{writer}\n")
+
     def test_checks_block_an_interview_with_no_end_record_and_note_a_topic_that_was_never_opened(self):
         opener = "ZQOPENER what do you keep track of things with?"
         self.interview({
@@ -5211,6 +5449,339 @@ if what == "provision":
                       "interviews/P01-cx.jsonl right, or to hold the interview again from its start move that file "
                       "into logs/", r.stdout)
 
+    def talked(self):
+        """An interview study whose interviews were held on the fakes, for the scripts that read them
+        afterwards. P01 (segment solo) and P02 (segment firm), each on opus and cx, three exchanges an
+        interview: T1, T2 and a close, with the answers of SAID. P02-cx stops after its first answer and
+        stays partial. The interviewer of P01-cx labels its second question T1, and its words open T2."""
+        plan = {run_id: [[], *([f"say:{answer}"] for answer in answers)] for run_id, answers in self.SAID.items()}
+        plan["P02-cx"] = [[], ["say:Stocktake, mostly."], ["exit:1"], []]
+        plan["interviewer-P01-cx"] = [
+            [], ["ask:T1:accept:Fair enough. ZQOPENER WHAT DO YOU KEEP TRACK OF THINGS WITH?"], []]
+        self.interview(plan, personas=2, segments=("solo", "firm"))
+        self.launch("run")
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P01-cx": "done", "P02-opus": "done", "P02-cx": "partial"})
+
+    SAID = {"P01-opus": ["The roster ate my week. I rang Sam on the Thursday and I was still waiting on the Monday.",
+                         "A notebook. It's fine, I never lose anything in it.", "Nothing else comes to mind."],
+            "P01-cx": ["Mostly the roster again. It usually sorts itself out.", "A notebook, and it does the job.",
+                       "No."],
+            "P02-opus": ["Stocktake. Last Tuesday it took me four hours and I paid a casual to cover the floor.",
+                         "A spreadsheet my accountant set up.", "No."]}
+
+    def analysis(self, name, text=None):
+        """Write a file of analysis/ by hand, as a job of the synthesis would, or with no text read the
+        rows of a CSV file a script wrote there."""
+        path = self.sd / "analysis" / name
+        if text is None:
+            with open(path, newline="") as f:
+                return list(csv.DictReader(f))
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(text)
+
+    @staticmethod
+    def coded(note, turns, signal, quote, raised="prompted", evidence="general", effort="none"):
+        """An evidence note in the form the analysts' brief gives."""
+        return (f"### Note {note}\n- Turns: {turns}\n- Signal: {signal}\n- Statement: What they said, in a line\n"
+                f"- Raised: {raised}\n- Evidence: {evidence}\n- Effort: {effort}\n- Quote: \"{quote}\"\n\n")
+
+    def test_notes_and_critique_become_rows_and_what_cannot_be_read_or_verified_is_listed_and_never_guessed(self):
+        self.study()  # a review study has no notes of this form: refused in a sentence, with nothing written
+        r = run("extract_notes.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stdout, "Traceback" in r.stderr, list(self.sd.glob("analysis/*.csv"))),
+                         (1, "", False, []), r.stderr)
+        self.talked()
+        r = run("extract_notes.py", self.sd, check=False)  # before the analysts and the critics: what to run
+        self.assertEqual((r.returncode, "run --role analyst" in r.stderr), (1, True), r.stderr)
+        self.analysis("critique-1.md", "# Critique\n\n## P01-opus\n\n**Final check.** Prose.\n\n" + "".join(
+            f"### {kind} {where}\n- {line}: {value}\n- {second}: One line of it\n\n"
+            for kind, where, line, value, second in (
+                ("Flag", "P01-opus/2", "Flag", "leading", "Better"),
+                ("Flag", "P01-opus/2", "Flag", "compound", "Better"),
+                ("Missed", "P01-cx/1", "Signal", "generality", "Note"),
+                ("Good", "P01-opus/1", "Move", "anchored", "Note"),
+                ("Flag", "P01-opus/3", "Flag", "rude", "Better"),    # no such flag
+                ("Good", "P01-opus/7", "Move", "anchored", "Note")))   # no such exchange
+            # A section with no mark in it, its run id in code marks and the persona's name after it: a critique
+            # all the same. And the section of another interview, whose id only begins with one of the study's.
+            + "## `P02-opus` (Person 2)\n\nNothing to mark.\n\n## P02-cx-r2\n\nProse.\n")
+        # The critics may write first. Their entries are read, and the analysts' job is named as still to run.
+        r = run("extract_notes.py", self.sd)
+        self.assertEqual((self.analysis("notes.csv"), len(self.analysis("critique.csv")),
+                          "Not written yet: analysis/qual-1.md (analyst-1)" in r.stdout,
+                          f"Next: launch.py {self.sd} run --role analyst" in r.stdout), ([], 6, True, True), r.stdout)
+        self.analysis("qual-1.md", "# P01\n\n## P01-opus\n\nWhat she said, in prose.\n\n" + "".join([
+            # In the answer named, with curly marks, another case and other spacing, and no closing full stop.
+            self.coded("P01-opus/1", 1, "PAIN", "i rang Sam on the  Thursday and I was still waiting on the Monday",
+                       "unprompted", "incident", "workaround").replace('"i rang', "\u201ci rang").replace(
+                           'Monday"', "Monday\u201d"),
+            self.coded("P01-opus/2", "1-2", "NON-PROBLEM", "I never lose anything in it."),  # in the second of two
+            self.coded("P01-opus/3", 3, "CONTEXT", "Nothing else comes to mind."),           # under a closing question
+            self.coded("P01-opus/4", 2, "PAIN", "I never lose a thing in it."),              # a word changed
+            self.coded("P01-opus/5", 2, "ANNOYED", "A notebook."),                           # no such signal
+            self.coded("P01-opus/6", 9, "PAIN", "A notebook."),                              # no such exchange
+            self.coded("P01-opus/8", "2-5000000", "PAIN", "A notebook."),                    # nor is its far end one
+            self.coded("P09-opus/1", 1, "PAIN", "A notebook."),                              # no such interview
+            self.coded("P01-opus/7", 2, "PAIN", "A notebook.").replace("- Effort: none\n", ""),  # a line short
+            # An id that is taken. The heading of the next section follows it at once, with its run id in bold,
+            # and is no line of the note.
+            self.coded("P01-opus/1", 2, "GOAL", "A notebook.").rstrip() + "\n",
+            "## **P01-cx**\n\n", self.coded("P01-cx/1", 2, "WORKAROUND", "A notebook, and it does the job.")]))
+        r = run("extract_notes.py", self.sd)
+        notes = self.analysis("notes.csv")
+        self.assertEqual([tuple(n[k] for k in ("note", "turn_from", "turn_to", "topic", "signal", "quote_verified",
+                                               "quote_turn")) for n in notes], [
+            ("P01-opus/1", "1", "1", "T1", "PAIN", "1", "1"),
+            ("P01-opus/2", "1", "2", "T1", "NON-PROBLEM", "1", "2"),  # the exchange its quote is in
+            ("P01-opus/3", "3", "3", "close", "CONTEXT", "1", "3"),
+            ("P01-opus/4", "2", "2", "T2", "PAIN", "0", ""),          # still a note, with a quote nobody may use
+            *((note, "", "", "", "unparsed", "", "") for note in ("P01-opus/5", "P01-opus/6", "P01-opus/8",
+                                                                   "P09-opus/1", "P01-opus/7", "P01-opus/1")),
+            # The topic is the one the turn log counts the question for, which its interviewer labelled T1.
+            ("P01-cx/1", "2", "2", "T2", "WORKAROUND", "1", "2")])
+        self.assertEqual(([self.turns("P01-cx", "question")[1].get(k) for k in ("topic", "labelled")],
+                          [notes[0][k] for k in ("run", "persona_id", "model", "replicate", "complete", "segment",
+                                                 "analyst")]),
+                         (["T2", "T1"], ["P01-opus", "P01", "opus", "1", "1", "solo", "1"]))
+        # Nothing of an unparsed note is filled in but what was written, whole.
+        unparsed = [n for n in notes if n["signal"] == "unparsed"]
+        filled = [[k for k in ("statement", "raised", "evidence", "effort", "quote") if n[k]] for n in unparsed]
+        self.assertEqual((filled, "- Signal: ANNOYED" in unparsed[0]["raw"], unparsed[3]["run"]), ([[]] * 6, True, ""))
+        self.assertEqual([(m["run"], m["turn"], m["kind"], m["value"]) for m in self.analysis("critique.csv")], [
+            ("P01-opus", "2", "flag", "leading"), ("P01-opus", "2", "flag", "compound"),  # two flags, one exchange
+            ("P01-cx", "1", "missed", "generality"), ("P01-opus", "1", "good", "anchored"),
+            ("P01-opus", "3", "unparsed", ""), ("P01-opus", "7", "unparsed", "")])
+        # Each is listed with what is wrong with it, and the quote that is not in the answer with them.
+        said = r.stdout.splitlines()
+        # A range is named by the end the log does not have, and never walked to find it.
+        for what, why in (("Note P01-opus/5", 'Signal is "ANNOYED"'), ("Note P01-opus/6", "exchange 9"),
+                          ("Note P01-opus/8", "exchange 5000000"),
+                          ("Note P09-opus/1", "no interview of this study"), ("Note P01-opus/7", '"- Effort: ..."'),
+                          ("Note P01-opus/1", "taken by an earlier note"), ("Flag P01-opus/3", 'Flag is "rude"'),
+                          ("Good P01-opus/7", "exchange 7"), ("Note P01-opus/4", '"I never lose a thing in it."')):
+            self.assertEqual(len([line for line in said if f"{what}: " in line and why in line]), 1, (what, r.stdout))
+        self.assertIn("5 read (P01-opus 4, P01-cx 1), 6 unparsed. 1 quote of the 5 could not be verified.", said[0])
+        # A file with no section for an interview its job was given is named, with what writes it again: the
+        # one analyst and the one critic have P02 too. The analyst's file says nothing of its interviews, and
+        # the critic's has a section for P02-opus, whatever marks its heading holds the run id in.
+        for name, role, left in (("qual-1.md", "analyst", "P02-opus and P02-cx"),
+                                 ("critique-1.md", "critic", "P02-cx")):
+            end = f"delete the file and run launch.py {self.sd} run --role {role}."
+            self.assertEqual(len([line for line in said
+                                  if line.startswith(f"{name} says nothing of {left}: ") and line.endswith(end)]),
+                             1, r.stdout)
+
+    def test_tallies_count_participants_who_raised_a_theme_apart_from_those_it_is_no_problem_for(self):
+        self.talked()
+        self.analysis("qual-1.md", "# P01\n\n## P01-opus\n\nProse.\n\n" + "".join([
+            self.coded("P01-opus/1", 1, "PAIN", "I rang Sam on the Thursday", "unprompted", "incident", "workaround"),
+            self.coded("P01-opus/2", 2, "NON-PROBLEM", "I never lose anything in it."),
+            self.coded("P01-opus/3", 3, "CONTEXT", "Nothing else comes to mind."),
+            self.coded("P01-opus/4", 2, "WORKAROUND", "A notebook.", effort="workaround"),  # and told of it too
+            self.coded("P01-cx/1", 1, "PAIN", "Mostly the roster again."),
+            self.coded("P01-cx/2", 2, "NON-PROBLEM", "A notebook, and it does the job.")]))
+        self.analysis("qual-2.md", "# P02\n\n" + "".join([
+            self.coded("P02-opus/1", 1, "PAIN", "I paid a casual to cover the floor", "unprompted", "incident", "paid"),
+            self.coded("P02-opus/2", 2, "MONEY", "A spreadsheet my accountant set up.", effort="paid"),
+            self.coded("P02-cx/1", 1, "PAIN", "Stocktake, mostly.", "unprompted")]))  # of the interview that stopped
+        # Two critics. The first marked no flag in P01-opus and says nothing of P01-cx, which has no critique.
+        self.analysis("critique-1.md", "## P01-opus\n\nProse.\n\n"
+                                       "### Good P01-opus/1\n- Move: anchored\n- Note: Asked for the last time\n")
+        self.analysis("critique-2.md", "## P02-opus\n\nProse.\n\n### Flag P02-opus/2\n- Flag: leading\n"
+                                       "- Better: What do you use?\n\n## P02-cx\n\nProse.\n")
+        r = run("analyze.py", self.sd, check=False)  # before the notes are extracted and grouped: what to run
+        self.assertEqual((r.returncode, "extract_notes.py" in r.stderr), (1, True), r.stderr)
+        run("extract_notes.py", self.sd)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, "run --role themes" in r.stderr), (1, True), r.stderr)
+        self.analysis("themes.md", "# Themes\n\n" + "".join(
+            f"### Theme {theme}\n- Definition: What is in it\n- Notes: {notes}\n\n" for theme, notes in (
+                ("TH1: The roster", "P01-opus/1, P01-cx/1"),
+                ("TH2: Keeping track", "P01-opus/2, P01-opus/4, P01-cx/2, P02-opus/2"),
+                ("TH3: Stocktake", "P02-opus/1, P02-cx/1, P01-opus/1"))))  # the last is TH1's already
+        run("analyze.py", self.sd)
+        quant = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+
+        def counts(tally):  # each count with the run ids it counted, so that a hand count can be set against it
+            return {k: (tally[k]["n"], tally[k]["runs"])
+                    for k in ("raised", "not_a_problem", "both", "unprompted", "incident")}
+
+        roster, track, stock = quant["themes"]
+        self.assertEqual((quant["runs"]["complete"], quant["runs"]["expected"], quant["runs"]["interviewed"],
+                          quant["runs"]["not_started"]),
+                         (3, 4, ["P01-opus", "P01-cx", "P02-opus"], {"n": 0, "runs": []}))
+        # Raised by two, one of them unprompted and with an incident, each with the furthest it had gone.
+        self.assertEqual((counts(roster), {e: c["runs"] for e, c in roster["effort"].items()}),
+                         ({"raised": (2, ["P01-opus", "P01-cx"]), "not_a_problem": (0, []), "both": (0, []),
+                           "unprompted": (1, ["P01-opus"]), "incident": (1, ["P01-opus"])},
+                          {"none": ["P01-cx"], "workaround": ["P01-opus"]}))
+        # Three groups that never overlap: who raised it, who said it is no problem and told of nothing under
+        # it, and who did both. Effort is counted over the first and the third, from the notes that tell of it.
+        self.assertEqual((counts(track), {e: c["runs"] for e, c in track["effort"].items()}),
+                         ({"raised": (1, ["P02-opus"]), "not_a_problem": (1, ["P01-cx"]), "both": (1, ["P01-opus"]),
+                           "unprompted": (0, []), "incident": (0, [])},
+                          {"workaround": ["P01-opus"], "paid": ["P02-opus"]}))
+        # One of its two notes that tell of it rests on a flagged question. A note of an interview with no
+        # critique is counted apart, never as one that rests on none.
+        self.assertEqual((track["flagged"], roster["flagged"]),
+                         ({"n": 1, "of": 2, "notes": ["P02-opus/2"], "not_critiqued": []},
+                          {"n": 0, "of": 1, "notes": [], "not_critiqued": ["P01-cx/1"]}))
+        # The interview that stopped is in no count, and a note two themes list is counted under the first.
+        self.assertEqual((counts(stock)["raised"], quant["themes_problems"], quant["no_theme"]),
+                         ((1, ["P02-opus"]), ["P01-opus/1 is listed under TH1 and under TH3: it is counted under TH1, "
+                                              "which lists it first."], ["P01-opus/3"]))
+        self.assertEqual(({k: (v["raised"]["n"], v["interviewed"]["n"]) for k, v in stock["by_segment"].items()},
+                          {k: (v["raised"]["n"], v["interviewed"]["n"]) for k, v in roster["by_model"].items()}),
+                         ({"solo": (0, 2), "firm": (1, 1)}, {"opus": (1, 2), "cx": (1, 1)}))
+        # Coverage: who opened each topic, by the turn logs, the notes under it by their ids, and the same
+        # three groups: a NON-PROBLEM note under a topic puts nobody who told of something there among those
+        # who only said it is no problem.
+        self.assertEqual([(c["topic"], c["opened"]["n"], c["interviews"]["n"], c["notes"], c["raised"]["runs"],
+                           c["not_a_problem"]["runs"], c["both"]["runs"]) for c in quant["coverage"]["topics"]], [
+            ("T1", 3, 3, {"n": 3, "notes": ["P01-opus/1", "P01-cx/1", "P02-opus/1"]},
+             ["P01-opus", "P01-cx", "P02-opus"], [], []),
+            ("T2", 3, 3, {"n": 4, "notes": ["P01-opus/2", "P01-opus/4", "P01-cx/2", "P02-opus/2"]},
+             ["P02-opus"], ["P01-cx"], ["P01-opus"])])
+        # A theme a persona told of on one model and not on the other is said, with the interviews compared.
+        self.assertEqual([(d["persona"], d["theme"], d["agree"], d["models"]["cx"]["runs"], d["interviews"]["cx"])
+                          for d in quant["model_agreement"]],
+                         [("P01", "TH1", True, ["P01-cx"], {"n": 1, "runs": ["P01-cx"]}),
+                          ("P01", "TH2", False, [], {"n": 1, "runs": ["P01-cx"]})])
+        self.assertEqual([(d["run"], d["state"], d["exchanges"], d["notes"]) for d in quant["runs"]["incomplete"]],
+                         [("P02-cx", "partial", 1, ["P02-cx/1"])])
+        # The critique: an interview no critic's file has a section for has no critique, which is counted
+        # and is not the same as one its critic marked no flag in. Each interview has its critic beside it.
+        self.assertEqual((quant["runs"]["no_critique"], quant["runs"]["no_notes"], quant["critique"]["by_interview"]),
+                         ({"n": 1, "runs": ["P01-cx"]}, {"n": 0, "runs": []},
+                          {"P01-opus": {"critic": "critic-1", "flag": 0, "missed": 0, "good": 1},
+                           "P01-cx": {"critic": None, "flag": 0, "missed": 0, "good": 0},
+                           "P02-opus": {"critic": "critic-2", "flag": 1, "missed": 0, "good": 0}}))
+        # The report: every table is under a heading that says what its counts are of, the unfinished
+        # interview is in none but its own, and each verified quote stands ready with its one exchange.
+        report = self.sd.joinpath("analysis/quant.md").read_text()
+        sections = {part.split("\n", 1)[0]: part for part in report.split("\n## ")[1:]}
+        tables = [name for name, part in sections.items() if "\n|---" in part]
+        self.assertEqual(([name for name in tables if "simulated" not in name and name != "Incomplete interviews"],
+                          [name for name, part in sections.items() if "P02-cx" in part],
+                          "Themes (simulated participants)" in tables,
+                          [word for word in ("frequency", "prevalence") if word in report.lower()]),
+                         ([], ["Incomplete interviews"], True, []), report)
+        self.assertIn('- "I paid a casual to cover the floor" (P02-opus, 1). PAIN, note P02-opus/1.',
+                      sections["Verified quotes"])
+        # It is titled with the study's name, which the folder's is not, and carries the notice under it.
+        from panel_lib import NOTICE
+        self.assertEqual((report.split("\n## ")[0], self.sd.name),
+                         (f"# Quantitative analysis: i\n\n{NOTICE}\n", "interview"))
+        self.assertIn("- 1 of the 4 interviews with a turn on record has no critique (P01-cx): ",
+                      sections["Key numbers"])
+        # The critics' marks stand by critic, the interview with no critique last and with no count, under a
+        # sentence that says marks by different critics are not comparable.
+        critique = next(part for name, part in sections.items() if name.startswith("Critique "))
+        self.assertEqual(([line for line in critique.splitlines() if line.startswith("| P")],
+                          "Marks by different critics are not comparable" in critique),
+                         (["| P01-opus | critic-1 | 0 | 0 | 1 |", "| P02-opus | critic-2 | 1 | 0 | 0 |",
+                           "| P01-cx | no critique | - | - | - |"], True))
+        # The tallies stand for the files they were made from. Once a critic's file says something else,
+        # critique.csv is not what it gives, and nothing is written until the marks are extracted again.
+        written = [self.sd.joinpath("analysis", name).read_bytes() for name in ("quant.md", "quant.json")]
+        self.analysis("critique-2.md", "## P02-opus\n\nProse.\n\n## P02-cx\n\nProse.\n")
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stdout, r.stderr, written),
+                         (1, "", "analysis/critique.csv is not what analysis/critique-1.md and analysis/critique-2.md "
+                                 f"now give: run extract_notes.py {self.sd} again.\n",
+                          [self.sd.joinpath("analysis", name).read_bytes() for name in ("quant.md", "quant.json")]))
+        run("extract_notes.py", self.sd)
+        run("analyze.py", self.sd)
+        again = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+        self.assertEqual(again["themes"][1]["flagged"]["n"], 0)  # the flag that is gone is counted no longer
+
+    def test_archive_of_an_interview_study_keeps_the_turn_logs_and_both_transcripts(self):
+        from panel_lib import NOTICE
+        self.talked()
+        run("check_runs.py", self.sd, check=False)  # a report of the study, to archive with it
+        checks = self.sd.joinpath("analysis/checks.md").read_text()
+        as_left = self.entries()  # a launcher that was killed leaves its interviews marked as carried
+        for entry in (as_left["P02-cx"], as_left["interviewer-P02-cx"]):
+            entry["carried"] = True
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        dest = self.tmp / "archive/panel/round-1"
+        r = run("archive.py", self.sd, "--dest", dest, check=False)
+        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
+        logs = {f.name: f.read_bytes() for f in self.sd.glob("interviews/*.jsonl")}
+        self.assertEqual((sorted(logs), {f.name: f.read_bytes() for f in dest.glob("interviews/*.jsonl")}),
+                         (["P01-cx.jsonl", "P01-opus.jsonl", "P02-cx.jsonl", "P02-opus.jsonl"], logs))
+        both = [dest.joinpath(folder, "P01-opus.md").read_text() for folder in ("interviews", "analysis/transcripts")]
+        self.assertEqual((["On my mind" in text for text in both],  # the card, which the analysts' copy leaves out
+                          ["**A:** Nothing else comes to mind." in text for text in both]),
+                         ([True, False], [True, True]))
+        # Nothing of a room, an interviewer's folder or the logs travels.
+        self.assertEqual(sorted(p.name for p in dest.iterdir()), ["analysis", "interviews", "prompts", "runs.json",
+                                                                  "study.json"])
+        # An interview with no end record is archived as it stands, and said plainly.
+        self.assertIn("1 of the 4 interviews has no end record and is archived as it stands: P02-cx (partial, 1 of 6 "
+                      "exchanges).", r.stdout)
+        # A report carries the notice from the script that writes it, so it is one file in the study and in the
+        # round, and the line is still there once the script has run again inside the round.
+        archived = dest.joinpath("analysis/checks.md").read_text()
+        run("check_runs.py", dest, check=False)
+        self.assertEqual((checks.startswith(f"# Run checks\n\n{NOTICE}\n"), archived == checks,
+                          NOTICE in dest.joinpath("analysis/checks.md").read_text()), (True, True, True))
+        # A turn in flight is refused, with nothing archived: its answer is not on the turn log yet.
+        as_left["P02-cx"]["attempts"][-1]["ended"] = None
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        other = self.tmp / "archive/panel/round-2"
+        r = run("archive.py", self.sd, "--dest", other, check=False)
+        self.assertEqual((r.returncode, "P02-cx, the participant's turn" in r.stderr,
+                          "Nothing was archived" in r.stderr, other.exists()), (1, True, True, False), r.stderr)
+
+    def test_quotations_of_the_synthesis_are_checked_against_the_exchange_each_names(self):
+        self.talked()
+        r = run("interview.py", self.sd, "quotes", check=False)  # no synthesis yet: it says who writes it
+        self.assertEqual((r.returncode, "run --role writer" in r.stderr), (1, True), r.stderr)
+        found = ['An answer: "I rang Sam on the Thursday and I was still waiting on the Monday." (P01-opus, 1)',
+                 "Curly marks, another case and other spacing: \u201ci rang Sam on  the Thursday\u201d (P01-opus, 1)",
+                 'A question: "Question 2?" (P01-opus, 2).',
+                 # A quotation may wrap, with its attribution on the next line, and so may the attribution.
+                 'One that wraps: "I rang Sam on the Thursday and I was\nstill waiting on the Monday."\n(P01-opus, 1)',
+                 'An attribution that wraps: "A notebook." (P01-opus,\n2) is all she said of it.',
+                 'A term, in a code span: `"keeping track"` is a theme.',
+                 "An apostrophe and a possessive: it's the brokers' files, and Sam's 'big week' is a term.",
+                 '```text\n"Inside a fence."\n```',
+                 # A block of four backticks holds a line of three, and ends where its own fence does.
+                 '````text\n```\n"Inside the block still."\n````']
+        wrong = ['Not what was said: "I rang Sam on the Friday" (P01-opus, 1)',
+                 'An exchange the log does not have: "Stocktake, mostly." (P02-cx, 4)',
+                 'Two words and no attribution: "fair enough"',
+                 'A sentence and no attribution: "Nobody here has the time to count stock every single week."',
+                 # No other marks, and no place, take a quotation past the check: its attribution brings it here.
+                 "In single marks: 'I rang Sam on the Thursday and I was still waiting on the Monday.' (P01-opus, 1)",
+                 "In curly single marks, with no attribution: ‘Nobody here has the time to count stock.’",
+                 "In guillemets: «I rang Sam on the Thursday» (P01-opus, 1)",
+                 "In no marks at all: she rang Sam on the Thursday (P01-opus, 1).",
+                 "In no marks, with the bracket over a line break: nobody ever said this of it (P01-opus,\n1).",
+                 'In a code span: `"I rang Sam on the Friday" (P01-opus, 1)`',
+                 'With an ellipsis that nobody said: "I rang Sam..." (P01-opus, 1)',
+                 'A mark that is never closed: "A notebook.']
+        lines = ["# Synthesis", *found[:5], *wrong[:2], *found[5:], *wrong[2:]]
+        self.analysis("SYNTHESIS.md", "\n\n".join(lines) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        listed = [int(line.split()[2].rstrip(":")) for line in r.stdout.splitlines() if line.startswith("- Line ")]
+        # Each is listed by the line it opens on, which for a bracket over a line break is where the bracket opens.
+        opens = {"\n\n".join(lines[:i]).count("\n") + (2 if i else 0) + item.count("\n", 0, item.find("(P01-opus,\n"))
+                 + 1: item for i, item in enumerate(lines)}
+        self.assertEqual((r.returncode, [opens.get(n) for n in listed]), (1, wrong), r.stdout + r.stderr)
+        from panel_lib import NOTICE
+        self.assertEqual((self.sd.joinpath("analysis/quote-check.md").read_text(),
+                          r.stdout.startswith(f"# Quote check\n\n{NOTICE}\n")), (r.stdout, True))
+        # With each of those taken out, the synthesis passes.
+        self.analysis("SYNTHESIS.md", "\n\n".join(["# Synthesis", *found]) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        self.assertEqual((r.returncode, "- Line" in r.stdout), (0, False), r.stdout + r.stderr)
+        # One that quotes nobody in the form has not passed: nothing in it was checked, and it says so.
+        self.analysis("SYNTHESIS.md", "\n\n".join(["# Synthesis", "She keeps a notebook.", *found[5:]]) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        self.assertEqual((r.returncode, "- Line" in r.stdout, "No quotation of analysis/SYNTHESIS.md was verified"
+                          in r.stdout), (1, False, True), r.stdout + r.stderr)
 
 
 class LauncherWithoutWaitidTest(LauncherTest):

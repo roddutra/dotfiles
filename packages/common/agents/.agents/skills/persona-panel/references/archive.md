@@ -23,6 +23,7 @@ Keep two tiers:
         study.json  study-brief.md  key.md  forms.json  runs.json  followups.json  panel-instructions.md
         personas/  prompts/  analysis/  scripts/ (only if the round used one-off scripts)
         evidence/<run id>/           usability only: steps.jsonl and the screenshots of its steps
+        interviews/                  interview only: each interview's turn log and full transcript
 ```
 
 Dropped because they regenerate: the site copies, in `panel/sites` or in `sites/` when the study did not browse (from `concepts/` + `key.md`), `panel/materials` (`capture.py`), scratch screenshots, designer verification shots.
@@ -40,7 +41,7 @@ Not archived either:
 
 What travels with a round besides the persona files:
 
-- `analysis/`, whole: `usage.md`, `runs.csv`, `answers.csv` and `lines.csv` with it. An archived round still analyses.
+- `analysis/`, whole: `usage.md`, `runs.csv`, `answers.csv` and `lines.csv` with it, and in an interview study the analysts' copies of the transcripts in `analysis/transcripts/`. An archived round still analyses.
 - `study-brief.md`: what was agreed with the user, hypotheses included.
 - `forms.json`: whether each `files` concept is images, PDFs or both. An archive without `--concepts` has no source file to tell them apart, and `analyze.py` needs it for the format caution (`references/method.md`). `archive.py` writes it from the source files while they can be read, else from the study's own copy.
 - `followups.json`: the follow-up questions asked and how each run answered. The answers themselves are in the persona files. `archive.py` refuses a study with a follow-up that is not settled: its persona file may hold what settling will reject, and an archive has no `logs/` to put it back from. It also refuses a study that a launcher has, and holds the study lock while it copies the round, so no follow-up starts under the copy. Of a study it cannot write, as in a read-only sandbox, it keeps a shared lock on `.launch.lock` for as long, which turns every launcher away: one that tries says that something is reading the study, and to try again. A study at rest has that file to share: `init_study.py` makes it and no launcher removes it. Only a study from before that has none, and there `archive.py` refuses a study with a run on record as running and copies any other unprotected (`references/runners.md`, A lead on Codex).
@@ -86,6 +87,33 @@ Three more refusals, each before anything is copied:
 - **A kept file or an evidence folder cannot be read as the study's own.** The refusal above (What the copy reads) reaches the evidence too: a symbolic link at the evidence root or at a run's evidence folder could bring in a file from outside the study. A kept file or step log that could not be scanned is not known to be clean. Each is named with the reason, and no link is followed. Put a plain file or folder at the name, or remove it, and archive again.
 
 The scan has limits, and the harness's own session records are outside it (`references/usability.md`, Safety). Run `launch.py <study> purge-sessions --yes` once the study is archived.
+
+## Interview studies
+
+An interview study has no concepts, no `key.md` and no persona files, so `--concepts` copies nothing and the round has no `personas/`. It keeps `study.json`, `study-brief.md`, `runs.json`, `prompts/` and:
+
+| In the archive | What it is |
+|---|---|
+| `interviews/<run id>.jsonl` | The turn log, byte for byte: the one record of what was said and of why an interview stopped |
+| `interviews/<run id>.md` | The full transcript: the situation card, and each question with its topic, move and reason. The card is meant to be kept, since the critique was marked against it |
+| `analysis/transcripts/<run id>.md` | The analysts' copy: the questions and answers alone |
+| `analysis/`, the rest | `qual-<n>.md`, `critique-<n>.md`, `notes.csv`, `critique.csv`, `themes.md`, `quant.md`, `quant.json`, `SYNTHESIS.md`, `quote-check.md`, `checks.md` and `usage.md` |
+
+The paths are the study's own, so an archived round still works with `extract_notes.py`, `analyze.py`, `check_runs.py` and `interview.py <round> quotes`. The three reports those scripts write, `quant.md`, `checks.md` and `quote-check.md`, carry the synthetic panel notice from the script itself in an interview study, so each is the same file in the study and in the round and keeps the line when its script runs again in the round. A review or a usability study's `quant.md` and `checks.md` get the line from `archive.py` alone: run either script in an archived round of one and the line is gone until the round is archived again.
+
+Never copied:
+
+- `panel/rooms/` and `interviewer/`: the two sides' working folders, which hold nothing.
+- `logs/`: every turn's raw input and output, and any turn log that a fresh start or `init_study.py --force` set aside (`logs/<run id>.interview-<k>.jsonl`, `logs/interviews-<time>/`). Those are superseded, never evidence.
+
+Two more refusals, each before anything is copied:
+
+- **A turn is in flight:** a side of an interview has an attempt with no end, so a process may still be answering and its answer is not on the turn log. `launch.py <study> stop` settles it and starts nothing. `launch.py <study> resume` goes on with the interview.
+- **A launcher is carrying an interview between two turns.** Wait for it to end, or stop it. A study whose launcher was killed is not refused for the mark it left: the interview is archived as its turn log stands.
+
+An interview with no end record does not stop the archive. A line names each one with the state it reads as and how far it got, and `analyze.py` lists it under "Incomplete interviews" and counts it in no table. An interview with turns on record and no transcript is named too: run `interview.py <study> render` and archive again.
+
+Nothing of an interview study is scanned. It has no test accounts, so there is no secret to look for, and a `leak_terms` entry in a question, a card or an answer is for `check_runs.py` to report before the round is archived. Archive only after `interview.py <study> quotes` exits 0, so that `quote-check.md` in the round says every quotation was found.
 
 ## Synthetic panel notice
 

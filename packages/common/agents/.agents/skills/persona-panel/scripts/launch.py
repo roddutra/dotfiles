@@ -18,7 +18,9 @@ Usage: launch.py <study-dir> <command> [options]
   resume --runs <ids> --extend             # also continue the limited runs named
   run --role analyst [--allow-incomplete]  # plan and start the analyst jobs
   run --role writer                        # plan and start the writer job
-  resume --role analyst|writer             # continue blocked jobs
+  run --role critic [--allow-incomplete]   # interview: plan and start the critic jobs
+  run --role themes                        # interview: plan and start the themes job
+  resume --role <role>                     # continue blocked jobs of that role
   stop                                     # stop the processes; runs stay resumable
   status [--json]                          # every run and job, its process, time and usage
   usage [--json]                           # what each harness reported; rewrites analysis/usage.md
@@ -581,7 +583,9 @@ It works before init_study.py and capture.py have run, and says what is missing.
 - a problem when a run may browse and the agent-browser CLI is not on PATH: every such run
   would end as "could not be started"
 - the analyst and writer jobs with their share of the synthesis pool, or which of
-  synthesis.analyst and synthesis.writer is missing
+  synthesis.analyst and synthesis.writer is missing. For an interview study the critic jobs and
+  the themes job too, in the order the jobs run with the script that stands between two of
+  them, the pool divided among all of them, and synthesis.critic among what may be missing
 - an estimate of what the runs still to go will use. For a model key with finished runs it is
   the mean tokens, cost and time those runs reported, times the runs to go, so a pilot gives the
   next plan a measured baseline. A finished run whose reported usage is known to be short (a
@@ -669,6 +673,60 @@ Analysts and the writer, set in study.json:
   "resume" continues a blocked job in its session.
 - Jobs run under limits.synthesis, apart from the run limits: its minutes for each job, and its
   budget_usd as one pool divided equally among the analysts and the writer, each share a cap.
+
+The synthesis of an interview study has four job roles, in this order (panel_lib.job_roles(),
+synthesis_jobs()), and a script between two of them:
+    run --role analyst    analyst-<n>   analysis/qual-<n>.md       what each participant said,
+                                                                   as evidence notes
+    run --role critic     critic-<n>    analysis/critique-<n>.md   marks on the interviewer's
+                                                                   questions
+    extract_notes.py                    analysis/notes.csv, critique.csv
+    run --role themes     themes        analysis/themes.md         the notes put into themes
+    analyze.py                          analysis/quant.md, quant.json
+    run --role writer     writer        analysis/SYNTHESIS.md      the final summary
+- "synthesis": {"critic": {"runner": "<runner>", "model": "<model>"}} is the critics' model
+  entry, with no default, as the analysts' and the writer's have none. There are as many critics
+  as analysts, and critic <n> has the personas analyst <n> has. The themes job runs on
+  synthesis.analyst. The pool is divided equally among every job planned: two analysts make
+  six jobs.
+- What each role waits for is one table (WAITS), and a job that is refused is not planned
+  either. Analysts and critics wait for the panel, in either order: no interview pending,
+  running or blocked, unless --allow-incomplete. The themes job waits for every analyst job and
+  for analysis/notes.csv. The writer waits for every analyst, critic and themes job and for
+  analysis/quant.md. A refusal for a file names the script that writes it.
+- An analyst or a critic none of whose interviews has a turn on record has nothing to read. It
+  refuses the command, or with --allow-incomplete is passed over with a line while the jobs
+  that have something to read run: after a pilot one half of the personas may have no
+  interview. --runs <job ids> judges the jobs it names alone. A job that was passed over is
+  still pending, so the themes job and the writer wait for it.
+- A job is done again by deleting its file and running its role again, and a done job is out
+  of date (interview.out_of_date(), from the attempts in runs.json and the turn logs, never
+  from a file's time) when an analyst's or a critic's interviews were held, went on or ended
+  after its brief was written, or when a job that a themes job or a writer reads was launched
+  again after its own last launch, or when a file a themes job or a writer was given to read
+  has changed or gone with no job run again. For the last, the launch of such a job records a
+  fingerprint of each file its brief names, in the attempt ("read", panel_lib.py "Job
+  entries"), taken as the brief is written. "run --role" says which, and that deleting the
+  job's file and running the role again puts it right, in place of what comes next, and exits
+  with 1. The job stays done: the lead decides. The plan says the same against the job's row
+  and under the table. A role that reads a job which is out of date in the second or the third
+  way is refused.
+- The scripts between the jobs leave no record, so each is asked what it would write now
+  (no_longer()): the themes job is refused while analysis/notes.csv is not what the analysts'
+  files give, and the writer while analysis/quant.json is not what analyze.py would write.
+- A job command that finds every job done starts nothing and says so, with the file to delete
+  to have one done again (done_already()).
+- "context_files" go to the writer alone, which is never given a transcript: a path under
+  interviews/, analysis/transcripts/, prompts/, interviewer/, panel/ or logs/ is refused when
+  study.json is loaded (panel_lib.NOT_CONTEXT).
+- The briefs are interview.brief()'s, from assets/interview-qual-brief.md,
+  interview-critique-brief.md, interview-themes-brief.md and interview-synthesis-brief.md
+  (interview.py, "The jobs of the synthesis", has what each job is given and kept from). Before
+  an analyst's or a critic's brief is written, both transcripts of every interview with a turn
+  on record are written again, so one that never ended has them too, and an analyst's brief
+  lists its unfinished interviews with their state.
+- Once the jobs of a role are done, the command's last line says what to read and what comes
+  next (after_jobs()).
 
 Follow-up questions. followup.py asks them, through the supervisor here: a follow-up is one more
 attempt on a finished run, of kind "followup", which resumes the run's session under the study
@@ -1403,7 +1461,8 @@ class Panellist:
 
 
 class Synthesis:
-    """The same questions about an analyst or writer job: one process that works in the study
+    """The same questions about a job of the synthesis (an analyst or the writer, and in an
+    interview study a critic or the themes job): one process that works in the study
     directory and writes one file, entry["file"]. Its progress has that file as its only unit,
     scored once the file holds something and never just "written", so a job is done, or it has
     nothing: pl.run_state() then never calls it partial."""
@@ -1537,9 +1596,11 @@ class Interview:
         return {"tools": interview.tools(side_of(entry), runners.get(entry["runner"]))}
 
 
-# An entry the launcher runs has its role here. An interviewer starts and stops with its interview, so
-# no command takes it as a --role (STARTABLE).
-ROLES = {"panellist": Panellist, "analyst": Synthesis, "writer": Synthesis, "interviewer": Interview}
+# An entry the launcher runs has its role here. The jobs of the synthesis are in the order they run, and
+# "critic" and "themes" are an interview study's alone (pl.job_roles()). An interviewer starts and stops
+# with its interview, so no command takes it as a --role (STARTABLE).
+ROLES = {"panellist": Panellist, "analyst": Synthesis, "critic": Synthesis, "themes": Synthesis,
+         "writer": Synthesis, "interviewer": Interview}
 STARTABLE = [role for role in ROLES if role != "interviewer"]
 
 
@@ -1748,6 +1809,7 @@ class Supervisor:
         self.left_alone = False  # a run this command was asked to continue cannot be
         self.distrusted = set()  # the browser session records this command has refused, and said so
         self.held = None        # why no command of the study may be started: what accounts.recover() stopped for
+        self.given = {}         # job id -> the fingerprints of what its brief gives it to read (plan_jobs())
         self.modules = {}
 
     def runner(self, name: str):
@@ -2047,6 +2109,8 @@ class Supervisor:
             "session": command["session_id"], "was": {k: e[k] for k in UNDONE if k in e},
             **({"followup": number} if number else {}),
             **({"evidence_aside": aside} if aside else {}),
+            # What its brief gave a job to read, as it was when the brief was written: only a launch starts from one.
+            **({"read": self.given[e["run"]]} if kind == "launch" and self.given.get(e["run"]) else {}),
             # What its step log held already: the step limit is watched in what this attempt adds (over_steps()).
             **({"steps": {"seen": "".join(marks(self.log_lines(e))), "begun": {}}} if usability and own else {})}]
         e.update(pid=None, pid_identity=None)
@@ -3537,14 +3601,20 @@ def select(runs: list[dict], role: str, ids: list[str] | None) -> list[dict]:
     what = noun if noun == Interview.noun else f"{role} {noun}"  # an interview is named by itself, not by a side
     if not pool:
         raise SystemExit(f"This study has no {what}s in runs.json." + (
-            f' "run --role {role}" plans and starts them.' if role in pl.JOB_ROLES else ""))
+            f' "run --role {role}" plans and starts them.' if ROLES[role] is Synthesis else ""))
     if ids is None:
         return pool
-    unknown = [i for i in ids if i not in {e["run"] for e in pool}]
-    if unknown:
-        raise SystemExit(f"No {what} called {', '.join(unknown)}. There {agree(len(pool), 'is', 'are')}: "
-                         f"{', '.join(e['run'] for e in pool)}")
+    known(what, ids, [e["run"] for e in pool])
     return [e for e in pool if e["run"] in ids]
+
+
+def known(what: str, ids: list[str], names: list[str]):
+    """Refuse, by exiting, the ids of --runs that are none of names: what a command is asked to
+    start is checked before it does anything."""
+    unknown = [i for i in ids if i not in names]
+    if unknown:
+        raise SystemExit(f"No {what} called {', '.join(unknown)}. There {agree(len(names), 'is', 'are')}: "
+                         f"{', '.join(names)}")
 
 
 def text_only_note(cfg: dict, brief_name: str) -> str:
@@ -3607,7 +3677,9 @@ def followups_note(cfg: dict, brief_name: str, runs: set[str]) -> str:
 
 def brief(cfg: dict, job: dict, records: list[dict], files: dict) -> str:
     """A job's prompt: its brief from assets/ with every placeholder filled. records is
-    pl.run_records(), and files maps a run id to its persona file."""
+    pl.run_records(), and files maps a run id to its persona file. An interview study's four
+    briefs are interview.brief()'s: what each job of one is given and kept from is a rule of
+    the interview, and is written there."""
     sd, syn, keys = cfg["_dir"], cfg["synthesis"], pl.model_keys(cfg)
     usability = cfg["type"] == "usability"  # its briefs are assets of their own, with the same placeholders
     qual, synthesis = ("usability-qual-brief", "usability-synthesis-brief") if usability else (
@@ -3617,6 +3689,8 @@ def brief(cfg: dict, job: dict, records: list[dict], files: dict) -> str:
     missing = [f for f in context if not (sd / f).is_file()]
     if missing:
         raise SystemExit(f"synthesis.context_files: no such file in {sd}: {', '.join(missing)}")
+    if cfg["type"] == "interview":
+        return interview.brief(cfg, job, records)
     values = {
         "PERSONAS": plural(len(cfg["personas"]), "persona"),
         "PRODUCT": cfg.get("product") or "the product",
@@ -3686,48 +3760,146 @@ def unsettled_followups(study_dir: Path, runs: list[dict]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomplete: bool):
-    """What comes before any analyst or writer job starts. Refuses, by exiting, a role with no
-    model entry and a job whose inputs are not ready: either while a follow-up question is not
-    settled, analysts while panellist runs are pending, running or blocked (unless
-    allow_incomplete), the writer until every analyst job is done.
+# What each job role waits for, the one table of it: the panel (no run or interview pending, running or
+# blocked, unless --allow-incomplete), the job roles whose every job must be done, which are the roles whose
+# files it is written from (pl.JOB_READS), and a file that a script writes from those jobs' output, with the
+# script. Only the roles a study has are asked for (pl.job_roles()), and only an interview study is held to
+# the file: the writer of a review or usability study is told when a file its brief names is missing, and
+# starts. In an interview study the file must also be what its script would write now (no_longer()), and
+# every job read must still be good (interview.rerun(), interview.altered()).
+WAITS = {"analyst": (True, (), None),
+         "critic": (True, (), None),
+         "themes": (False, pl.JOB_READS["themes"], ("analysis/notes.csv", "extract_notes.py")),
+         "writer": (False, pl.JOB_READS["writer"], ("analysis/quant.md", "analyze.py"))}
+CALLED = {"analyst": "analysts", "critic": "critics", "themes": "themes job", "writer": "writer"}  # the jobs of a role
+
+
+def waiting(role: str) -> str:
+    """The jobs of a role and their verb, for a sentence on what they wait for: "analysts wait",
+    "themes job waits"."""
+    return f"{CALLED[role]} wait{'' if CALLED[role].endswith('s') else 's'}"
+
+
+def no_longer(cfg: dict, role: str, records: list[dict]) -> str | None:
+    """Why the file that the jobs of a role read from a script (WAITS) no longer stands, in one
+    sentence that names the script to run again, None when it is what that script would write
+    now. Asked of an interview study, of a file that is there. Nothing records when a script
+    ran and no file's time is compared: each script is asked what it would write now.
+
+        themes   analysis/notes.csv against what the analysts' files give now
+                 (extract_notes.changed()). The themes job reads nothing of critique.csv
+        writer   analysis/quant.json against the report made again (analyze.stale_tallies()),
+                 as analyze.py will read the study once this command has let it go: with no
+                 launcher holding it
+
+    The two modules are loaded here, so that no study of another type loads them."""
+    if role == "themes":
+        import extract_notes
+        return extract_notes.changed(cfg, records, ("qual",))
+    if role == "writer":
+        import analyze
+        return analyze.stale_tallies(cfg)
+    return None
+
+
+def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomplete: bool,
+              ids: list[str] | None = None) -> tuple[set[str], dict[str, dict]]:
+    """What comes before any job of the synthesis starts. Refuses, by exiting, a name in ids
+    (the jobs --runs names, None for every job of the role) that is no job study.json plans
+    for the role, before anything is planned or written, a role with no
+    model entry and a job whose inputs are not ready (WAITS): any while a follow-up question is
+    not settled, analysts and critics while panellist runs or interviews are pending, running
+    or blocked (unless allow_incomplete), the themes job until every analyst job is done, the
+    writer until every job of every role before it is, and in an interview study the themes job
+    and the writer until the script that writes the file they read has run. There a job that
+    is done is not enough: a job that reads one which was built on files since written anew
+    (interview.rerun()) or since changed with no job run again (interview.altered()) is refused
+    with what puts that job right, and so is one whose script would now write another file than
+    the one that is there (no_longer()). So after an analyst is run again, or a note is put
+    right by hand, nothing goes on from the old notes, themes or tallies.
     Then, for the run command, brings the role's job entries in runs and their prompts in line
-    with study.json: a new job is added, and one that is pending or failed is planned afresh."""
-    sd, planned = cfg["_dir"], pl.synthesis_jobs(cfg)
+    with study.json: a new job is added, and one that is pending or failed is planned afresh.
+    In an interview study both transcripts of every interview with a turn on record are written
+    first for the analysts and the critics (interview.write_transcripts()), so an interview
+    that never ended has the copy its brief names.
+
+    An analyst or a critic of an interview study none of whose interviews has a turn on record
+    has nothing to read (interview.nothing_to_read()), and is not planned. Of the jobs the
+    command is about, such a job refuses the command, as it always did. With allow_incomplete
+    it is passed over with a line while the others run, so that part of a panel (a pilot, one
+    persona's interviews) can be analysed and critiqued, and the command is refused only when
+    none of its jobs has anything to read. A job --runs does not name is not judged.
+
+    Returns the ids of the jobs with nothing to read, of which the caller starts none, and for
+    each job of an interview study whose brief was written the fingerprints of the files that
+    brief gives it to read (interview.given(): of a themes job and a writer), taken as the
+    brief is written. The caller hands them to the supervisor, which records them in the
+    attempt that launches the job, in the one save that puts the attempt on record."""
+    sd, planned, talk = cfg["_dir"], pl.synthesis_jobs(cfg), cfg["type"] == "interview"
     wanted = [j for j in planned if j["role"] == role]
-    if role not in cfg["synthesis"] or wanted[0]["runner"] is None:
+    if command == "run" and ids is not None:  # "resume" plans nothing, and select() asks it of runs.json
+        known(f"{role} {Synthesis.noun}", ids, [j["run"] for j in wanted])
+    key = pl.job_entry(role)
+    if key not in cfg["synthesis"] or wanted[0]["runner"] is None:
+        whose = f"the {role}" if key == role else f"the {CALLED[role]}, which runs on synthesis.{key}"
         raise SystemExit(
-            f'study.json names no runner for the {role}. Add "synthesis": {{"{role}": {{"runner": "<runner>", '
+            f'study.json names no runner for {whose}. Add "synthesis": {{"{key}": {{"runner": "<runner>", '
             f'"model": "<model>"}}}}: there is no default, and "model" may be left out for the runner\'s own.')
     runners.get(wanted[0]["runner"])
     out = unsettled_followups(sd, runs)
     if out:
         files = agree(len(out), "its persona file", "their persona files")
         raise SystemExit(
-            f"The {'analysts wait' if role == 'analyst' else 'writer waits'} for the follow-up questions: the one put "
+            f"The {waiting(role)} for the follow-up questions: the one put "
             f"to {planning.listed(out)} is not settled, so {files} may still be put back as before the question. "
             f"Wait for the follow-up to finish, or settle one that was cut short with: followup.py {sd} list")
     records = pl.run_records(sd, cfg, held(cfg))
-    if role == "analyst":
-        waiting = [r for r in records if r["state"] in ("pending", "running", "blocked")]
-        if waiting and not allow_incomplete:
-            unit = "interview" if cfg["type"] == "interview" else "panellist run"
+    panel, before, script = WAITS[role]
+    before = [r for r in before if r in pl.job_roles(cfg)]
+    if panel:
+        waiting_for = [r for r in records if r["state"] in ("pending", "running", "blocked")]
+        if waiting_for and not allow_incomplete:
+            unit = "interview" if talk else "panellist run"
+            then = ("analyse what there is: the analysts are then told which runs are incomplete." if not talk else
+                    "analyse what there is: the analysts are then told which interviews are unfinished."
+                    if role == "analyst" else
+                    "critique what there is: a transcript says where an unfinished interview stopped.")
             raise SystemExit(
-                f"Analysts wait for the panel: {plural(len(waiting), unit)} of {len(records)} "
-                f"{agree(len(waiting), 'has', 'have')} not finished ("
-                + ", ".join(f"{r['run']} {r['state']}" for r in waiting) + "). Finish them with launch.py run and "
-                "resume, or pass --allow-incomplete to analyse what there is: the analysts are then told which "
-                "runs are incomplete.")
-    else:
+                f"{CALLED[role].capitalize()} wait for the panel: {plural(len(waiting_for), unit)} of {len(records)} "
+                f"{agree(len(waiting_for), 'has', 'have')} not finished ("
+                + ", ".join(f"{r['run']} {r['state']}" for r in waiting_for) + "). Finish them with launch.py run and "
+                f"resume, or pass --allow-incomplete to {then}")
+    if before:
         recorded_jobs = {e["run"]: e for e in runs}
-        analysts = {j["run"]: state_of(cfg, recorded_jobs.get(j["run"], j)) for j in planned if j["role"] == "analyst"}
-        if set(analysts.values()) != {"done"}:
+        states = {j["run"]: state_of(cfg, recorded_jobs.get(j["run"], j)) for j in planned if j["role"] in before}
+        if set(states.values()) != {"done"}:
+            # The roles with a job that is not done, in the order they run: the first is what to start next.
+            first, *later = [r for r in before
+                             if any(states[j["run"]] != "done" for j in planned if j["role"] == r)]
             raise SystemExit(
-                "The writer waits for the analysts: " + ", ".join(f"{k} is {v}" for k, v in analysts.items())
-                + f". Finish them first: launch.py {sd} run --role analyst, or resume --role analyst for one "
-                "that is blocked.")
+                f"The {waiting(role)} for {planning.listed([f'the {CALLED[r]}' for r in before])}: "
+                + ", ".join(f"{k} is {v}" for k, v in states.items())
+                + f". Finish them first: launch.py {sd} run --role {first}, or resume --role {first} for one "
+                "that is blocked."
+                + (f" Then the same with --role {planning.listed(later)}." if later else ""))
+    if talk and before:  # every job it reads is done: one of them built on files that were since written anew
+        on_record = {e["run"]: e for e in runs}
+        stale = next((line for line in (interview.out_of_date_line(cfg, on_record[j["run"]], runs, records)
+                                        for j in planned if j["role"] in before and j["run"] in on_record
+                                        and (interview.rerun(on_record[j["run"]], runs)
+                                             or interview.altered(cfg, on_record[j["run"]]))) if line), None)
+        if stale:
+            raise SystemExit(f"The {waiting(role)}, because a job it reads is out of date. {stale}")
+    if talk and script and not (sd / script[0]).is_file():
+        raise SystemExit(
+            f"The {waiting(role)} for {script[0]}, which is not there: {script[1]} {sd} writes it. Run that, "
+            f"then launch.py {sd} {command} --role {role} again.")
+    stale = no_longer(cfg, role, records) if talk and script else None
+    if stale:
+        raise SystemExit(f"The {waiting(role)}, because {stale[:-1]}, then launch.py {sd} {command} --role {role} "
+                         "again.")
     if command != "run":
-        return
+        return set(), {}
     current = {e["run"]: e for e in runs if e["role"] == role}
     settled = {k: state_of(cfg, e) for k, e in current.items() if state_of(cfg, e) not in ("pending", "failed")}
     changed = [k for k, state in settled.items()
@@ -3739,10 +3911,24 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
                 f"{j['run']} reading {', '.join(j['personas'])}" for j in wanted)
             + '. Put "synthesis" and the personas back as they were. To plan again instead, delete the output '
             "files of the jobs named, and take any of them that is not done out of runs.json.")
+    # The analysts and critics of an interview study with no interview to read: none is planned or started.
+    unheard = {j["run"]: j for j in wanted
+               if talk and j["run"] not in settled and interview.nothing_to_read(cfg, j, records)}
+    about = [j["run"] for j in wanted if ids is None or j["run"] in ids]  # the jobs this command is asked to start
+    empty = [k for k in about if k in unheard]
+    if empty and (not allow_incomplete or len(empty) == len(about)):
+        raise SystemExit(interview.nothing_to_read(cfg, unheard[empty[0]], records))
     files = {e["run"]: e["file"] for e in runs if e["role"] == "panellist"}
-    prompts = {j["run"]: brief(cfg, j, records, files) for j in wanted if j["run"] not in settled}
+    if talk and panel and len(settled) < len(wanted):  # the transcripts a brief is about to name
+        for r in records:
+            interview.write_transcripts(cfg, r["run"])
+    prompts = {j["run"]: brief(cfg, j, records, files) for j in wanted if j["run"] not in {*settled, *unheard}}
+    # What each of those briefs gives its job to read, as it is now: the supervisor records it on the job's launch.
+    given = {j["run"]: interview.given(cfg, j) for j in wanted if talk and j["run"] in prompts}
+    for k in empty:
+        say(interview.nothing_to_read(cfg, unheard[k], records, passed=True))
     for job in wanted:
-        if job["run"] in settled:
+        if job["run"] not in prompts:
             continue
         if job["run"] not in current:
             runs.append({})
@@ -3751,9 +3937,74 @@ def plan_jobs(cfg: dict, runs: list[dict], role: str, command: str, allow_incomp
         (sd / job["prompt"]).write_text(prompts[job["run"]])
     for stale in set(current) - {j["run"] for j in wanted}:
         runs.remove(current[stale])  # pending or failed, and no longer planned
-    for name in ("analysis/quant.md", "analysis/checks.md", "analysis/lead-notes.md") if prompts else ():
+    # The files a brief names that no job is held to. In an interview study only the writer's brief names one.
+    named = (("analysis/quant.md", "analysis/checks.md", "analysis/lead-notes.md") if not talk else
+             ("analysis/checks.md",) if role == "writer" else ())
+    for name in named if prompts else ():
         if not (sd / name).is_file():
             say(f"Note: {name} does not exist, and the {role}'s brief names it.")
+    return set(unheard), given
+
+
+def done_already(cfg: dict, chosen: list[dict], records: list[dict]) -> str:
+    """What the lead is told when a job command of an interview study starts nothing because
+    every job it is about is done: that, and how one is done again, which is to delete its file
+    and run the role again. Nothing else says so, and "Finished: done 2." reads as if two jobs
+    had just run. The command named has --allow-incomplete when the panel would still refuse
+    the role without it."""
+    names, files, role = [e["run"] for e in chosen], [e["file"] for e in chosen], chosen[0]["role"]
+    unfinished = WAITS[role][0] and any(r["state"] in ("pending", "running", "blocked") for r in records)
+    one = len(chosen) == 1
+    return (f"{pl.listed(names)} {'was' if one else 'were'} done already, and nothing was started. To have "
+            f"{'it' if one else 'one'} done again, delete its file ({pl.listed(files, 'or')}) and run launch.py "
+            f"{cfg['_dir']} run --role {role}{' --allow-incomplete' if unfinished else ''} again.")
+
+
+def after_jobs(cfg: dict, runs: list[dict], role: str, chosen: list[dict]) -> list[str]:
+    """What comes after the jobs of a role, as the line a command ends with once the jobs it
+    was asked for are done: what to read, and the next step of the synthesis. In an interview
+    study the analysts and the critics may run in either order, so each names the other while
+    it has a job that is not done, and the scripts that stand between two jobs are named with
+    what they write. Nothing after the writer.
+
+    A job of the command's own role may be still to run too: one that --allow-incomplete
+    passed over for want of an interview to read, or one that --runs did not name. The line
+    then names it, says when it can run and which roles wait for it, and goes on only as far
+    as the analysis can without it: a line that went straight on to the scripts read as if
+    the role were finished."""
+    sd, read = cfg["_dir"], f"Next: read {', '.join(e['file'] for e in chosen)}"
+    if cfg["type"] != "interview":
+        return [f"{read}, then launch.py {sd} run --role writer."] if role == "analyst" else []
+    if role == "themes":
+        return [f"{read}, then analyze.py {sd}, which writes the tallies (analysis/quant.md), then launch.py {sd} "
+                "run --role writer."]
+    if role not in ("analyst", "critic"):
+        return []
+    other, on_record = "critic" if role == "analyst" else "analyst", {e["run"]: e for e in runs}
+    to_run = {r: [j for j in pl.synthesis_jobs(cfg)
+                  if j["role"] == r and state_of(cfg, on_record.get(j["run"], j)) != "done"] for r in (role, other)}
+    extract = (f"extract_notes.py {sd}, which reads the notes and the critique into analysis/notes.csv and "
+               "analysis/critique.csv")
+    if not to_run[role] and not to_run[other]:
+        return [f"{read}, then {extract}, then launch.py {sd} run --role themes."]
+    out = [f"{read}."]
+    if to_run[role]:
+        records = pl.run_records(sd, cfg, held(cfg))
+        mine = [j["run"] for j in to_run[role]]
+        when = [f"{j['run']} once an interview of {interview.heard_from(j)} is held"
+                for j in to_run[role] if interview.nothing_to_read(cfg, j, records)]
+        waits = planning.listed([f"the {CALLED[r]}" for r, (_, before, _) in WAITS.items() if role in before])
+        out.append(f"{planning.listed(mine)} {agree(len(mine), 'is', 'are')} still to run"
+                   + (f", {when[0].split(' ', 1)[1]}" if when and len(mine) == 1 else
+                      f" ({'; '.join(when)})" if when else "")
+                   + f": launch.py {sd} run --role {role}. {waits[0].upper()}{waits[1:]} "
+                   f"{'wait' if ' and ' in waits else 'waits'} for {agree(len(mine), 'it', 'them')}.")
+    if to_run[other]:
+        out.append(f"The {CALLED[other]} are still to run ({', '.join(j['run'] for j in to_run[other])}): launch.py "
+                   f"{sd} run --role {other}.")
+    elif role == "critic":  # the notes are all there, and the themes job reads nothing of the critique
+        out.append(f"Until then: {extract} so far, then launch.py {sd} run --role themes.")
+    return [" ".join(out)]
 
 
 def fitness(cfg: dict, entries: list[dict]) -> tuple[dict, dict, list[str]]:
@@ -3856,7 +4107,21 @@ def launch(args, cfg: dict) -> int:
     not queued: it is left alone, as a run with sections written and no session is. Nor is one
     whose turn log is not as a launcher writes one (interview.malformed()): what is left of
     such a log is no account of the interview, so nothing is added to it, the line says which
-    record is wrong and what to do, and the command exits with 1."""
+    record is wrong and what to do, and the command exits with 1.
+
+    When "--role writer" leaves the writer of an interview study done, the quotations of its
+    synthesis are checked against the transcripts (interview.quote_check(), which also writes
+    analysis/quote-check.md): what is found is said, and the command exits with 1 when a
+    quotation cannot be verified. The job stays done and nothing is sent back to it.
+
+    A job's names in --runs are checked before anything is planned (plan_jobs()), and a job
+    with no interview to read is neither planned nor started. A done job of an interview study
+    that is out of date (interview.out_of_date_line(): an analyst or a critic whose file does
+    not cover its interviews as they stand, a themes job or a writer written before a job it
+    reads was run again or a file it was given changed) is said so in place of what comes next,
+    the quote check included, and the command exits with 1: as with a quotation, the job stays
+    done and the lead decides. A job command of an interview study that finds every job done
+    and starts nothing says so, with how a job is done again (done_already())."""
     sd, command = cfg["_dir"], args.cmd
     if args.extend and not (command == "resume" and args.runs):
         raise SystemExit("--extend goes with resume --runs <ids>: name the limited runs to give one more allowance.")
@@ -3868,8 +4133,14 @@ def launch(args, cfg: dict) -> int:
     if args.released and not args.runs:
         raise SystemExit("--released goes with run or resume and --runs <ids>: name the released runs to start "
                          "again, each with a new test account.")
-    if args.allow_incomplete and args.role != "analyst":
-        raise SystemExit("--allow-incomplete goes with --role analyst: it lets the analysts start on an "
+    jobs = pl.job_roles(cfg)
+    if args.role not in ("panellist", *jobs):  # "critic" and "themes" are jobs of an interview study alone
+        raise SystemExit(f"--role {args.role} is for an interview study, and this is {pl.a_type(cfg['type'])} "
+                         f"study: its jobs are {planning.listed([f'--role {job}' for job in jobs])}.")
+    if args.allow_incomplete and not WAITS.get(args.role, (False,))[0]:
+        raise SystemExit("--allow-incomplete goes with --role analyst or --role critic: it lets them start on an "
+                         "unfinished panel." if "critic" in jobs else
+                         "--allow-incomplete goes with --role analyst: it lets the analysts start on an "
                          "unfinished panel.")
     if any(e["runner"] is None for e in pl.read_runs(sd)):
         raise SystemExit("This study is in native mode: its model entries name no runner, so the lead starts each "
@@ -3883,14 +4154,16 @@ def launch(args, cfg: dict) -> int:
         sup = Supervisor(cfg, runs, args.grace, args.poll, retry=command != "resume", stop=stop,
                          by="resume" if command == "resume" else "run")
         sup.reconcile()
-        if args.role in pl.JOB_ROLES:
-            plan_jobs(cfg, runs, args.role, command, args.allow_incomplete)
-            sup.save()
         ids = [x.strip() for x in args.runs.split(",") if x.strip()] if args.runs else None
+        unheard = set()  # the jobs with no interview to read: not planned, and never started
+        if args.role in jobs:
+            unheard, sup.given = plan_jobs(cfg, runs, args.role, command, args.allow_incomplete, ids)
+            sup.save()
         if command == "pilot":
             first = cfg["personas"][0]["id"]
             ids = [e["run"] for e in runs if e["role"] == args.role and e["persona"] == first and e["replicate"] == 1]
-        chosen = select(runs, args.role, ids)
+        chosen = [e for e in select(runs, args.role, ids and [i for i in ids if i not in unheard])
+                  if e["run"] not in unheard]
 
         plan = []
         for e in chosen:
@@ -3955,6 +4228,7 @@ def launch(args, cfg: dict) -> int:
             elif lifts and lifts > time.time():
                 say(f"{e['run']}: its harness said its limit lifts at {clock(lifts)}; trying anyway.")
             sup.queue.append((e, kind))
+        began = bool(sup.queue or sup.adopted)  # whether this command starts, or goes on with, any process
         sup.supervise()
         # An adopted turn stands for its interview, which the participant's entry names.
         adopted = [sup.pair(e["interview"])["p"] if "interview" in e else e for e in sup.adopted]
@@ -3966,9 +4240,25 @@ def launch(args, cfg: dict) -> int:
                 f"{sd / pl.INTERVIEWS}/<run id>.md, and the analysts' copies in {pl.TRANSCRIPTS}/."
                 + (" Read them before the rest: the next plan estimates from what the pilot used."
                    if command == "pilot" else ""))
-        if done and args.role == "analyst":
-            say(f"Next: read {', '.join(e['file'] for e in chosen)}, then launch.py {sd} run --role writer.")
-        return 0 if done and not (refusal or sup.left_alone or sup.refused) else 1
+        # A done job of an interview study that is out of date: its interviews have more on record than it read,
+        # a job it reads was run again after it, or a file it was given has changed since. It stays done and the
+        # lead decides, as with a quotation below: said in place of what comes next, and in the exit code.
+        short, talk = [], args.role in jobs and cfg["type"] == "interview"
+        if talk:
+            records = pl.run_records(sd, cfg, held(cfg))
+            short = [line for line in (interview.out_of_date_line(cfg, e, runs, records) for e in chosen
+                                       if state_of(cfg, e) == "done") if line]
+        for line in short:
+            say(line)
+        if talk and done and chosen and not short and not began:  # every job was done already: how one is done again
+            say(done_already(cfg, chosen, records))
+        for line in after_jobs(cfg, runs, args.role, chosen) if done and args.role in jobs and not short else ():
+            say(line)
+        unverified = False  # a quotation of the synthesis that is not in the exchange it names: said, and the exit code
+        if talk and done and not short and args.role == "writer":  # the writer stays done: the lead decides
+            lines, unverified = interview.quote_check(cfg)
+            say("", *lines)
+        return 0 if done and not (refusal or sup.left_alone or sup.refused or unverified or short) else 1
     finally:
         lock.release()
 
@@ -4176,7 +4466,7 @@ def status(args, cfg: dict) -> int:
     held = Lock.holder(sd)
     cfg["_held"] = bool(held)  # the one answer every state below is read against (held())
     blind = bool(held) and not held["seen"]
-    rows = {"run": [], "job": []}  # panellist runs, then analyst and writer jobs
+    rows = {"run": [], "job": []}  # panellist runs, then the jobs of the synthesis
     entries = pl.read_runs(sd)
     hosts = {e["interview"]: e for e in entries if e["role"] == "interviewer" and "interview" in e}
     for e in entries:
@@ -4247,7 +4537,8 @@ def status(args, cfg: dict) -> int:
         return 0
     for noun, group in rows.items():
         if noun == "job" and group:
-            print("\nAnalysts and writer:")
+            print("\nAnalysts, critics, themes and writer:" if "critic" in pl.job_roles(cfg) else
+                  "\nAnalysts and writer:")
         for r in group:
             u, shared = r["usage"], r["unallocated"]
             lump = [] if not shared else (
@@ -4348,7 +4639,7 @@ def plan(args, cfg: dict) -> int:
     sd = cfg["_dir"]
     scaffolded = (sd / "runs.json").exists()
     entries = pl.read_runs(sd) if scaffolded else pl.planned_runs(cfg) + pl.planned_interviewers(cfg)
-    on_record = {e["run"]: e for e in entries if e["role"] in pl.JOB_ROLES}
+    on_record = {e["run"]: e for e in entries if e["role"] in pl.job_roles(cfg)}
     jobs = []
     for job in pl.synthesis_jobs(cfg):
         seen = on_record.get(job["run"])
@@ -4503,10 +4794,12 @@ def main():
                                    "not pilot)")
     ap.add_argument("--role", default="panellist", metavar="{" + ",".join(STARTABLE) + "}",
                     help="what to start (run, resume): panellist runs (the default), the analyst jobs, or the "
-                         "writer job once the analysts are done")
+                         "writer job once the analysts are done. In an interview study also the critic jobs "
+                         "and the themes job, and each waits for what it reads")
     ap.add_argument("--allow-incomplete", action="store_true",
                     help="with --role analyst: start the analysts while panellist runs are pending, running or "
-                         "blocked, and tell them which runs are incomplete")
+                         "blocked, and tell them which runs are incomplete. In an interview study with --role "
+                         "critic too")
     ap.add_argument("--allow-missing", action="store_true",
                     help="go ahead when a runner's CLI is missing or signed out, leaving its runs untouched")
     ap.add_argument("--extend", action="store_true",

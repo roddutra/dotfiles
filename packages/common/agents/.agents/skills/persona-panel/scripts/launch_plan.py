@@ -48,6 +48,13 @@ question, apart from its run limits, so what a follow-up used is taken out of it
 and shown under a role of its own, "follow-up": a finished run measures the same for the estimate
 whether or not it was asked anything afterwards.
 
+A job of the synthesis that is run again. A job is done again by deleting its file and running
+its role again, and every attempt of it spends from the one share of the pool. So a job's row
+shows, once it has an attempt on record, what it has used and what is left of the share
+(share_used()), a line names a job to go with less left than a finished attempt of it has cost,
+and the estimate takes a job's mean over its finished attempts, its own earlier ones included
+when its file was deleted. For every study type.
+
 An interview study (panel_lib.py, "Interview studies"). An interview is two runs.json entries,
 its participant's and its interviewer's, and the plan is given both: runs holds the
 interviewers' entries with the participants'. Each side has limits of its own, so each is a
@@ -226,7 +233,9 @@ def unwritable_study(cfg: dict) -> str | None:
 def label(entry: dict) -> str:
     """The name of an entry's model entry: its model key for a panellist run, its role for a job
     (synthesis.analyst and synthesis.writer are one model entry each) and for an interviewer
-    (interview.interviewer is one too)."""
+    (interview.interviewer is one too). Every job role of an interview study is named by
+    itself, the themes job too, though it runs on synthesis.analyst: it has jobs, limits and
+    usage of its own, and reads other files than an analyst does."""
     return entry["key"] if entry["role"] == "panellist" else entry["role"]
 
 
@@ -590,6 +599,22 @@ def interview_tokens(runner: str, side: str, exchanges: int) -> int | None:
         return None
     base, slope = TURN_TOKENS[runner, side]
     return exchanges * base + slope * exchanges * (exchanges + 1) // 2
+
+
+# The steps of an interview study's synthesis, in order, as the plan lists them under its jobs: the role or
+# the script (with {sd}, the study directory), what must be there first, and what it writes. launch.WAITS is
+# what refuses a job out of turn.
+SYNTHESIS_ORDER = (
+    "analyst and critic, in either order, once no interview is pending, running or blocked: "
+    "analysis/qual-<n>.md and analysis/critique-<n>.md.",
+    "extract_notes.py {sd}: analysis/notes.csv and analysis/critique.csv, read from both.",
+    "themes, once every analyst is done and analysis/notes.csv is what their files give: analysis/themes.md.",
+    "analyze.py {sd}: the tallies, analysis/quant.md and quant.json.",
+    "writer, once every analyst, critic and themes job is done and analysis/quant.md is what analyze.py would "
+    "write: analysis/SYNTHESIS.md.",
+    "A job is done again by deleting its file and running its role again. The steps after it are then out of "
+    "date, and each says so when it is run. So does a themes job or a writer once a file it was given has "
+    "changed with no job run again: a note put right by hand, tallies written again.")
 
 
 def interview(cfg: dict, runs: list[dict], states: dict) -> dict | None:
@@ -1069,11 +1094,23 @@ def estimate(rows: list[dict], pages: int, text_only: bool, turns: dict | None =
     per page: {(entry, role): the method's tokens for one interview (interview_tokens())}, None
     or no key where it has none. Such an entry's basis is "exchanges". A row of a finished
     interview there has "exchanges", its length, and the entry gets "per_exchange", what its
-    finished interviews came to for each (interview.measured())."""
+    finished interviews came to for each (interview.measured()).
+
+    A row of a job of the synthesis has "finishes", how many of its attempts ended done
+    (share_used()). A job is done again by deleting its file and running its role again, and it
+    spends from the one share each time, so what it has used is the cost of that many runs of
+    it: the mean is taken over the finished attempts, and a job whose file was deleted is
+    measured by its own earlier attempts though it is to go. "measured_runs" counts those
+    attempts and "measured_of" the runs or jobs they are of, which is the same number wherever
+    nothing was done twice."""
     entries = []
+
+    def times(found):  # the runs measured: one for each row, or for each finished attempt of a job
+        return sum(r.get("finishes") or 1 for r in found)
+
     for name, role in dict.fromkeys((r["entry"], r["role"]) for r in rows):
         own = [r for r in rows if (r["entry"], r["role"]) == (name, role)]
-        done = [r for r in own if r["state"] == "done" and r["attempts"]]
+        done = [r for r in own if r["attempts"] and (r["state"] == "done" or r.get("finishes"))]
         to_go = sum(r["state"] in TO_GO for r in own)
         # A run whose reported usage is known to be short measures nothing for tokens and cost: a
         # process of it was stopped before reporting, or what it used came in one total with a
@@ -1081,8 +1118,9 @@ def estimate(rows: list[dict], pages: int, text_only: bool, turns: dict | None =
         short = {"unallocated": [r for r in done if r.get("unallocated")],
                  "unreported": [r for r in done if r["unreported_attempts"] and not r.get("unallocated")]}
         whole = [r for r in done if not r.get("unallocated") and not r["unreported_attempts"]]
-        tokens = [r["input_tokens"] + (r["output_tokens"] or 0) for r in whole if r["input_tokens"] is not None]
-        costs = [r["cost_usd"] for r in whole if r["cost_usd"] is not None]
+        counted, costed = ([r for r in whole if r[f] is not None] for f in ("input_tokens", "cost_usd"))
+        tokens = [r["input_tokens"] + (r["output_tokens"] or 0) for r in counted]
+        costs = [r["cost_usd"] for r in costed]
         per = {"tokens": None, "cost_usd": None, "seconds": None}
         each = rules.measured([
             {"exchanges": r["exchanges"], "seconds": r["seconds"] or 0,
@@ -1091,9 +1129,9 @@ def estimate(rows: list[dict], pages: int, text_only: bool, turns: dict | None =
             for r in done if r.get("exchanges") is not None])
         if done:
             basis = "measured" if tokens else "duration"
-            per.update(tokens=round(sum(tokens) / len(tokens)) if tokens else None,
-                       cost_usd=sum(costs) / len(costs) if costs else None,
-                       seconds=sum(r["seconds"] or 0 for r in done) / len(done))
+            per.update(tokens=round(sum(tokens) / times(counted)) if tokens else None,
+                       cost_usd=sum(costs) / times(costed) if costs else None,
+                       seconds=sum(r["seconds"] or 0 for r in done) / times(done))
         elif turns is not None:  # an interview study: the figure for its runner and side, or none
             per["tokens"] = turns.get((name, role))
             basis = "exchanges" if per["tokens"] is not None else "none"
@@ -1104,7 +1142,7 @@ def estimate(rows: list[dict], pages: int, text_only: bool, turns: dict | None =
         entries.append({
             "entry": name, "role": role, "runner": own[0]["runner"], "runs": len(own),
             "done": sum(r["state"] == "done" for r in own), "to_go": to_go, "basis": basis,
-            "measured_runs": len(done), "per_run": per, "per_exchange": each,
+            "measured_runs": times(done), "measured_of": len(done), "per_run": per, "per_exchange": each,
             "reports_cost": own[0].get("reports_cost", True),
             # finished runs left out of the mean tokens and cost, by why: they still count for the time
             "left_out": {why: len(rows) for why, rows in short.items()},
@@ -1155,17 +1193,46 @@ def ceiling(runs: list[dict], jobs: list[dict], pool: dict) -> dict:
         "with_extensions_usd": round(runs_usd + pool["budget_usd"] + more, 6)}
 
 
+def share_used(entry: dict, limits: dict | None) -> dict:
+    """What a job of the synthesis has used of its share of the pool, for its row of the plan:
+
+        "attempts"   its attempts on record
+        "finished"   those of them that ended done. A job is done again by deleting its file and
+                     running its role again, so one job may have finished several times
+        "used_usd"   what its sessions reported in all, None with no attempt on record and
+                     where its harness reports no cost
+        "left_usd"   what is left of its share: the share, once more for each --extend, less
+                     that. None wherever "used_usd" is, and for a job with no limits (native)
+
+    Every attempt of a job spends from the one share, the first as the fourth: the launcher
+    caps each process at what is left (launch.left(), the same sum). So a plan that showed the
+    share alone promised a job run again a budget it no longer had."""
+    attempts = entry.get("attempts") or []
+    used = usage_of(entry)["cost_usd"] if attempts else None
+    share = None if limits is None else limits["budget_usd"] * (1 + (entry.get("extended") or 0))
+    return {"attempts": len(attempts), "finished": sum(a.get("state") == "done" for a in attempts), "used_usd": used,
+            "left_usd": None if used is None or share is None else max(0, round(share - used, 6))}
+
+
 def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolded: bool, launcher: dict | None) -> dict:
     """The plan as one JSON-ready object. Starts no run and writes nothing to the study: the
     only processes are each runner's check(), shell_check() and model_status(), which make no
     model call. A check or a model status may let a harness refresh its own login.
 
     runs are the panellist entries (runs.json's, or the ones study.json plans when scaffolded
-    is false), jobs the analyst and writer entries study.json plans with anything a launcher
+    is false), jobs the entries of the synthesis study.json plans (pl.synthesis_jobs(): the analysts
+    and the writer, and in an interview study the critics and the themes job) with anything a launcher
     recorded about them, and states maps each run and job id to its state. In an interview
     study runs holds the interviewers' entries too, each with its state: "interview" is then
     the section on the study (interview()), "runs" stays the participants' rows, one for each
-    interview, and the ceiling counts both sides of each.
+    interview, and the ceiling counts both sides of each. A job's row there has two keys more:
+    "out_of_date", what a done job's file was written without, each with what happened since
+    (interview.out_of_date(): the interviews of an analyst or a critic, the jobs a themes job or
+    a writer reads, or the files either was given that have changed with no job run again), and
+    "out_of_date_note", what the lead is told of it, None for a job that is still good.
+
+    A job's row of any study has what the job has used of its share of the pool
+    (share_used()): "attempts", "finished", "used_usd" and "left_usd".
     """
     sd, native = cfg["_dir"], all(e["runner"] is None for e in runs)
     runs = sorted(runs, key=lambda e: e["role"] == "interviewer")  # the panel first, as it is without interviewers
@@ -1216,7 +1283,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     if earlier:
         notes.append(f"{earlier_sessions(earlier)} {purge_hint(sd)}")
 
-    # One row per model entry: a model key of the panel, synthesis.analyst or synthesis.writer, and in an
+    # One row per model entry: a model key of the panel, a job role of the synthesis (label()), and in an
     # interview study interview.interviewer.
     groups = {}
     for e in runs + planned:
@@ -1252,6 +1319,14 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     # The interviewers' rows are no run of the plan, and a cap of its ceiling each.
     run_rows = [run_row(e) for e in runs if e["role"] != "interviewer"]
     host_rows, job_rows = [run_row(e) for e in runs if e["role"] == "interviewer"], [run_row(e) for e in planned]
+    for row, e in zip(job_rows, planned):
+        row.update(share_used(e, row["limits"]))
+    if talk:  # a done job that is out of date: more on record than it read, a job it reads run again, a file changed
+        records = pl.run_records(sd, cfg, bool(launcher))
+        for row, e in zip(job_rows, planned):
+            done = row["state"] == "done"
+            row.update(out_of_date=rules.out_of_date(cfg, e, planned, records) if done else {},
+                       out_of_date_note=rules.out_of_date_line(cfg, e, planned, records) if done else None)
 
     checked = []
     for name in dict.fromkeys(m["runner"] for m in models if not native):
@@ -1296,14 +1371,21 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                                       else "identifiers")
         receives = ("its run prompt, the usability instructions, its persona file with the tasks"
                     + (f", its test account's {lent}" if lent else ""))
-    given = {  # an interview study: what each side's provider is sent, and what a job is
+    opened = "and whatever else in the study directory it opens, where it works"
+    given = {  # an interview study: what each side's provider is sent, and what a job of each role is
         "panellist": "its prompt (the participant brief, the persona and the study's context notes) and every "
                      "question its interviewer puts to it. Nothing of the guide",
         "interviewer": "its prompt (the interviewer brief with its reference notes, the guide, and the "
                        "participant's name, role and segment) and every answer the participant gives. Nothing of "
                        "the persona's bio or personality, and no situation card",
-        "job": "the transcripts it is given, analysis/ and whatever else in the study directory it opens, where "
-               "it works"}
+        "analyst": "its brief (with each of its personas' role, segment, personality and bio), the analysts' "
+                   f"copies of their transcripts (the questions and answers), {opened}",
+        "critic": "its brief (with the guide, and each of its personas' role, segment, personality and bio), the "
+                  "full transcripts of their interviews (each with the situation card and the interviewer's "
+                  f"notes), {opened}",
+        "themes": f"its brief, analysis/notes.csv (the analysts' notes, each with a quote), {opened}",
+        "writer": "its brief (with the goals and the topics), the tallies, the themes, the analysts' and the "
+                  f"critics' files and the checks under analysis/, {opened}"}
     opens = []  # what a run that browses can open, besides what it reads
     if study:
         opens.append(f"every page it opens at {study['base_url']}, with what it types there")
@@ -1319,7 +1401,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                        and runners.get(m["runner"]).capabilities()["browser"])
             entries.append({
                 "entry": m["entry"], "role": m["role"], "runner": m["runner"], "runs": m["runs"],
-                "receives": given.get(m["role"], given["job"]) if talk else
+                "receives": given[m["role"]] if talk else
                             (receives + (", and " + " and ".join(opens) if browses else "")
                              if m["role"] == "panellist" else
                              "the persona files it is given, analysis/ and whatever else in the study "
@@ -1335,7 +1417,9 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     names = {e["run"]: label(e) for e in [*runs, *planned]}
     costed = {name: runners.get(name).capabilities()["usage"]["cost"] for name in {e["runner"] for e in runs + planned}
               if name}
-    rows = [{**r, "entry": names[r["run"]], "reports_cost": costed.get(r["runner"], False)} for r in usage["runs"]]
+    finishes = {j["run"]: j["finished"] for j in job_rows}  # a job is measured by its attempts that ended done
+    rows = [{**r, "entry": names[r["run"]], "reports_cost": costed.get(r["runner"], False),
+             **({"finishes": finishes[r["run"]]} if r["run"] in finishes else {})} for r in usage["runs"]]
     turns = None
     if talk:  # the method's figure for each side, to the interview's cap, and how long each finished one was
         turns = {(label(e), e["role"]): interview_tokens(e["runner"], side_of(e), talk["turns"]) for e in runs}
@@ -1357,9 +1441,9 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         "runners": checked,
         "providers": providers,
         "synthesis": None if native else {
-            "pool": pool, "share": pl.synthesis_share(cfg), "shares": cfg["synthesis"].get("analysts", 1) + 1,
+            "pool": pool, "share": pl.synthesis_share(cfg), "shares": len(pl.synthesis_jobs(cfg)),
             "jobs": job_rows,
-            "missing": [role for role in pl.JOB_ROLES if not any(j["role"] == role for j in planned)]},
+            "missing": [role for role in pl.job_roles(cfg) if not any(j["role"] == role for j in planned)]},
         "estimate": forecast,
         "used": summed(usage["runs"]),  # the runs and jobs: follow-ups are apart, under "followups"
         "ceiling": None if native else ceiling(run_rows + host_rows, job_rows, pool),
@@ -1462,16 +1546,47 @@ def render(plan: dict) -> list[str]:
                        f"{e['receives']}.")
 
     syn = plan["synthesis"]
-    out += ["", f"Analysts and writer, under limits.synthesis ({syn['pool']['minutes']:g} min for each job, "
+    out += ["", ("Analysts, critics, the themes job and the writer" if talk else "Analysts and writer")
+                + f", under limits.synthesis ({syn['pool']['minutes']:g} min for each job, "
                 f"{money(syn['pool']['budget_usd'])} as one pool):"]
     if syn["jobs"]:
+        def state_of(j):  # with what a done job's file was written without, which a line below names
+            without = j.get("out_of_date") or {}  # an interview study's alone: {what: what happened since}
+            short = len(without)
+            since = (plural(short, "interview") if j["role"] in ("analyst", "critic")
+                     else plural(short, "file changed", "files changed") if set(without.values()) <= set(rules.ALTERED)
+                     else plural(short, "job run again", "jobs run again"))
+            return j["state"] + (f", {since} since" if short else "")
+
+        def budget_of(j):  # its share, and for a job with attempts on record what it has used and has left of it
+            time_limit, budget = limits_of(j)
+            if j["used_usd"] is not None and j["left_usd"] is not None:
+                budget += f", {money(j['used_usd'])} used, {money(j['left_usd'])} left"
+            return [time_limit, budget]
+
         out += table([["Job", "Runner", "Model", "Effort", "Time limit", "Budget", "State", "Prompt"],
-                      *([j["run"], *entry_cells(j), *limits_of(j), j["state"], j["prompt"]] for j in syn["jobs"])])
+                      *([j["run"], *entry_cells(j), *budget_of(j), state_of(j), j["prompt"]] for j in syn["jobs"])])
         out.append(f"  Each job's budget is its share of the pool, divided equally among the {syn['shares']} jobs "
                    "study.json plans. A brief is written to prompts/ when its job is started.")
-    for role in syn["missing"]:
-        out.append(f'  synthesis.{role} is missing from study.json: there is no default, so "run --role {role}" '
-                   f'will refuse. Add "synthesis": {{"{role}": {{"runner": "<runner>", "model": "<model>"}}}}.')
+        if any(j["attempts"] for j in syn["jobs"]):
+            out.append("  A job that is run again spends from the same share as its earlier attempts: used and left "
+                       "are of that share, over every attempt on record.")
+        for j in syn["jobs"]:  # a job to go with less left than a run of it has cost: it will stop at its budget
+            mean = j["used_usd"] / j["finished"] if j["finished"] and j["left_usd"] is not None else None
+            if mean is not None and j["state"] in TO_GO and j["budget_enforced"] and j["left_usd"] < mean:
+                out.append(f"  {j['run']} has {money(j['left_usd'])} left, less than a finished attempt of it used "
+                           f"({money(mean)} on average), so it is likely to stop at its budget. It then reads limited: "
+                           f"launch.py {sd} resume --role {j['role']} --runs {j['run']} --extend gives it one more "
+                           "allowance.")
+        out += [f"  {j['out_of_date_note']}" for j in syn["jobs"] if j.get("out_of_date_note")]
+    if talk:
+        out += [f"  The order, with what each step waits for and writes. A role is started with launch.py {sd} run "
+                "--role <role>:",
+                *(f"    {n}. {step.format(sd=sd)}" for n, step in enumerate(SYNTHESIS_ORDER, start=1))]
+    for key in dict.fromkeys(pl.job_entry(role) for role in syn["missing"]):  # the themes job is on synthesis.analyst
+        refused = listed([f'"run --role {role}"' for role in syn["missing"] if pl.job_entry(role) == key])
+        out.append(f'  synthesis.{key} is missing from study.json: there is no default, so {refused} '
+                   f'will refuse. Add "synthesis": {{"{key}": {{"runner": "<runner>", "model": "<model>"}}}}.')
 
     sides = {i[x]["run"]: f"{i['run']} {x}" for i in talk["interviews"] for x in pl.SIDES} if talk else None
     out += ["", *estimate_lines(plan), "", *ceiling_lines(plan["ceiling"], syn, sides),
@@ -1557,8 +1672,9 @@ def estimate_lines(plan: dict) -> list[str]:
         if e["basis"] in ("measured", "duration"):
             cost = money(per["cost_usd"]) if per["cost_usd"] is not None else "cost not reported"
             tokens = f"{per['tokens']:,} tokens" if per["tokens"] is not None else "tokens not reported"
-            line = (f"measured on {plural(e['measured_runs'], 'finished ' + unit)}: {tokens}, {cost} and "
-                    f"{span(per['seconds'])} {a}. ")
+            measured = (plural(e["measured_runs"], "finished " + unit) if e["measured_runs"] == e["measured_of"]
+                        else f"{plural(e['measured_runs'], 'finished attempt')} of {plural(e['measured_of'], unit)}")
+            line = f"measured on {measured}: {tokens}, {cost} and {span(per['seconds'])} {a}. "
             each = e.get("per_exchange")
             if each and each["seconds"] is not None:  # an interview: what its side came to for each exchange
                 line += ((f"It ran {plural(round(each['exchanges']), 'exchange')}" if each["interviews"] == 1

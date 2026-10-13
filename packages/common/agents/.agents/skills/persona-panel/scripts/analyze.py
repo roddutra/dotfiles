@@ -80,6 +80,22 @@ task look easier than it was. quant.json has "runs", "completion" ("by_task", "b
 "tasks" (the scores by task), "persona_scores" and "model_scores". A study exported before
 tasks.csv existed gets the scores and a line that says what is missing.
 
+An interview study ("type": "interview") has no scores, and none of the above is written for it
+either. Its report is interview_report.report(), which documents it: from analysis/notes.csv and
+critique.csv (extract_notes.py), analysis/themes.md (the themes job) and the turn logs, the
+simulated participants who raised each theme, who said it is not a problem and who did both,
+unprompted, with an incident and with what effort, by segment, model key and persona, model
+agreement, the coverage of each topic, the notes that rest on a flagged question, the
+critique's counts with the critic that marked each interview, every verified quote in the form
+the synthesis must give it, and the incomplete interviews apart. It says what to run when one
+of its inputs is not there, and all three filters work on it. It is titled with the study's
+name, where the other two reports have the folder's, and carries the synthetic panel notice
+under its title (opening()). Nothing is written from an input that no longer stands: a CSV
+file that is not what the analysts' and the critics' files give now, or a themes.md from before
+an analyst was run again, is refused in one sentence that says what to run. And
+stale_tallies() says whether quant.json is still what this script would write, which the
+launcher asks before it starts the writer.
+
 Every one of those tables uses complete runs only, and the output states "N of M runs complete",
 where M is the runs expected after the filters. Incomplete runs that wrote something, or that
 stopped as partial, limited, blocked or failed, get their own table, "Incomplete runs", with
@@ -608,6 +624,87 @@ def usability(cfg: dict, rows: list[dict], runs: list[dict], names: dict, task_r
     return md, res
 
 
+def opening(sd: Path, no_models: list[str], no_personas: list[str], segment: str | None,
+            study: str | None = None) -> list[str]:
+    """How every report begins: its title, and the filters when any was given. A review or a
+    usability study's is titled with the name of its folder. study is given for an interview
+    study: the name study.json gives it, which its plan is headed with too and which a folder
+    called "round-1" does not say. Its report also carries the synthetic panel notice
+    (pl.NOTICE) under the title, where it is written, so that the file is the same in the study,
+    in an archive of it and when it is written again inside the archive. archive.py adds the
+    line to a file that lacks it only as it archives a round, so a report that left it to the
+    archive would lose it the next time analyze.py ran there."""
+    md = [f"# Quantitative analysis: {study or sd.name}", ""] + ([pl.NOTICE, ""] if study else [])
+    if no_models or no_personas or segment:
+        md += [f"Filters: excluded models {', '.join(no_models) or 'none'}; excluded personas "
+               f"{', '.join(no_personas) or 'none'}; segment {segment or 'all'}.", ""]
+    return md
+
+
+def out_name(out: str | None, no_models: list[str], no_personas: list[str], segment: str | None) -> str:
+    """The basename of the two output files in analysis/: --out, or quant with the filters added.
+    Exits when it is no name of a file there."""
+    base = out or ("quant" + (f"-{segment.replace(',', '+')}" if segment else "") +
+                   "".join(f"-no-{x}" for x in [*no_models, *no_personas]))
+    if pl.name_problem(base):  # it names analysis/<base>.md and .json, and must stay there
+        raise SystemExit(f"The output name {base!r} {pl.NAME_RULE}. Give another with --out.")
+    return base
+
+
+def as_json(res: dict) -> str:
+    """The figures of a report as the text of its JSON file."""
+    return json.dumps(without_nan(res), indent=2, default=str)
+
+
+def write_out(sd: Path, base: str, md: list[str], res: dict, printed: list[str]):
+    """Write the report and its figures to analysis/<base>.md and .json, and print the part of
+    it that the lead reads at once."""
+    with pl.output(sd / "analysis" / f"{base}.md") as f, pl.output(sd / "analysis" / f"{base}.json") as g:
+        f.write("\n".join(md))
+        g.write(as_json(res))
+    print("\n".join(printed))
+    print(f"Wrote analysis/{base}.md and analysis/{base}.json")
+
+
+def interview_tallies(cfg: dict, no_models: list[str], no_personas: list[str], segment: str | None,
+                      held: bool | None = None) -> tuple[list[str], dict]:
+    """The report of an interview study as main() writes it: (the lines of quant.md, what goes
+    into quant.json). Its tables are of notes, themes and turns, a report of its own
+    (interview_report.report(), which exits when an input is not there or no longer stands).
+    held is report()'s."""
+    import interview_report  # here, so that no other study loads it
+    sd = cfg["_dir"]
+    filters = {"models": set(no_models), "personas": set(no_personas),
+               "segment": set(segment.split(",")) if segment else None}
+    lines, figures = interview_report.report(cfg, filters, held)
+    md = opening(sd, no_models, no_personas, segment, cfg.get("study") or sd.name) + lines
+    return md, {"filters": {"exclude_models": no_models, "exclude_personas": no_personas, "segment": segment},
+                **figures}
+
+
+def stale_tallies(cfg: dict, held: bool = False) -> str | None:
+    """Why analysis/quant.md and quant.json are no longer the tallies of an interview study as
+    it stands, in one sentence that says what to run, None when they are. The launcher asks
+    before it starts the writer, which reads quant.md.
+
+    The report is made again in memory, with no filter, and its figures are set against
+    quant.json, character for character. Nothing is recorded and no file's time is compared, so
+    whatever the report reads decides it, and nothing else: notes.csv, critique.csv, themes.md,
+    the turn logs, what the jobs' files cover and study.json. The figures are compared and not
+    the lines of quant.md, which name the study directory as it was given to the command that
+    wrote them, and whose sentences may be put another way from one version of this script to
+    the next. A report that cannot be made at all, an input being gone or out of date
+    (interview_report.report()), is no report of the study as it stands either: the sentence is
+    the same, and this script then says what it needs first."""
+    sd = cfg["_dir"]
+    try:
+        same = (sd / "analysis" / "quant.json").read_text() == as_json(interview_tallies(cfg, [], [], None, held)[1])
+    except (OSError, UnicodeDecodeError, SystemExit):
+        same = False
+    return None if same else ("analysis/quant.md is no longer the tallies of the analysis as it stands: run analyze.py "
+                              f"{sd} again, which writes them or says what it needs first.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
@@ -632,6 +729,11 @@ def main():
                          f"{', '.join(q['id'] for q in cfg['personas'])}")
     filters = {"models": set(no_models), "personas": set(no_personas),
                "segment": set(args.segment.split(",")) if args.segment else None}
+    if cfg["type"] == "interview":  # no scores to load: a report of its own
+        md, res = interview_tallies(cfg, no_models, no_personas, args.segment)
+        shown = [i for i, line in enumerate(md) if line.startswith("## ")]  # its key numbers are what is printed
+        return write_out(sd, out_name(args.out, no_models, no_personas, args.segment), md, res,
+                         md[: shown[1] if len(shown) > 1 else len(md)])
     all_rows, all_ranks, runs = load(sd, keys, filters)
     if not runs:
         raise SystemExit("No runs to analyse. Run extract_scores.py first, and check the filters.")
@@ -645,10 +747,7 @@ def main():
     def who(pid):  # how a table names a persona
         return f"{pid} {names.get(pid, '')}" + (f" (variant of {variant_of[pid]})" if pid in variant_of else "")
     res = {"filters": {"exclude_models": no_models, "exclude_personas": no_personas, "segment": args.segment}}
-    md = [f"# Quantitative analysis: {sd.name}", ""]
-    if no_models or no_personas or args.segment:
-        md += [f"Filters: excluded models {', '.join(no_models) or 'none'}; excluded personas "
-               f"{', '.join(no_personas) or 'none'}; segment {args.segment or 'all'}.", ""]
+    md = opening(sd, no_models, no_personas, args.segment)
     # Concepts of different forms are compared partly on format: said before any number, and by the factors
     caution = pl.form_caution(cfg)
     if caution:
@@ -659,17 +758,10 @@ def main():
                "those within one form only, or leave them out, and remember that Overall and the rankings carry them "
                "too.", ""]
     n_runs = len({run_key(r) for r in rows})
-    base = args.out or ("quant" + (f"-{args.segment.replace(',', '+')}" if args.segment else "") +
-                        "".join(f"-no-{x}" for x in [*no_models, *no_personas]))
-    if pl.name_problem(base):  # it names analysis/<base>.md and .json, and must stay there
-        raise SystemExit(f"The output name {base!r} {pl.NAME_RULE}. Give another with --out.")
+    base = out_name(args.out, no_models, no_personas, args.segment)
 
     def write(printed):
-        with pl.output(sd / "analysis" / f"{base}.md") as f, pl.output(sd / "analysis" / f"{base}.json") as g:
-            f.write("\n".join(md))
-            g.write(json.dumps(without_nan(res), indent=2, default=str))
-        print("\n".join(printed))
-        print(f"Wrote analysis/{base}.md and analysis/{base}.json")
+        write_out(sd, base, md, res, printed)
 
     if cfg["type"] == "usability":  # tasks are not ranked or compared: a report of its own
         lines, figures = usability(cfg, all_rows, runs, names, read_csv(sd, "tasks.csv", filters),

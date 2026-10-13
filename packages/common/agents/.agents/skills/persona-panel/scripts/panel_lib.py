@@ -11,8 +11,9 @@ Standard library only. Every script takes a study directory laid out as:
     <study>/study-brief.md    what the lead agreed with the user, from assets/study-brief.md (lead
                               only: init_study.py refuses a copy of it anywhere under panel/)
     <study>/runs.json         one entry per run (schema below)
-    <study>/prompts/          one run prompt per run, <run id>.md, and one filled brief per analyst
-                              and writer job, <job id>.md
+    <study>/prompts/          one run prompt per run, <run id>.md, and one filled brief per job of
+                              the synthesis (an analyst, the writer and, in an interview study,
+                              a critic and the themes job), <job id>.md
     <study>/panel/            the only folder panellists may read
         _panel-instructions.md
         sites/concept-<L>/    neutral copies of each concept of kind "site", only in a study whose
@@ -49,7 +50,8 @@ Standard library only. Every script takes a study directory laid out as:
                               (what each harness reported: per run, per model key, per role and
                               in total). In an interview study also transcripts/<run id>.md, the
                               analysts' copy of each transcript: the questions and answers, with
-                              no situation card and none of the interviewer's notes
+                              no situation card and none of the interviewer's notes; and
+                              critique-<n>.md (one per critic) and themes.md (the themes job's)
     <study>/logs/             launch.py only: <run id>.<attempt>.in, .out and .err, the input and
                               output of each CLI process it started; .pid, where the attempt's
                               watchdog records itself and the CLI before the CLI runs, the
@@ -308,6 +310,10 @@ Its limits are limits.run (each participant, over its whole interview: INTERVIEW
 study.json gives none), limits.interviewer (each interviewer, the same), limits.turn (minutes
 alone: the most one turn of either side may take) and limits.synthesis. synthesis.critic is the
 model entry of the jobs that critique the interviewer's questions, and belongs to no other type.
+Its synthesis has four job roles (job_roles()): the analysts, as many critics, the themes job
+and the writer (synthesis_jobs(), "Job entries" below), which share limits.synthesis equally
+(synthesis_share()). Like synthesis.analyst and synthesis.writer, synthesis.critic has no
+default: a job whose model entry is missing is refused when it is started.
 
 A run is one persona on one model entry and one replicate. Its id is <pid>-<key>, or
 <pid>-<key>-r<n> for replicate n > 1, where <key> is the model entry's key (letters and digits).
@@ -464,24 +470,39 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   resumed or asked a follow-up, and "status" says so. Not noted for a failed
                   run, which "run" starts afresh in a new session
 
-Job entries. launch.py adds one entry per analyst and writer job (synthesis_jobs()) when
-"run --role analyst" or "run --role writer" plans them, and rewrites one while its job is
-pending or failed. A job is one output file, so its entry has no persona, segment or replicate:
+Job entries. launch.py adds one entry per job of the synthesis (synthesis_jobs()) when "run
+--role <role>" plans the jobs of that role, and rewrites one while its job is pending or failed.
+The roles are job_roles(): "analyst" and "writer", and in an interview study "critic" and
+"themes" between them. A job is one output file, so its entry has no persona, segment or
+replicate:
 
-    run        analyst-1, analyst-2 or writer; also the prompt file name
-    role       "analyst" or "writer"
+    run        analyst-1, analyst-2 or writer, and in an interview study critic-1, critic-2 or
+               themes; also the prompt file name
+    role       "analyst" or "writer", or in an interview study "critic" or "themes"
     name       what status shows, for example "Analyst 1 of 2"
-    key, runner, model, effort   the synthesis.analyst or synthesis.writer model entry. "key" is
-               null when the entry gives none
-    personas   analyst only: the ids of the personas whose files it reads, in persona id order
-    file       its output file, relative to the study directory. The job is done when this file
-               exists and is not empty
+    key, runner, model, effort   the model entry of its role (job_entry()): synthesis.analyst,
+               synthesis.writer or synthesis.critic, and synthesis.analyst for the themes job
+               too. "key" is null when the entry gives none
+    personas   analyst and critic only: the ids of the personas whose files or transcripts it
+               reads, in persona id order. Critic <n> has the personas analyst <n> has
+    file       its output file, relative to the study directory: analysis/qual-<n>.md,
+               analysis/critique-<n>.md, analysis/themes.md or analysis/SYNTHESIS.md. The job
+               is done when this file exists and is not empty
     prompt     its brief with every placeholder filled, relative to the study directory
 
 It gets the same launcher fields as a panellist run, and one more: "note", a sentence about a
 finished job's output that the lead should know (it was taken from the job's reply, or its
 process did not end cleanly), else null. Everything that lists panellist runs selects the role
 "panellist", so job entries never appear in run tracking, checks, scores or analysis.
+
+An attempt of the kind "launch" of a themes job or a writer of an interview study has one field
+more, "read": {path: fingerprint}, each file its brief gave the job to read, by its path
+relative to the study directory, as it was when the brief was written (interview.given()). It
+is saved with the attempt, before the process exists, and is what says later that a done job
+was built on a file that has since changed (interview.altered()). A fingerprint (fingerprint())
+is the SHA-256 of the file's bytes, and for a markdown file of its text with the synthetic
+panel notice, which is how an archive keeps it. An attempt without the field, of a job launched
+before the field was recorded or of an analyst or a critic, is held to nothing by it.
 
 Interview entries. In an interview study init_study.py writes two entries for each run: the
 participant's (run_entry()), then its interviewer's (interviewer_entry()). Each side has a
@@ -862,6 +883,9 @@ INTERVIEWS = "interviews"               # the turn logs and transcripts, relativ
 ROOMS = "panel/rooms"                   # a folder for each participant, <run id>, relative to it too
 INTERVIEWER_DIR = "interviewer"         # a folder for each interviewer, <run id>
 TRANSCRIPTS = "analysis/transcripts"    # the analysts' copies of the transcripts
+# Where an interview study keeps what its writer is never given, so no file there is a context file
+# (check_study()): the transcripts, both sides' prompts and folders, and what their processes printed.
+NOT_CONTEXT = (INTERVIEWS, TRANSCRIPTS, "prompts", INTERVIEWER_DIR, "panel", "logs")
 # The record types of a turn log (module docstring, "The turn log"), and the ones made from a reply.
 TURN_TYPES = ("start", "card", "ready", "question", "answer", "rejected", "end-offered", "end", "lost", "halt",
               "resume")
@@ -933,7 +957,7 @@ KEY_RE = re.compile(r"[A-Za-z0-9]+")
 LIMIT_NAMES = ("minutes", "budget_usd")
 DEFAULT_LIMITS = {
     "run": {"minutes": 15, "budget_usd": 2.0},        # each panellist run, over all its attempts
-    "synthesis": {"minutes": 30, "budget_usd": 5.0},  # analyst and writer jobs
+    "synthesis": {"minutes": 30, "budget_usd": 5.0},  # the jobs of the synthesis
     "followup": {"minutes": 5, "budget_usd": 0.5},    # each run asked a follow-up, for each question
     "interviewer": {"minutes": 15, "budget_usd": 1.0},  # each interviewer, over its whole interview
     "turn": {"minutes": 3},                           # one turn of either side of a conversation
@@ -950,7 +974,14 @@ LIMIT_SETS = {"review": ("run", "synthesis", "followup", "debrief"),
               "usability": ("run", "synthesis", "followup", "debrief"),
               "interview": ("run", "interviewer", "turn", "synthesis")}
 RUN_DEFAULTS = {"runner": None, "effort": None, "replicate": 1, "role": "panellist"}
-JOB_ROLES = ("analyst", "writer")
+JOB_ROLES = ("analyst", "writer")  # the jobs of the synthesis of a review or usability study, in their order
+INTERVIEW_JOB_ROLES = ("analyst", "critic", "themes", "writer")  # and of an interview study: job_roles()
+JOB_ENTRIES = {"themes": "analyst"}  # a job role whose model entry is another's key of "synthesis": job_entry()
+# The job roles whose files a job of the synthesis is written from, of the roles its study has (job_roles()).
+# The launcher starts a job only once every job of those roles is done (launch.WAITS), and in an interview
+# study a done job is out of date once one of them has been run again (interview.out_of_date()). The files a
+# job is given to read, those jobs' among them, are interview.GIVEN.
+JOB_READS = {"themes": ("analyst",), "writer": ("analyst", "critic", "themes")}
 SYNTHESIS_KEYS = ("analysts", "analyst", "writer", "decision_maker", "context_files", "critic")
 DEFAULT_DECISION_MAKER = "the decision-maker"
 MODIFICATIONS = "logs/modifications.json"  # the modification record, relative to the study directory
@@ -1121,7 +1152,7 @@ def check_study(cfg: dict):
     if "critic" in syn and cfg["type"] != "interview":
         _fail(f'synthesis.critic belongs to an interview study, and this is {a_type(cfg["type"])} study: it is the '
               "model entry of the jobs that critique an interviewer's questions. Take it out")
-    for job in (*JOB_ROLES, "critic"):
+    for job in dict.fromkeys(job_entry(role) for role in INTERVIEW_JOB_ROLES):  # every model entry it may hold
         if job in syn:
             model_entry(syn[job], cfg["runner"], f"synthesis.{job}")
     who = syn.get("decision_maker", DEFAULT_DECISION_MAKER)
@@ -1139,6 +1170,18 @@ def check_study(cfg: dict):
                   "team's hypotheses, and an analyst or writer that has read them tends to find them. Take it "
                   "out, and put what the jobs need (the decisions and constraints that apply now) in a file of "
                   "its own")
+        # In an interview study a context file goes to the writer alone, which is given the analysis and the
+        # guide and never a transcript: as the path is written, and as where a link at it leads.
+        home, led = cfg["_dir"].resolve(), (cfg["_dir"] / f).resolve()
+        ways = {"is under": Path(f), **({"is a link into": led.relative_to(home)} if led.is_relative_to(home) else {})}
+        kept = next(((how, folder) for how, p in ways.items() for folder in NOT_CONTEXT
+                     if cfg["type"] == "interview" and p.is_relative_to(folder)), None)
+        if kept:
+            _fail(f'synthesis.context_files: "{f}" {kept[0]} {kept[1]}/, where an interview study keeps its '
+                  "transcripts, prompts and logs. The writer is given the analysis and the guide and never what "
+                  "was said or how it was asked: the coded notes and the quote check stand between the two. Take "
+                  "it out, and put what the writer needs (the decisions and constraints that apply now) in a file "
+                  "of its own")
     variants(cfg)
 
 
@@ -2639,7 +2682,7 @@ def limits_for(cfg: dict, role: str = "panellist", key: str | None = None) -> di
     limits.overrides merged over it, where a usability run's "minutes" default to what its tasks
     permit (usability_minutes()) and an interview's participant has INTERVIEW_RUN where
     study.json gives none; the job's share of limits.synthesis (synthesis_share) for
-    an analyst or writer job; limits.followup for "followup", what each run asked a follow-up
+    a job of the synthesis (job_roles()); limits.followup for "followup", what each run asked a follow-up
     question may use for that question, apart from its run limits, and limits.debrief for
     "debrief" the same way, for each side of a debrief; limits.interviewer for "interviewer",
     each interviewer over its whole interview; and for "turn" {"minutes"} alone, limits.turn:
@@ -2651,37 +2694,57 @@ def limits_for(cfg: dict, role: str = "panellist", key: str | None = None) -> di
         timed = ({"minutes": usability_minutes(cfg)} if cfg.get("type") == "usability"
                  else INTERVIEW_RUN if cfg.get("type") == "interview" else {})
         return {**DEFAULT_LIMITS["run"], **timed, **limits.get("run", {}), **limits.get("overrides", {}).get(key, {})}
-    if role in JOB_ROLES:
+    if role in job_roles(cfg):
         return synthesis_share(cfg)
     raise ValueError(f"unknown role {role!r}")
 
 
+def job_roles(cfg: dict) -> tuple:
+    """The roles of the jobs of a study's synthesis, in the order the jobs run: the analysts and
+    the writer, and in an interview study the critics and the themes job between them. Wherever
+    a study is at hand this is asked, never a constant: "critic" and "themes" are roles of an
+    interview study alone."""
+    return INTERVIEW_JOB_ROLES if cfg.get("type") == "interview" else JOB_ROLES
+
+
+def job_entry(role: str) -> str:
+    """The key of "synthesis" that holds a job role's model entry: the role's own name, except
+    that the themes job runs on synthesis.analyst (JOB_ENTRIES). So what a lead is told to add
+    for a role with no entry is this key, never "synthesis.themes"."""
+    return JOB_ENTRIES.get(role, role)
+
+
 def synthesis_pool(cfg: dict) -> dict:
-    """limits.synthesis in force, {"minutes", "budget_usd"}: "minutes" for each analyst or writer
-    job, "budget_usd" one pool for all of them. Panellist runs never spend it."""
+    """limits.synthesis in force, {"minutes", "budget_usd"}: "minutes" for each job of the
+    synthesis, "budget_usd" one pool for all of them. Panellist runs never spend it."""
     return {**DEFAULT_LIMITS["synthesis"], **(cfg.get("limits") or {}).get("synthesis", {})}
 
 
 def synthesis_share(cfg: dict) -> dict:
-    """What one analyst or writer job may use over all its attempts, {"minutes", "budget_usd"}.
+    """What one job of the synthesis may use over all its attempts, {"minutes", "budget_usd"}.
 
-    The pool's budget is divided equally among the jobs study.json plans, the analysts and the
-    writer, and each share is a cap. A share is rounded down to a millionth of a dollar, so the
-    caps never add up to more than the pool. "minutes" is the pool's, for each job.
+    The pool's budget is divided equally among every job study.json plans (synthesis_jobs()):
+    the analysts and the writer, and in an interview study as many critics as analysts and the
+    themes job too. Each share is a cap. A share is rounded down to a millionth of a dollar, so
+    the caps never add up to more than the pool. "minutes" is the pool's, for each job.
     """
-    pool = synthesis_pool(cfg)
-    jobs = (cfg.get("synthesis") or {}).get("analysts", 1) + 1
+    pool, jobs = synthesis_pool(cfg), len(synthesis_jobs(cfg))
     return {"minutes": pool["minutes"], "budget_usd": math.floor(round(pool["budget_usd"] / jobs * 1e6, 3)) / 1e6}
 
 
 def synthesis_jobs(cfg: dict) -> list[dict]:
-    """The analyst and writer jobs study.json plans, each as its runs.json job entry before a
-    launcher has touched it (fields in the module docstring).
+    """The jobs of the synthesis that study.json plans, in the order they run, each as its
+    runs.json job entry before a launcher has touched it (fields in the module docstring): the
+    analysts, then the writer. In an interview study, between them, as many critics as analysts
+    and the one themes job.
 
     With two analysts the personas are split into halves in persona id order, the first taking
     the extra one, so each analyst reads every model and replicate of its personas. A single
-    analyst writes analysis/qual-1.md too. A job whose synthesis.analyst or synthesis.writer
-    entry is missing has no runner and no model: there is no default, and a launcher refuses it.
+    analyst writes analysis/qual-1.md too. Critic <n> has the half analyst <n> has, so an
+    interview's notes and its critique come from the same split. The themes job reads the
+    notes of every interview, on the synthesis.analyst model entry (job_entry()). A job whose
+    model entry is missing from "synthesis" has no runner and no model: there is no default,
+    and a launcher refuses it.
     """
     syn = cfg.get("synthesis") or {}
     n = syn.get("analysts", 1)
@@ -2691,11 +2754,18 @@ def synthesis_jobs(cfg: dict) -> list[dict]:
         _fail(f"synthesis.analysts is {n}, but the study has {plural(len(ids), 'persona')} to split between them"
               + (": set it to 1, or add a persona" if ids else ": add its personas first"))
     cut = math.ceil(len(ids) / n)
-    entry = {role: model_entry(syn[role], cfg.get("runner"), f"synthesis.{role}") if role in syn
-             else dict.fromkeys(ENTRY_FIELDS) for role in JOB_ROLES}
+    halves = list(enumerate((ids[:cut], ids[cut:])[:n], start=1))
+    entry = {role: model_entry(syn[job_entry(role)], cfg.get("runner"), f"synthesis.{job_entry(role)}")
+             if job_entry(role) in syn else dict.fromkeys(ENTRY_FIELDS) for role in job_roles(cfg)}
     jobs = [{"run": f"analyst-{i}", "role": "analyst", "name": f"Analyst {i} of {n}", **entry["analyst"],
              "personas": own, "file": f"analysis/qual-{i}.md", "prompt": f"prompts/analyst-{i}.md"}
-            for i, own in enumerate((ids[:cut], ids[cut:])[:n], start=1)]
+            for i, own in halves]
+    if "critic" in entry:  # an interview study: the critics of the same halves, then the themes job
+        jobs += [{"run": f"critic-{i}", "role": "critic", "name": f"Critic {i} of {n}", **entry["critic"],
+                  "personas": own, "file": f"analysis/critique-{i}.md", "prompt": f"prompts/critic-{i}.md"}
+                 for i, own in halves]
+        jobs.append({"run": "themes", "role": "themes", "name": "Themes", **entry["themes"],
+                     "file": "analysis/themes.md", "prompt": "prompts/themes.md"})
     return [*jobs, {"run": "writer", "role": "writer", "name": "Synthesis writer", **entry["writer"],
                     "file": "analysis/SYNTHESIS.md", "prompt": "prompts/writer.md"}]
 
@@ -2856,6 +2926,28 @@ def with_notice(text: str) -> str:
     return "\n".join([*lines[:at], *([""] if at else []), NOTICE, *after, *lines[at:]])
 
 
+def fingerprint(path: Path) -> str | None:
+    """What a file holds, as a mark that two readings of it can be compared by: the SHA-256 of
+    its bytes, None when no file is there or it cannot be read. A launcher records it of each
+    file a job is given to read (module docstring, "Job entries").
+
+    A markdown file is marked by its text with the synthetic panel notice (with_notice()), read
+    as archive.py reads one, and not by its bytes: an archive adds the line to a markdown file
+    that lacks it, so the file a job read and its copy in an archived round have one mark. A
+    markdown file that is not text is marked by its bytes, as an archive copies it."""
+    try:
+        if not path.is_file():  # nothing there, or a folder or a FIFO, which is no file to read
+            return None
+        if path.suffix == ".md":
+            try:
+                return hashlib.sha256(with_notice(path.read_text()).encode()).hexdigest()
+            except UnicodeDecodeError:
+                pass
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def reply_document(text: str, start: str | None = None) -> str:
     """The document inside an agent's reply: everything from the first line matching the regex
     start (default: the first "# " heading), or the whole reply when no line matches, without
@@ -2939,7 +3031,7 @@ def workdir(study_dir: Path, of: dict | str) -> Path:
     """The directory a run's or job's process works in. of is its runs.json entry, or a role.
     An entry that names a "workdir" works there, as each side of an interview does, in a folder
     of its own. Any other works where its role does, which is all a role alone can say: panel/
-    for a panellist, the study directory for an analyst or the writer."""
+    for a panellist, the study directory for a job of the synthesis."""
     if isinstance(of, dict):
         if of.get("workdir"):
             return Path(study_dir) / of["workdir"]

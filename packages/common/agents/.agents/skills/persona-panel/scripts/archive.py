@@ -4,7 +4,8 @@
 Kept: study.json, key.md, runs.json, prompts/, analysis/ (usage.md and runs.csv with it),
 panel/_panel-instructions.md, panel/personas/ and, when the study has them, study-brief.md (what
 was agreed with the user is part of the record) and followups.json (the questions behind the
-"## Follow-up <n>" sections of the persona files, which check_runs.py reads). Dropped: the site
+"## Follow-up <n>" sections of the persona files, which check_runs.py reads) and interviews/ (the
+turn logs and full transcripts of an interview study, below). Dropped: the site
 copies, in panel/sites or <study>/sites (the archive keeps the concepts once, separately),
 panel/materials (regenerate with capture.py), panel/scratch, logs/ (raw harness output, which
 contains everything a panellist read and wrote), .launch.lock, which every study has and which
@@ -57,7 +58,7 @@ depends on the concept's kind (panel_lib.py, "Concept kinds"):
           cannot be opened is skipped, and the line for the concept says how many of its pages
           were screenshotted and how many were not
 
-Three refusals, each with nothing archived. A study that a launcher has (launch.py, followup.py or
+Three refusals for every study, each with nothing archived. A study that a launcher has (launch.py, followup.py or
 init_study.py --force) is refused: archive.py takes the launcher's own lock on the study
 (launch.Lock) and holds it until the round is copied, so no follow-up can be asked or settled
 under the copy. Of a study it cannot write, as in a sandbox that shows it read-only, it keeps a
@@ -79,6 +80,29 @@ folder that may not be read or listed. Each is named with the reason, and none i
 opened. Most are found by the walk, before anything is copied. A file that can no longer be read
 when it is copied, or that a review study, which is scanned for nothing, first opens then, ends
 the archive in the same words.
+
+An interview study has no concepts, no key.md and no persona files. Its archive holds the other
+kept files and its interviews, at the paths the study has them, so that an archived round still
+extracts, analyses and has its quotes checked (extract_notes.py, analyze.py, interview.py quotes):
+  interviews/<run id>.jsonl   the turn log of each interview, byte for byte: the one record of
+                              what was said, and of why an interview stopped
+  interviews/<run id>.md      the full transcript, with the situation card, which is meant to be
+                              kept: it is what the critique was marked against
+  analysis/transcripts/       the analysts' copies, with the rest of analysis/: notes.csv,
+                              critique.csv, themes.md, quant.md and quote-check.md among it
+Never copied: the rooms (panel/rooms) and the interviewers' folders (interviewer/), which hold
+nothing, and logs/, which has every turn's raw output and the turn logs that a fresh start or a
+new scaffold set aside. Those are superseded, never evidence.
+
+Two more refusals for an interview study, under the lock (refuse_unsettled()): a turn in flight,
+which is an attempt with no end on either side of an interview, and an interview that a launcher
+is carrying between two turns. A mark that a killed launcher left on an interview is no reason
+to refuse. An interview with no end record is archived as it stands, and a line names each with
+what it reads as and how far it got, and each that has turns on record and no transcript
+(interview_lines()). Nothing of an interview study is scanned: it has no test account, so no
+secret is known, and a "leak_terms" entry in a question, a card or an answer is for
+check_runs.py to say before the round is archived. A usability study that keeps a folder
+interviews/ has every file of it scanned for its secrets with the other kept files.
 
 A usability study has no concepts and no key.md. Its archive holds the other kept files and its
 evidence, panel/evidence/<run id>/ as evidence/<run id>/ (panel_lib.run_evidence):
@@ -162,6 +186,7 @@ KEEP = {  # study path -> archive path
     "analysis": "analysis",
     "panel/_panel-instructions.md": "panel-instructions.md",
     "panel/personas": "personas",
+    pl.INTERVIEWS: pl.INTERVIEWS,  # the turn logs and the full transcripts: the same path, so an archived round reads
 }
 IGNORED = ("__pycache__", ".DS_Store")  # the names left out of a folder, whatever is under them
 SCALE = 50     # per cent of its size a step's screenshot is brought down to, as snapshot.py does a concept's page
@@ -243,30 +268,83 @@ def take_study(sd: Path):
     if lock.share("archive"):
         return lock
     try:
-        running = [e["run"] for e in pl.read_runs(sd) if launch.in_flight(e)] if (sd / "runs.json").exists() else []
+        running = ([launch.named(e) for e in pl.read_runs(sd) if launch.in_flight(e)]
+                   if (sd / "runs.json").exists() else [])
     except ValueError:  # not valid JSON: it names no run
         running = []
     if running:
         raise SystemExit(
             f"{pl.plural(len(running), 'run')} of this study {pl.agree(len(running), 'is', 'are')} on record as "
-            f"running ({', '.join(running)}), and this shell can neither write the study nor hold a lock on "
+            f"running ({'; '.join(running)}), and this shell can neither write the study nor hold a lock on "
             f"{lock.path}, so the study cannot be protected from a launcher while it is copied. Nothing was "
             f"archived. Archive it from a shell that can write the study. {pl.SANDBOX_HINT}")
     return None
 
 
-def refuse_unsettled(sd: Path):
-    """Exit when a follow-up question of the study is not settled (launch.unsettled_followups).
-    The caller has the study lock, so none can be asked or settled after this has looked."""
+def refuse_unsettled(sd: Path, held: bool = False):
+    """Exit when something of the study is not settled. The caller has the study lock, so nothing
+    can be asked, answered or settled after this has looked.
+
+    A follow-up question that is not settled (launch.unsettled_followups). A turn of an
+    interview in flight: an attempt with no end on an entry of a conversation
+    (launch.in_flight()), whose process may still be answering, and whose answer the turn log
+    does not have yet. And an interview that a launcher is carrying between two turns, by the
+    one rule for that (pl.carried()): the entry is marked as carried and a launcher has the
+    study, which is what held says. The caller passes it false whenever it has the study
+    itself, since no launcher then has: a mark that a killed launcher left is no reason to
+    refuse, and such an interview is archived as its log stands (interview_lines())."""
     if not (sd / "logs").is_dir():  # an archive archived again: it has nothing to settle with
         return
-    out = launch.unsettled_followups(sd, pl.read_runs(sd) if (sd / "runs.json").exists() else [])
+    runs = pl.read_runs(sd) if (sd / "runs.json").exists() else []
+    out = launch.unsettled_followups(sd, runs)
     if out:
         raise SystemExit(f"A follow-up question to {', '.join(out)} is not settled, so "
                          f"{pl.agree(len(out), 'its persona file', 'their persona files')} may hold what a "
                          "launcher will reject and put back. Nothing was archived. Settle it with: "
                          f"followup.py {sd} list, once any process still answering has ended (launch.py {sd} "
                          "status shows them).")
+    turns = [launch.named(e) for e in runs if "interview" in e and launch.in_flight(e)]
+    if turns:
+        raise SystemExit(f"{pl.plural(len(turns), 'turn')} of this study {pl.agree(len(turns), 'is', 'are')} not "
+                         f"settled ({'; '.join(turns)}): its process may still be answering, and what it answers is "
+                         f"not on the turn log yet. Nothing was archived. launch.py {sd} stop settles it and starts "
+                         f"nothing, and launch.py {sd} resume goes on with the interview.")
+    carried = list(dict.fromkeys(pl.interview_of(e) for e in runs if "interview" in e and pl.carried(e, held)))
+    if carried:
+        raise SystemExit(f"A launcher is carrying {pl.listed(carried)} between two turns, so "
+                         f"{pl.agree(len(carried), 'its turn log is', 'their turn logs are')} still being written. "
+                         f"Nothing was archived. Wait for it to end, or stop it with launch.py {sd} stop.")
+
+
+def interview_lines(cfg: dict) -> list[str]:
+    """What the archive says of the interviews of an interview study: how many turn logs and
+    transcripts travel, each interview that has no end record, with what it reads as and how far
+    it got, and each that has turns on record and no transcript to show them. An interview that
+    did not finish is archived as it stands and refuses nothing: it is said plainly, so that
+    nobody takes the round for a finished one. Read under the study lock, where a mark that an
+    interview is carried counts for nothing (pl.carried())."""
+    sd, records = cfg["_dir"], pl.run_records(cfg["_dir"], cfg)
+    logs = [r for r in records if pl.turn_log(sd, r["run"]).is_file()]
+    shown = [r["run"] for r in records if (sd / pl.INTERVIEWS / f"{r['run']}.md").is_file()]
+    lines = [f"Interviews: {pl.plural(len(logs), 'turn log')} and {pl.plural(len(shown), 'transcript')} in "
+             f"{pl.INTERVIEWS}/, with the analysts' copies in {pl.TRANSCRIPTS}/. The rooms, the interviewers' "
+             "folders and logs/ stay behind."]
+    unended = [r for r in records if not r["progress"]["complete"]]
+    if unended:
+        each = [f"{r['run']} ({r['state']}, " + (f"{r['progress']['exchanges']} of {r['progress']['cap']} exchanges)"
+                                                 if any(t["t"] in pl.SPOKEN for t in r["turns"])
+                                                 else "no turn on record)") for r in unended]
+        n = len(unended)
+        lines.append(f"{n} of the {pl.plural(len(records), 'interview')} {pl.agree(n, 'has', 'have')} no end record "
+                     f"and {pl.agree(n, 'is archived as it stands', 'are archived as they stand')}: {'; '.join(each)}. "
+                     f"analyze.py lists {pl.agree(n, 'it', 'them')} under \"Incomplete interviews\" and counts "
+                     f"{pl.agree(n, 'it', 'them')} in no table.")
+    bare = [r["run"] for r in records if r["run"] not in shown and any(t["t"] in pl.SPOKEN for t in r["turns"])]
+    if bare:
+        lines.append(f"{pl.listed(bare)}: turns on record and no transcript, so the archive has "
+                     f"{pl.agree(len(bare), 'its turn log', 'their turn logs')} alone. interview.py {sd} render writes "
+                     "the transcripts: archive again after it.")
+    return lines
 
 
 def redacted(sd: Path) -> tuple[str, int] | None:
@@ -780,7 +858,8 @@ def main():
     usability, said, left = cfg["type"] == "usability", [], []
     lock = take_study(sd)
     try:
-        refuse_unsettled(sd)
+        # With the study in hand no launcher has it. Only a study that gave no lock at all is asked.
+        refuse_unsettled(sd, held=lock is None and bool(launch.Lock.holder(sd)))
         plan = usability_plan(cfg) if usability else review_plan(cfg)
         forms = pl.file_forms(cfg)
         try:
@@ -789,6 +868,8 @@ def main():
                 noticed = sum(add_notice(work / held) for held in KEEP.values())
                 if usability:
                     said = plan["lines"] + copy_evidence(plan, work)
+                if cfg["type"] == "interview":
+                    said = interview_lines(cfg)
                 if forms:  # with none known, a record an earlier archive left there stays
                     pl.write_forms(work, forms)
                 left = publish(work, dest, other_kind(plan) if usability else [])

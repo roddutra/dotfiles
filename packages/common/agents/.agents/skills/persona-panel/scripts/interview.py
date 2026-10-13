@@ -164,16 +164,85 @@ back, how to discard the interview or keep it and report the leak. Only the turn
 an interview of the study: one that a fresh start or a new scaffold moved into logs/ is not
 read.
 
+The jobs of the synthesis (brief()). An interview study's synthesis has four job roles
+(panel_lib.job_roles()), which launch.py plans, orders and starts. This module fills their
+briefs, since what each is given and kept from is a rule of the interview:
+
+    analyst-<n>   assets/interview-qual-brief.md: the analysts' copy of the transcript of each
+                  interview of its personas, and who each persona is (id, name, role, segment,
+                  personality, bio). Its unfinished interviews are listed with their state and
+                  the exchanges they have. Nothing of the guide, of the interviewer's notes or
+                  of a situation card: it is told to open nothing under interviews/, prompts/
+                  or interviewer/, nor study.json
+    critic-<n>    assets/interview-critique-brief.md: the full transcript of each interview of
+                  the same personas, with the card and every TOPIC, MOVE and WHY, the same
+                  account of each persona, and the study's guide: the purpose, every goal, every
+                  topic with its opener and the segments it is kept to, and the interview cap
+    themes        assets/interview-themes-brief.md: analysis/notes.csv, and nothing of the study
+    writer        assets/interview-synthesis-brief.md: the files of the analysis, the purpose,
+                  the goals and the topics, who it writes for, the study's context files, and
+                  which participants shared the interviewer's runner and model. No transcript
+
+The files the themes job and the writer are given are one table (GIVEN) and the study's context
+files (context()): the brief names them from there, and a launch records a fingerprint of each
+from there (given()), so what is recorded is what the brief named.
+
+A brief is filled with the values of its own role and no other, and a transcript is named only
+for an interview with a turn on record. An analyst or a critic with no such interview has
+nothing to read (nothing_to_read()): it is refused, or with --allow-incomplete passed over
+while the jobs that have something run, so that part of a panel can be analysed.
+
+A done job that is out of date (out_of_date()). A job is redone by deleting its file and running
+its role again, and a job that is done stays done whatever happens after it. So one function
+says whether a done job is still good, from the attempts in runs.json and the turn logs and
+from no file's time, for three reasons: an analyst or a critic whose interviews were held, went on
+or ended after its brief was written covers less than there is now (uncovered()), a themes
+job or a writer is built on files that are gone once a job it reads (panel_lib.JOB_READS) has
+been launched again after its own last launch (rerun()), and a themes job or a writer is built
+on a file as it was once a file it was given holds something else, or is gone, with no job run
+again: a note put right by hand and extracted again, tallies written again, a file edited
+(altered(), by the fingerprints its last launch recorded, panel_lib.py "Job entries"). "run"
+says which and what to do in place of what comes next, the plan says it against the job's row,
+and neither a job that reads such a job nor analyze.py goes on from it (launch.plan_jobs(),
+interview_report.report()).
+
 What a finished interview measured (measured()). The plan divides what each side of the
 finished interviews used by their exchanges, for a figure an exchange that an interview of
 another length can be judged by.
 
+The quotes (normal(), said_in(), quotations(), attributions(), quote_problems(),
+quote_check()). A quotation is held to the transcript by one rule, said_in(): its words, once
+normal() has made the quotation marks straight, the white space single, the case one and one
+closing full stop gone (an ellipsis stays, as words that must be there), stand in the text as
+words of their own. extract_notes.py asks it of each note's Quote, in the answers of the
+exchanges the note names. The quotes command asks it of every quotation of
+analysis/SYNTHESIS.md, which the writer's brief has in one form: the words between double
+quotation marks, then at once the run id and the one exchange in brackets,
+
+    "I was still waiting on the Monday." (P02-a, 7)
+
+and the words must be in that exchange's question or its answer. Any other stretch between
+double quotation marks, straight or curly and of any length, is listed as a quotation with no
+attribution, so leaving the attribution off is no way past the check. Text in a code span or a
+fenced block is not read, and nor are words in single quotation marks, in guillemets or in no
+marks. So three things more are listed: a quotation in single marks or guillemets (words in
+them that an attribution follows, or that are speech: quotations()); every bracket of a run id
+of the study and a number that is not the attribution of a stretch between double marks,
+wherever it stands, since the bracket is kept for that and whatever was put before it was not
+checked (a bracket may run over a line break, as a quotation may, and is found all the same:
+attributions()); and a synthesis in which no quotation was verified at all. What is found is printed
+and written to analysis/quote-check.md, and the command exits with 1 when anything is listed.
+The launcher runs the same check when a writer job of an interview study ends done. Nothing is
+sent back to the writer.
+
 Usage:
   interview.py <study-dir> render [--runs <ids>]   # write both transcripts again
+  interview.py <study-dir> quotes                  # check the quotations of the synthesis
 
 render takes the study while it writes. When a launcher has it, render says so and writes
 all the same: a transcript is made from the turns on record at that moment, and the launcher
-writes it again when its interview ends.
+writes it again when its interview ends. quotes takes no lock: it reads the synthesis and the
+turn logs, and writes its one report.
 """
 
 from __future__ import annotations
@@ -228,6 +297,30 @@ NO_END, MALFORMED, LEAKED = "no end record", "turn log of the wrong form", "leak
 CONTINUES = {"pending": "run", "failed": "run", "partial": "resume", "blocked": "resume",
              "limited": "resume --runs <ids> --extend", "running": None}
 STOPPED = ("partial", "limited", "blocked", "failed")  # of those, the states of an interview that began and stopped
+SYNTHESIS, QUOTE_CHECK = "analysis/SYNTHESIS.md", "analysis/quote-check.md"  # what "quotes" reads, and writes
+DOUBLE_MARKS = str.maketrans({"\u201c": '"', "\u201d": '"'})  # curly double quotation marks, read as straight ones
+CODE_SPAN = re.compile(r"(`+).+?\1")                  # a code span of a markdown line: no quotation is read in it
+BLOCK_START = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s|[|#])")  # a line that opens a list item, a table row or a heading
+QUOTED_LINE = re.compile(r"\s*(?:>\s*)+")                     # the marks that open a line of a markdown quotation
+SINGLE_MARKS = str.maketrans({"‘": "'", "’": "'"})  # and curly single ones, where the wrong marks are looked for
+FENCE_LINE = re.compile(r"\s*(`{3,}|~{3,})(.*)")       # a line that may open or close a fenced block: marks, the rest
+# An attribution: a run id and one exchange, in brackets. A number of ten digits or more is no exchange of any log.
+BRACKET = re.compile(r"\(\s*([^\s,()]+)\s*,\s*(\d{1,9})\s*\)")
+# The same bracket left open where a line ends, "(P01-a,": the next line goes on with it, though "7) ..." opens
+# like an item of a numbered list.
+OPEN_BRACKET = re.compile(r"\(\s*[^\s,()]+\s*,\s*$")
+EMPHASIS = re.compile(r"[*_]*\s*")                     # all that may stand between a closing mark and its attribution
+STRAY = re.compile(r"[*_\s,.;:]*")                     # and what a writer leaves there by mistake, which is named
+# Words in the marks no quotation is read in. Single ones: the opening mark stands before a word, after white space
+# or an opening bracket (emphasis marks may come between), and the closing mark after a word with no letter or digit
+# behind it. So the apostrophe of "don't", of "the brokers' files" and of "*Dana*'s" opens nothing, and the one of
+# "don't" closes nothing. And guillemets.
+OTHER_MARKS = re.compile(r"(?<![^\s(\[{|])[*_]*'(?=\S)(?P<single>.+?)(?<=\S)'(?![^\W_])"
+                         r"|«\s*(?P<guillemets>.+?)\s*»", re.S)
+MARK_NAMES = {"single": ("single quotation marks", "''"), "guillemets": ("guillemets", "«»")}
+SPEECH_WORDS = 6                                       # a stretch in those marks this long is speech, and no term
+ELLIPSIS = "…"                                    # read as three full stops: the same words, written either way
+SHOWN_WORDS = 12                                       # the words of a quotation that a line about it repeats
 
 
 def notices() -> dict[str, str]:
@@ -316,17 +409,41 @@ def interviewer_prompt(cfg: dict, persona: dict, block: str = "interview") -> st
     writes one for this guide (_example_status())."""
     held = pl.guide(cfg, persona["id"], block)
     shown = held["topics"][min(1, len(held["topics"]) - 1)]
-    topics = [f"{i}. {t['id']}, {t['area']}. "
-              f"Serves {pl.listed(t['goals']) if t['goals'] else 'no goal in particular'}. "
-              f"Cap: {pl.plural(t['turns'], 'exchange')}. Opener: \"{' '.join(t['opener'].split())}\""
-              for i, t in enumerate(held["topics"], start=1)]
     return pl.fill_brief("interviewer-brief.md", {
         "ABOUT": held["about"], "NAME": persona["name"], "ROLE": persona["role"],
         "SEGMENT_LINE": _segment_line(cfg, persona),
-        "GOALS": "\n".join(f"- {g['id']}: {' '.join(g['learn'].split())}" for g in held["goals"]),
-        "TOPICS": "\n".join(topics), "TURNS": held["turns"], "REFERENCES": references(),
+        "GOALS": _goal_lines(held["goals"]),
+        "TOPICS": _topic_lines(cfg, held["topics"]), "TURNS": held["turns"], "REFERENCES": references(),
         "FIRST_TOPIC": held["topics"][0]["id"], "EXAMPLE_TOPIC": shown["id"],
         "EXAMPLE_STATUS": _example_status(held, shown)})
+
+
+def _goal_lines(goals: list[dict]) -> str:
+    """The learning goals of a guide as a brief lists them: "- G1: <what to find out>", a line
+    each."""
+    return "\n".join(f"- {g['id']}: {' '.join(g['learn'].split())}" for g in goals)
+
+
+def _topic_lines(cfg: dict, topics: list[dict], kept: bool = False) -> str:
+    """The topics of a guide as a brief lists them, numbered in the order they are opened, a
+    line each: the id, the area, the goals it serves, its cap and its opener. This is the one
+    form of it, for the interviewer and for the jobs that are given the guide. kept: say of a
+    topic that "segments" keeps to some personas which segments those are, by their names in
+    study.json "segments". An interviewer is given its own persona's topics and needs no such
+    word. A critic and the writer are given every topic of the study, and would otherwise read
+    a topic that a participant was never to be asked as one the interviewer left out."""
+    names = cfg.get("segments") if isinstance(cfg.get("segments"), dict) else {}
+
+    def only(t: dict) -> str:
+        if not (kept and t["segments"]):
+            return ""
+        whom = [names.get(s, s) for s in t["segments"]]
+        return f" Asked only of the {pl.agree(len(whom), 'segment')} {pl.listed(whom)}."
+
+    return "\n".join(f"{i}. {t['id']}, {t['area']}. "
+                     f"Serves {pl.listed(t['goals']) if t['goals'] else 'no goal in particular'}. "
+                     f"Cap: {pl.plural(t['turns'], 'exchange')}. Opener: \"{' '.join(t['opener'].split())}\""
+                     + only(t) for i, t in enumerate(topics, start=1))
 
 
 def _example_status(guide: dict, shown: dict) -> str:
@@ -996,6 +1113,310 @@ def write_transcripts(cfg: dict, run: str) -> list[Path]:
         written = records
 
 
+# ---------------------------------------------------------------- the jobs of the synthesis
+
+# The brief of each job role of an interview study's synthesis (pl.job_roles()), in assets/.
+JOB_BRIEFS = {"analyst": "interview-qual-brief.md", "critic": "interview-critique-brief.md",
+              "themes": "interview-themes-brief.md", "writer": "interview-synthesis-brief.md"}
+# What the themes job and the writer are given to read, the one list of it: for each role, the placeholders of
+# its brief with the path each stands for, relative to the study directory and as the brief names it, which
+# for the files of several jobs is a pattern. brief() fills the brief from it and given() takes the
+# fingerprints of a launch from it, so the two cannot name different files. The writer is given the study's
+# context files besides (context()). An analyst and a critic are given transcripts, which brief() lists and
+# the turn logs account for (uncovered()), so they are not here.
+GIVEN = {"themes": {"NOTES": "analysis/notes.csv"},
+         "writer": {"TALLIES": "analysis/quant.md", "FIGURES": "analysis/quant.json", "THEMES": "analysis/themes.md",
+                    "QUAL": "analysis/qual-*.md", "CRITIQUE": "analysis/critique-*.md", "CHECKS": "analysis/checks.md"}}
+# Given, and no fingerprint taken of it: quant.md names the study directory, as it was given to the command
+# that wrote it, wherever it says what to run, and its sentences change with the script, so analyze.py run
+# again with nothing changed may write other bytes. quant.json is the same tallies as figures alone, written
+# the same from any folder and inside an archive, and no change of wording touches it, which is why
+# analyze.stale_tallies() compares it too.
+RESTATED = ("analysis/quant.md",)
+ALTERED = ("changed", "was removed")  # what altered() says became of a file a job was given
+
+
+def _span(ids: list[str], mark: str = "") -> str:
+    """The personas of a job's share as its brief names them: "persona P01", "personas P01 to
+    P04", with mark around the ids."""
+    return f"{pl.agree(len(ids), 'persona')} {mark}{ids[0] if len(ids) == 1 else f'{ids[0]} to {ids[-1]}'}{mark}"
+
+
+def _persona_facts(cfg: dict, ids: list[str]) -> str:
+    """Who each of those personas is, as an analyst and a critic are told it: the id, name,
+    role, segment and personality on one line, and the bio lines under it. More than the
+    interviewer had, which is name, role and segment: both read what a participant said against
+    who it was briefed to be."""
+    def flat(text) -> str:
+        return " ".join(str(text).split())
+
+    out = []
+    for p in (p for pid in ids for p in cfg["personas"] if p["id"] == pid):
+        facts = [f"Role: {flat(p['role'])}", _segment_line(cfg, p)[2:], f"Personality: {flat(p['personality'])}"]
+        out.append(f"- **{p['id']}, {flat(p['name'])}.** " + " ".join(f"{fact.rstrip('.')}." for fact in facts if fact))
+        out += [f"  - {flat(line)}" for line in p.get("bio") or []]
+    return "\n".join(out)
+
+
+def _same_model(cfg: dict) -> str:
+    """What the writer is told of the one limit that depends on the study: which participants,
+    by model key, were on the interviewer's own runner and model, or that none was. It opens
+    with a space, to follow the sentence that states the limit. Two entries match by those two
+    fields as study.json writes them, as in the plan's note: a model left out is its runner's
+    default, and no model's name is read for what it might be."""
+    host = cfg["interview"]["interviewer"]
+    same = [e["key"] for e in pl.model_entries(cfg) if (e["runner"], e["model"]) == (host["runner"], host["model"])]
+    if not same:
+        return " In this round no participant shared the interviewer's runner and model."
+    keys = pl.model_keys(cfg)
+    whom = ("every participant" if len(same) == len(keys) else
+            f"the participants on {pl.listed(same)} (the model key a run id ends with)")
+    return (f" In this round {whom} shared the interviewer's runner and model"
+            + ("." if len(same) == len(keys) else ", and the others did not."))
+
+
+def _heard(job: dict, records: list[dict]) -> list[dict]:
+    """The interviews of a job's personas with a turn on record (pl.SPOKEN), in the personas'
+    order: the ones an analyst or a critic has a transcript of."""
+    return [r for pid in job["personas"] for r in records
+            if r["pid"] == pid and any(t["t"] in pl.SPOKEN for t in r["turns"])]
+
+
+def heard_from(job: dict) -> str:
+    """The personas whose interviews an analyst or a critic reads, as a sentence names them:
+    "persona P01", "personas P03 to P04"."""
+    return _span(job["personas"])
+
+
+def nothing_to_read(cfg: dict, job: dict, records: list[dict], passed: bool = False) -> str | None:
+    """What the lead is told of an analyst or a critic none of whose interviews has a turn on
+    record, None for a job that has one to read and for the themes job and the writer, which
+    read no transcript. The sentence that refuses the job, or with passed the line for one
+    that "run --allow-incomplete" passes over while the jobs that have something to read run:
+    after a pilot, or with part of a panel held, one half of the personas may have no
+    interview yet."""
+    if job["role"] not in ("analyst", "critic") or _heard(job, records):
+        return None
+    why, sd = f"no interview of {heard_from(job)} has a turn on record", cfg["_dir"]
+    if passed:
+        return (f"{job['run']}: passed over, as it would have nothing to read: {why}. Start it once one is held: "
+                f"launch.py {sd} run --role {job['role']}")
+    return f"{job['run']} would have nothing to read: {why}. Hold the interviews first: launch.py {sd} run"
+
+
+def _launched(job: dict) -> list[dict]:
+    """The attempts of a job of the synthesis that started it from its brief, in their order:
+    those of the kind "launch"."""
+    return [a for a in job.get("attempts") or [] if a.get("kind") == "launch" and a.get("started")]
+
+
+def launches(job: dict) -> list[float]:
+    """When a job of the synthesis started from its brief, each time it did: the start of each
+    of its attempts of the kind "launch", in their order, [] with none on record (a file
+    written by hand). A brief is written just before each such attempt and at no other time
+    (launch.plan_jobs()), and a job is done again only by one: its file is deleted, it reads
+    pending, and "run" launches it."""
+    return [a["started"] for a in _launched(job)]
+
+
+def context(cfg: dict, role: str) -> list[str]:
+    """The study's context files a job of a role is given, as study.json writes them, relative
+    to the study directory: "synthesis.context_files" for the writer, none for any other."""
+    return list(cfg["synthesis"].get("context_files", [])) if role == "writer" else []
+
+
+def given(cfg: dict, job: dict) -> dict[str, str]:
+    """The files a themes job or a writer is given to read, as they are now: {path: fingerprint},
+    each path relative to the study directory. {} for an analyst and a critic.
+
+    The files are the ones the job's brief names: every file a path or a pattern of GIVEN
+    stands for, and the context files (context()). A launcher asks this as it writes the brief
+    and records the answer on the attempt that starts the job from it (launch.plan_jobs(),
+    "read" in panel_lib.py, "Job entries"). A file that is not there has no fingerprint and is
+    left out, and so is quant.md (RESTATED): quant.json answers for the tallies."""
+    sd, role = cfg["_dir"], job["role"]
+    names = {f.relative_to(sd).as_posix() for pattern in GIVEN.get(role, {}).values() if pattern not in RESTATED
+             for f in sd.glob(pattern)}
+    marks = {name: pl.fingerprint(sd / name) for name in sorted(names | set(context(cfg, role)))}
+    return {name: mark for name, mark in marks.items() if mark}
+
+
+def uncovered(job: dict, records: list[dict]) -> dict[str, str]:
+    """The interviews of an analyst's or a critic's personas that its file does not cover as
+    they stand now, each with what happened since: {"P02-cx": "was held", "P01-cx": "went on",
+    "P03-cx": "ended"}. Empty for any other job, and for one with no attempt on record.
+
+    job is the job's entry in runs.json and records pl.run_records(). Decided from what the
+    two record and from no file's time: a job's brief is written, and the transcripts it names
+    with it, just before each attempt of the kind "launch" (launches()), under the
+    study lock, so no turn is added between the two. What the job read is therefore every turn
+    dated up to the start of its last such attempt, and an interview with a card, a question,
+    an answer or an end record dated after it has more than the file was written from. A job
+    is asked this when it is done: one that is not is planned and briefed afresh."""
+    started = launches(job)
+    if job["role"] not in ("analyst", "critic") or not started:
+        return {}
+    read, out = started[-1], {}
+    for r in (r for pid in job["personas"] for r in records if r["pid"] == pid):
+        said = [t["at"] for t in r["turns"] if t["t"] in pl.SPOKEN]
+        new = [at for at in said if at > read]
+        if new or any(t["at"] > read for t in r["turns"] if t["t"] == "end"):
+            out[r["run"]] = "ended" if not new else "was held" if len(new) == len(said) else "went on"
+    return out
+
+
+def rerun(job: dict, runs: list[dict]) -> dict[str, str]:
+    """The jobs a themes job or a writer reads (pl.JOB_READS) that were launched after its own
+    last launch, each with what happened: {"analyst-1": "was run again"}, or "was run" for one
+    that had no earlier launch. Empty for any other job, and for one with no launch on record.
+
+    job is the job's entry in runs.json and runs the entries of runs.json, or of the jobs alone.
+    Decided as uncovered() decides, from the attempts on record and from no file's time: a job
+    is launched only once every job it reads is done, so what it read is what those jobs had
+    written by its last launch, and a job among them launched after that has written its file
+    anew since. Whether the new file says the same is not asked: the lead reads it and decides.
+    The scripts between two jobs leave no record in runs.json, and are held to what they read
+    another way (extract_notes.changed(), analyze.stale_tallies()). What a job read of the
+    files they write is altered()'s."""
+    started = launches(job)
+    if not started:
+        return {}
+    read = {e["run"]: launches(e) for role in pl.JOB_READS.get(job["role"], ()) for e in runs if e["role"] == role}
+    return {run: "was run again" if len(began) > 1 else "was run" for run, began in read.items()
+            if began and began[-1] > started[-1]}
+
+
+def altered(cfg: dict, job: dict) -> dict[str, str]:
+    """The files a themes job or a writer was given to read that are no longer what it read,
+    each with what became of it (ALTERED): {"analysis/notes.csv": "changed",
+    "analysis/checks.md": "was removed"}. Empty for a job whose last launch recorded no
+    fingerprint: an analyst, a critic, and a job launched before fingerprints were recorded,
+    which is never out of date for want of one.
+
+    job is the job's entry in runs.json. Decided from what its last attempt of the kind
+    "launch" recorded ("read": given() as the brief was written) against the same files now,
+    and from no file's time. It is what rerun() cannot see, a file that changed with no job run
+    again: a note put right by hand in an analyst's file and extract_notes.py run again, which
+    leaves the themes on notes.csv as it was, analyze.py run again after that, which leaves the
+    writer on the earlier tallies, and a file of the analysis or a context file edited after
+    the writer read it. Running a script again with nothing changed writes the same file, and
+    is not seen.
+
+    A file that is gone counts in a study and not in an archived round, which has no panel/
+    folder (as pl.personas_dir() tells one): archive.py keeps analysis/ whole and leaves out a
+    context file that lies elsewhere, and what a copy left out was not taken from the job."""
+    read = (_launched(job) or [{}])[-1].get("read")
+    if not read:
+        return {}
+    sd = cfg["_dir"]
+    live, now = (sd / "panel").is_dir(), {name: pl.fingerprint(sd / name) for name in read}
+    changed, removed = ALTERED
+    return {name: changed if now[name] else removed for name, mark in read.items()
+            if now[name] != mark and (now[name] or live)}
+
+
+def out_of_date(cfg: dict, job: dict, runs: list[dict], records: list[dict]) -> dict[str, str]:
+    """Whether a done job of an interview study's synthesis is still good: {} when it is, else
+    what its file was written without, each with what happened since. For an analyst or a
+    critic those are interviews (uncovered()). For the themes job and the writer they are the
+    jobs they read that were run again (rerun()), and with none of those the files they were
+    given that have changed with no job run again (altered()): a job run again is the cause on
+    record, and is named in place of the files it wrote. job is its entry in runs.json, runs
+    the entries of runs.json and records pl.run_records(). A job with no launch on record is
+    not judged."""
+    return uncovered(job, records) or rerun(job, runs) or altered(cfg, job)
+
+
+def out_of_date_line(cfg: dict, job: dict, runs: list[dict], records: list[dict]) -> str | None:
+    """What the lead is told of a done job that out_of_date() finds wanting, None for one that is
+    still good: in one sentence, what its file was written without (the interviews, the jobs
+    run again, or the files that changed, by name) and what to do, which is to delete the file
+    and run the role again. For an analyst or a critic the command named has --allow-incomplete
+    when the panel would still refuse the role without it. Said by "run" and "resume" of the
+    role, by the plan under the jobs, by "run" of a role that reads the job, and by analyze.py
+    of the themes job."""
+    since = out_of_date(cfg, job, runs, records)
+    if not since:
+        return None
+    many, sd, by_what = len(since), cfg["_dir"], {}
+    for name, what in since.items():  # "P01-cx and P02-cx were held and P03-cx ended"
+        by_what.setdefault(what, []).append(name)
+    before = pl.listed([f"{pl.listed(names)} {what if len(names) == 1 else what.replace('was ', 'were ', 1)}"
+                        for what, names in by_what.items()])
+    if job["role"] in ("analyst", "critic"):
+        unfinished = any(r["state"] in ("pending", "running", "blocked") for r in records)
+        lacks = (f"does not cover {pl.agree(many, 'that interview', 'those interviews')} as "
+                 f"{pl.agree(many, 'it stands', 'they stand')} now")
+        again = f"--role {job['role']}{' --allow-incomplete' if unfinished else ''}"
+    elif set(by_what) <= set(ALTERED):  # files, with no job run again: "analysis/notes.csv changed"
+        lacks = f"is built on what {pl.agree(many, 'that file', 'those files')} held then"
+        again = f"--role {job['role']}"
+    else:
+        lacks = f"is not built on what {pl.agree(many, 'that job has', 'those jobs have')} written since"
+        again = f"--role {job['role']}"
+    return (f"{job['run']}: done, but {job['file']} was written before {before}, so it {lacks}: to put that right, "
+            f"delete {job['file']} and run launch.py {sd} run {again} again.")
+
+
+def brief(cfg: dict, job: dict, records: list[dict]) -> str:
+    """The prompt of a job of an interview study's synthesis: its brief from assets/ (JOB_BRIEFS)
+    with every placeholder filled. job is the job's entry (pl.synthesis_jobs()) and records
+    pl.run_records(), one for each interview.
+
+    What each role is given is decided here and nowhere else (module docstring, "The jobs of
+    the synthesis"), and a brief is filled with the values of its own role alone:
+    pl.fill_brief() exits on a placeholder it has no value for, so a goal or a topic can reach
+    an analyst's brief neither from here nor by a token added to its asset. The files the
+    themes job and the writer are given are named from GIVEN and context(), which is also
+    where a launch takes the fingerprints from (given()). An analyst and a critic are given a
+    transcript for each of their interviews with a turn on record, which launch.plan_jobs()
+    has written just before, and one with none of them cannot be started (nothing_to_read(),
+    which launch.plan_jobs() asks before it plans one)."""
+    sd, held, role = cfg["_dir"], cfg["interview"], job["role"]
+    if role == "themes":
+        return pl.fill_brief(JOB_BRIEFS[role], {"STUDY_DIR": sd, **GIVEN[role]})
+    keys = pl.model_keys(cfg)
+    panel = {"STUDY_DIR": sd, "PERSONAS": pl.plural(len(cfg["personas"]), "persona"),
+             "MODELS": f"{pl.plural(len(keys), 'model')} ({', '.join(keys)})"}
+    # The study's guide: every goal, and every topic with the segments it is kept to. One persona's is pl.guide().
+    guide = {"ABOUT": held["about"], "GOALS": _goal_lines(held["goals"]),
+             "TOPICS": _topic_lines(cfg, held["topics"], kept=True)}
+    if role == "writer":
+        syn, done = cfg["synthesis"], sum(r["state"] == "done" for r in records)
+        return pl.fill_brief(JOB_BRIEFS[role], {
+            **panel, **guide, **GIVEN[role], "DECISION_MAKER": syn.get("decision_maker", pl.DEFAULT_DECISION_MAKER),
+            "RUNS": pl.plural(len(records), "interview") + ("" if done == len(records) else
+                                                              f", {done} of them complete"),
+            "EXTRA_CONTEXT_FILES": "\n".join(f"- `{f}`: background from the lead." for f in context(cfg, role)),
+            "SAME_MODEL_NOTE": _same_model(cfg)})
+
+    own = [r for pid in job["personas"] for r in records if r["pid"] == pid]
+    spoken = _heard(job, records)
+    if not spoken:
+        raise SystemExit(nothing_to_read(cfg, job, records))
+    others =[j for j in pl.synthesis_jobs(cfg) if j["role"] == role and j["run"] != job["run"]]
+    share = {**panel, "OWN_PERSONAS": _span(job["personas"], "**"), "FILES": pl.plural(len(spoken), "transcript"),
+             "PERSONA_FACTS": _persona_facts(cfg, job["personas"]), "OUTPUT_FILE": Path(job["file"]).name}
+    if role == "critic":
+        return pl.fill_brief(JOB_BRIEFS[role], {
+            **share, **guide, "TURNS": held["turns"],
+            "TRANSCRIPTS": "\n".join(f"- `{sd / pl.INTERVIEWS / (r['run'] + '.md')}`" for r in spoken),
+            "OTHER_CRITICS_SENTENCE": " ".join(
+                f"Another critic owns the interviews of {_span(j['personas'])} and writes `{j['file']}`: leave both "
+                "to them." for j in others) or "You are the only critic."})
+    unfinished = [f"- `{r['run']}.md` ({r['run']}): {r['state']}, {pl.plural(r['progress']['exchanges'], 'exchange')}"
+                  for r in spoken if r["state"] != "done"]
+    unfinished += [f"- {r['run']}: {r['state']}, with no turn on record, so it has no transcript"
+                   for r in own if r not in spoken]
+    return pl.fill_brief(JOB_BRIEFS[role], {
+        **share,
+        "TRANSCRIPTS": "\n".join(f"- `{sd / pl.TRANSCRIPTS / (r['run'] + '.md')}`" for r in spoken),
+        "INCOMPLETE_RUNS": "\n".join(["", "Unfinished interviews:", *unfinished]) if unfinished else "",
+        "OTHER_ANALYSTS_SENTENCE": " ".join(
+            f"Another analyst owns the interviews of {_span(j['personas'])} and writes `{j['file']}`: leave both "
+            "to them." for j in others) or "You are the only analyst."})
+
+
 # ---------------------------------------------------------------- the checks
 
 def _exchanges(numbers: list[int]) -> str:
@@ -1152,6 +1573,347 @@ def measured(done: list[dict]) -> dict | None:
             "tokens": each("tokens"), "seconds": each("seconds")}
 
 
+# ---------------------------------------------------------------- the quotes
+
+def normal(text: str) -> str:
+    """Words as a quotation is compared with the transcript, by the one rule for it: curly
+    quotation marks and apostrophes made straight, every run of white space one space and case
+    folded, as for any quoted line (pl.same_line()), and then one closing full stop dropped, and
+    no more than one. Case is folded on purpose: a quotation that starts in the middle of a
+    sentence is often given a capital, which changes no word, and no invented quotation passes
+    for it. The one full stop is dropped because a writer's own often ends up inside the marks.
+
+    An ellipsis is words like any other, wherever it stands: text that ends in three full stops
+    keeps every one of them, so "I rang Sam..." is not found in "I rang Sam on the Thursday",
+    and is found where the participant trailed off in just those words. The single character
+    is read as three full stops, so either way of writing one matches the other. Nothing else
+    is forgiven: a word changed, left out or added and a corrected spelling all make other
+    words.
+
+    pl.same_line() itself drops every closing full stop, which is right for an opener and would
+    let an added ellipsis pass here. So it is given the text without its closing full stops,
+    and they are put back, less one, or whole where they end in an ellipsis."""
+    flat = " ".join((text or "").replace(ELLIPSIS, "...").split())
+    head = flat.rstrip(". ")
+    tail = flat[len(head):]
+    return pl.same_line(head) + (tail if tail.endswith("...") else tail[:-1].rstrip())
+
+
+def said_in(words: str, text: str | None) -> bool:
+    """Whether a text holds a quotation word for word: normal() of the words is found in
+    normal() of the text, as words of their own (_holds(), so "he is" is not found in "the
+    issue"). False for words that are nothing once normalised, which every text would hold.
+    This one function decides a note's "quote_verified" (extract_notes.py) and every quotation
+    of the synthesis (quote_problems())."""
+    quote = normal(words)
+    return bool(quote) and _holds(normal(text or ""), quote) >= 0
+
+
+def exchanges(records: list[dict]) -> dict[int, dict]:
+    """The exchanges of a turn log by their number: {n: {"topic", "question", "answer"}}, the
+    topic question n counts for (never its "labelled"), its words, and the answer's, None while
+    it has none. Read through fold(), so a record that pl.read_turns() set aside is no part of
+    an exchange."""
+    pos = fold(records)
+    answers = {a["n"]: a["text"] for a in pos["answers"]}
+    return {q["n"]: {"topic": q["topic"], "question": q["say"], "answer": answers.get(q["n"])}
+            for q in pos["questions"]}
+
+
+def _lines(text: str):
+    """Every line of a markdown text as (its number, the line, whether it is in a fenced block),
+    the lines that open and close the block with it. The marks that open a line of a markdown
+    quotation ("> ") are made blank space, so a column of the line is still its column in the
+    text. A fenced block is CommonMark's: it opens with three or more backticks or tildes (a
+    backtick fence with a backtick after it on the line is a code span, and opens nothing), and
+    closes only on a line of the same mark, at least as many of them, and nothing else. So a
+    block of four backticks holds a line of three and is not closed by it. One that is never
+    closed runs to the end of the text."""
+    fence = None  # the mark and the length of the fence that is open
+    for n, line in enumerate(text.replace("\r\n", "\n").split("\n"), start=1):
+        quoted = QUOTED_LINE.match(line)
+        line = " " * quoted.end() + line[quoted.end():] if quoted else line
+        mark = FENCE_LINE.match(line)
+        if fence:
+            if mark and mark[1][0] == fence[0] and len(mark[1]) >= fence[1] and not mark[2].strip():
+                fence = None
+            yield n, line, True
+        elif mark and not (mark[1][0] == "`" and "`" in mark[2]):
+            fence = (mark[1][0], len(mark[1]))
+            yield n, line, True
+        else:
+            yield n, line, False
+
+
+def _speech(words: str) -> bool:
+    """Whether words in single quotation marks or guillemets read as something said, and not as
+    a term: SPEECH_WORDS words or more, or a sentence, which ends in a full stop, a question
+    mark or an exclamation mark inside the marks."""
+    return len(words.split()) >= SPEECH_WORDS or words.endswith((".", "?", "!"))
+
+
+def quotations(text: str) -> list[dict]:
+    """What a markdown text holds between quotation marks, in the order of its lines. Each
+    stretch is {"line", "marks", "words", "run", "exchange", "at", "stray", "after"}:
+
+        "marks"             "double", or "single" or "guillemets" for a quotation in the wrong
+                            marks (below)
+        "run", "exchange"   the attribution that follows the closing mark at once, in the form
+                            (<run id>, <exchange>), None when none does. Between the mark and
+                            the bracket only white space and emphasis marks may stand
+        "at"                where that bracket opens, (line, column), for attributions(). Also
+                            given when punctuation alone stands between the mark and a bracket
+                            of the form: "stray" is then that punctuation and the bracket, and
+                            "run" stays None
+        "after"             what follows the closing mark on its line, for a message
+
+    A line whose double marks do not pair is {"line", "unpaired": True}, and nothing on it is
+    read.
+
+    Read: every stretch between double quotation marks, straight or curly, of any length. And,
+    outside those, a stretch in single quotation marks, straight or curly, or in guillemets,
+    when it reads as a quotation: an attribution follows it, or it is speech (_speech()). A
+    single mark opens such a stretch only before a word and closes it only after one, so no
+    apostrophe inside a word opens or closes anything and a possessive opens nothing. A shorter
+    term in single marks is left alone.
+
+    Not read: a fenced block (_lines()) and a code span, which is where a term, a label or a
+    title goes. Nor words in no marks at all, or between character entities. An attribution in
+    any of those places is still found, by attributions(), so none of them hides a quotation
+    that names its exchange.
+
+    Marks are paired within a paragraph, a list item or a table row (BLOCK_START), so a
+    quotation or its attribution may run over a line break of one. A line that follows a
+    bracket left open (OPEN_BRACKET) goes on with its paragraph whatever it opens with: the
+    "7) ..." that ends a wrapped attribution is no item of a list. Where such a block has an
+    odd number of double marks it is read line by line instead, and each line with an odd
+    number is unpaired."""
+    out, block = [], []
+
+    def pairs(lines: list[tuple[int, str]]):
+        joined = "\n".join(line for _, line in lines)
+
+        def spot(i: int) -> tuple[int, int]:  # the line and the column of a place in the block
+            return lines[joined.count("\n", 0, i)][0], i - joined.rfind("\n", 0, i) - 1
+
+        def follows(end: int) -> dict:  # what stands after a closing mark
+            named = BRACKET.match(joined, EMPHASIS.match(joined, end).end())
+            stray = None if named else BRACKET.match(joined, STRAY.match(joined, end).end())
+            return {"run": named[1] if named else None, "exchange": int(named[2]) if named else None,
+                    "at": spot((named or stray).start()) if named or stray else None,
+                    "stray": " ".join(joined[end:stray.end()].split()) if stray else "",
+                    "after": joined[end:].split("\n")[0].strip()[:40]}
+
+        marks, rest = [m.start() for m in re.finditer('"', joined)], joined
+        for a, b in zip(marks[::2], marks[1::2]):
+            out.append({"line": spot(a)[0], "marks": "double", "words": " ".join(joined[a + 1:b].split()),
+                        **follows(b + 1)})
+            rest = rest[:a] + "`" * (b + 1 - a) + rest[b + 1:]  # nothing inside a quotation is in other marks
+        for m in OTHER_MARKS.finditer(rest.translate(SINGLE_MARKS)):
+            kind = m.lastgroup
+            q = {"line": spot(m.start())[0], "marks": kind, "words": " ".join(m[kind].split()), **follows(m.end())}
+            if q["run"] or q["stray"] or _speech(q["words"].rstrip("*_")):
+                out.append(q)
+
+    def close():
+        odd = [line.count('"') % 2 for _, line in block]
+        if sum(odd) % 2 == 0:  # the marks of the paragraph pair: across its lines, where a quotation wraps
+            pairs(block)
+        for item, unpaired in zip(block, odd) if sum(odd) % 2 else ():
+            if unpaired:
+                out.append({"line": item[0], "unpaired": True})
+            else:
+                pairs([item])
+        block.clear()
+
+    for n, line, fenced in _lines(text):
+        if fenced or not line.strip():
+            close()
+        else:
+            if BLOCK_START.match(line) and not (block and OPEN_BRACKET.search(block[-1][1])):
+                close()
+            # A code span is made backticks of its own length: a column stays the text's, nothing in it is a
+            # mark, and an apostrophe against it ("`quant.md`'s") still stands against something.
+            block.append((n, CODE_SPAN.sub(lambda m: "`" * len(m[0]), line).translate(DOUBLE_MARKS)))
+    close()
+    return sorted(out, key=lambda q: q["line"])
+
+
+def attributions(text: str, runs: list[str]) -> list[dict]:
+    """Every attribution in a markdown text: each (<run id>, <number>) whose run id is one of
+    runs, wherever it stands, a fenced block and a code span too. Each is {"line", "column",
+    "bracket", "run", "exchange", "where", "before"}: where the bracket opens, the bracket as
+    written with its white space made single, what it names, "a fenced block" or "a code span"
+    when it opens in one and "" in the running text, and the text of its line before it.
+
+    A bracket may run over a line break, as a quotation may: (P01-a, at the end of one line and
+    7) at the start of the next is one attribution, found where it opens, which is where
+    quotations() says the attribution of a wrapped quotation is. So it is looked for in each
+    unbroken run of lines, and never across a blank line, which ends a paragraph: what stands on
+    either side of one is two pieces of text, to a reader as to this."""
+    out, stretch = [], []
+
+    def close():
+        joined = "\n".join(line for _, line, _ in stretch)
+        for m in BRACKET.finditer(joined):
+            if m[1] not in runs:
+                continue
+            n, line, fenced = stretch[joined.count("\n", 0, m.start())]
+            column = m.start() - joined.rfind("\n", 0, m.start()) - 1
+            where = ("a fenced block" if fenced else
+                     "a code span" if any(a <= column < b for a, b in (x.span() for x in CODE_SPAN.finditer(line)))
+                     else "")
+            out.append({"line": n, "column": column, "bracket": " ".join(m[0].split()), "run": m[1],
+                        "exchange": int(m[2]), "where": where, "before": line[:column]})
+        stretch.clear()
+
+    for item in _lines(text):
+        if item[1].strip():
+            stretch.append(item)
+        else:
+            close()
+    close()
+    return out
+
+
+def _shown(words: str, marks: str = '""') -> str:
+    """A quotation as a message shows it, in its own marks: whole, or its first SHOWN_WORDS
+    words."""
+    parts = words.split()
+    return marks[0] + " ".join(parts[:SHOWN_WORDS]) + (" ..." if len(parts) > SHOWN_WORDS else "") + marks[1]
+
+
+def quote_problems(cfg: dict, text: str) -> list[str]:
+    """What is wrong with the quotations of a synthesis, given as its text: a sentence each, in
+    the order of its lines, [] when there is nothing. A quotation is verified when it stands
+    between double quotation marks, the attribution at once after it names an interview of the
+    study and an exchange its turn log has, and its words are in that exchange's question or
+    its answer (said_in()). So each of these is listed, by its line:
+
+        the words are not in the exchange named. Where another exchange of that interview holds
+        them the sentence says which, since the wrong number is the usual slip
+        the attribution names no interview of the study, or an exchange its log does not have
+        no attribution follows the closing mark, whatever the length of what is between the
+        marks: leaving it off is no way past the check, and a term or a title is set in italics
+        or in code
+        the marks of a line do not pair
+        a quotation in single quotation marks or in guillemets (quotations() says when words
+        in those marks are one): its words were not checked
+        an attribution, (<a run id of this study>, <number>), that is not the attribution of a
+        stretch above (attributions()): it follows words in no marks, or is in a code span or a
+        fenced block. The bracket is kept for a quotation's attribution, so that whatever marks
+        a quotation is given, and wherever it is put, naming its exchange brings it here
+
+    And one sentence more when no quotation was verified at all, whatever else was found: a
+    synthesis that quotes nobody in the form has not been checked, and must not read as one
+    that passed.
+
+    Nothing is changed, and nothing is sent back to the writer: the lead puts each right from
+    the transcript, or runs the writer again (quote_check())."""
+    sd = cfg["_dir"]
+    entries = pl.read_runs(sd) if (sd / "runs.json").exists() else pl.planned_runs(cfg)
+    runs, logs = [e["run"] for e in entries if e["role"] == "panellist"], {}
+    found, out, verified = quotations(text), [], 0
+    for q in found:
+        if q.get("unpaired"):
+            out.append((q["line"], "its double quotation marks do not pair, so nothing on it was checked."))
+            continue
+        run, n = q["run"], q["exchange"]
+        if q["marks"] != "double":
+            name, marks = MARK_NAMES[q["marks"]]
+            named = f"({run}, {n})" if run else q["stray"].lstrip("*_ ,.;:")
+            out.append((q["line"], f"{_shown(q['words'], marks)} is in {name}, which are not read, so its words were "
+                        "not checked" + (f", though {named} follows them" if named else "") + ". A quotation goes "
+                        "between double quotation marks."))
+            continue
+        said = _shown(q["words"])
+        if run is None:
+            between, _, bracket = q["stray"].partition("(")  # the punctuation left there, and the bracket after it
+            out.append((q["line"], f"{said} has no attribution"
+                        + (f' at once after its closing mark: "{between.strip()}" stands between the mark and '
+                           f"({bracket}, where only white space and emphasis marks may." if q["stray"] else
+                           f": what follows it, {q['after']}, is not of the form (run id, exchange)."
+                           if q["after"].lstrip("*_ ").startswith("(") else ".")))
+        elif run not in runs:
+            out.append((q["line"], f"{said} names {run}, which is no interview of this study. Its interviews: "
+                        f"{', '.join(runs)}."))
+        else:
+            held = logs.setdefault(run, exchanges(pl.read_turns(sd, run)))
+            if n not in held:
+                out.append((q["line"], f"{said} names exchange {n} of {run}, which its turn log does not have: it has "
+                            + (f"exchanges 1 to {max(held)}." if held else "no exchange.")))
+            elif not any(said_in(q["words"], held[n][part]) for part in ("question", "answer")):
+                others = [str(k) for k, x in held.items()
+                          if any(said_in(q["words"], x[part]) for part in ("question", "answer"))]
+                out.append((q["line"], f"{said} is not in exchange {n} of {run}, in its question or in its answer"
+                            + (f". Those words are in exchange {pl.listed(others)}" if others else "")
+                            + f". Read {pl.INTERVIEWS}/{run}.md."))
+            else:
+                verified += 1
+    # Every attribution that is none of the above: whatever stands before it was not checked.
+    taken = {q["at"] for q in found if q.get("at")}
+    unread = {q["line"] for q in found if q.get("unpaired")}  # said already: nothing on the line was checked
+    for a in attributions(text, runs):
+        if (a["line"], a["column"]) in taken or a["line"] in unread:
+            continue
+        before = " ".join(a["before"].split()[-SHOWN_WORDS // 2:])
+        out.append((a["line"], f"{a['bracket']} is in {a['where']}, where nothing is read, so no quotation before it "
+                    "was checked. A quotation and its attribution go in the running text." if a["where"] else
+                    f"{a['bracket']} follows no quotation that was read: "
+                    + (f"before it is {before}, and no stretch between double quotation marks ends there" if before
+                       else "nothing is before it on its line")
+                    + ". Words quoted go between double quotation marks with the bracket at once after, and what is "
+                    f"told in other words names its exchange in words, as in exchange {a['exchange']} of {a['run']}."))
+    lines = [f"Line {line}: {sentence}" for line, sentence in sorted(out, key=lambda found: found[0])]
+    if not verified:
+        lines.append(f"No quotation of {SYNTHESIS} was verified, so it has none a reader can rely on. The summary must "
+                     "quote the participants (its section 7, Quotes): each quotation between double quotation marks, "
+                     "then at once its run and its one exchange in brackets, taken with its attribution from "
+                     '"Verified quotes" in analysis/quant.md.')
+    return lines
+
+
+def quote_check(cfg: dict) -> tuple[list[str], bool]:
+    """Check the quotations of an interview study's synthesis, analysis/SYNTHESIS.md, and write
+    what was found to analysis/quote-check.md: (the lines of that file, which are what the
+    caller prints, whether anything is listed). The "quotes" command and the launcher, when a
+    writer job ends done, both call this. The file carries the synthetic panel notice
+    (pl.NOTICE) under its title, as every report of an interview study does where it is
+    written, so that it reads the same in the study, in an archive of it, and when the check is
+    run again inside the archive. Exits when there is no synthesis to read, or the report
+    cannot be written."""
+    sd = cfg["_dir"]
+    try:
+        text = (sd / SYNTHESIS).read_text()
+    except FileNotFoundError:
+        raise SystemExit(f"No {SYNTHESIS} to check. The writer writes it: launch.py {sd} run --role writer.")
+    except (OSError, UnicodeDecodeError) as err:
+        raise SystemExit(f"Cannot read {sd / SYNTHESIS}: {err}")
+    found = [q for q in quotations(text) if q.get("marks") == "double"]
+    wrong = quote_problems(cfg, text)  # never empty with nothing found: a synthesis that quotes nobody is listed
+    lines = ["# Quote check", "", pl.NOTICE, "",
+             f"{SYNTHESIS} has {pl.plural(len(found), 'stretch', 'stretches')} between double quotation marks. "
+             + (f"{pl.plural(len(wrong), 'problem')}:" if wrong else
+                "Each is a quotation with its run and exchange, and its words are in the exchange it names. No "
+                "attribution stands anywhere else.")]
+    if wrong:
+        lines += ["", *(f"- {problem}" for problem in wrong), "",
+                  "A quotation is the words between double quotation marks, then at once its run and its one "
+                  'exchange in brackets, as in "I was still waiting on the Monday." (P02-a, 7), and the words are one '
+                  "unbroken stretch of that exchange's question or answer. Words that are nobody's, such as a term, a "
+                  "title or a question proposed for later, go in italics or in code, never between double quotation "
+                  "marks. Single quotation marks and guillemets are read as neither, and a bracket of a run id and a "
+                  "number is kept for a quotation's attribution. A mark that stands alone on its line is closed or "
+                  "taken out.", "",
+                  "Nothing was changed and nothing was sent back to the writer. Put each right by hand from the "
+                  f"transcript, {pl.INTERVIEWS}/<run id>.md, or delete {SYNTHESIS} and run the writer again (launch.py "
+                  f"{sd} run --role writer). Then run interview.py {sd} quotes until it exits 0: a synthesis is not "
+                  "handed over before it does."]
+    with pl.output(sd / QUOTE_CHECK) as f:
+        f.write("\n".join(lines) + "\n")
+    return lines, bool(wrong)
+
+
 # ---------------------------------------------------------------- the commands
 
 def conversations(runs: list[dict]) -> list[str]:
@@ -1163,11 +1925,20 @@ def conversations(runs: list[dict]) -> list[str]:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
-    ap.add_argument("cmd", choices=["render"])
+    ap.add_argument("cmd", choices=["render", "quotes"])
     ap.add_argument("--runs", help="render: comma-separated run ids (default: every interview with a turn on record)")
     args = ap.parse_args()
     import launch  # here and never at the top: launch.py imports this module
     cfg = pl.load_study(args.study_dir)
+    if args.cmd == "quotes":
+        if cfg["type"] != "interview":
+            raise SystemExit("quotes checks the synthesis of an interview study, where every quotation names its "
+                             f"run and exchange: a {cfg['type']} study has none to check.")
+        if args.runs:
+            raise SystemExit("quotes takes no --runs: it checks every quotation of the synthesis.")
+        lines, wrong = quote_check(cfg)
+        print("\n".join(lines), flush=True)
+        raise SystemExit(1 if wrong else 0)
     sd, held = cfg["_dir"], conversations(pl.read_runs(cfg["_dir"]))
     if not held:
         raise SystemExit("This study has no interview, so it has no transcript to write.")

@@ -12,8 +12,9 @@ Switched on by $FAKE_PANEL, a directory the test owns:
 
 The run is the one whose persona file the prompt names (.../personas/<pid>-<slug>--<key>.md is
 run <pid>-<key>). A prompt with a "## Produce `<file>`" or "## Output: `<file>`" heading is a
-job's brief instead: .../analysis/qual-<n>.md is the job analyst-<n> and .../analysis/SYNTHESIS.md
-the job writer, and that file is what the job writes. A resume message names no file, so a
+job's brief instead: .../analysis/qual-<n>.md is the job analyst-<n>, .../analysis/SYNTHESIS.md
+the job writer and, in an interview study, .../analysis/critique-<n>.md the job critic-<n> and
+.../analysis/themes.md the job themes, and that file is what the job writes. A resume message names no file, so a
 resumed process finds its run by its session id, which the fake recorded at launch. A resume of
 a session it has no record of ends as the real CLI ends one: its own message on stderr, nothing
 on stdout, exit code 1. A test loses a session by deleting sessions/<session id>.json.
@@ -23,6 +24,8 @@ Steps, in the order given:
     write:<n>       append the next n concept sections, scored, in the file's review order
     write:all       append every concept section still missing, then the final sections.
                     For a job, any write step writes its whole output file
+    text:<words>    a job: write its output file with the words as what it found, in place of
+                    the usual line: a synthesis with a quotation in it
     steps:<n>       usability: how many steps each task attempted from here on takes (default 2)
     act:<n>         usability: take n steps of the next task and write no section for it: a
                     task that was under way when the run was cut off
@@ -99,7 +102,9 @@ from pathlib import Path
 
 PATIENCE = 30  # seconds a blocked step waits before giving up, so a broken test leaves no process behind
 PERSONA_FILE = re.compile(r"(\S+/personas/([^/\s-]+)-[^/\s]*--([^/\s]+)\.md)")
-JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(?:qual-(\d+)|SYNTHESIS)\.md)`", re.M)
+JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(qual|critique|themes|SYNTHESIS)(?:-(\d+))?\.md)`",
+                        re.M)
+JOBS = {"qual": "analyst", "critique": "critic", "themes": "themes", "SYNTHESIS": "writer"}  # a job, by its file
 DOCUMENT = "I could not write the file, so here is the document.\n\n# Findings\n\n- From the reply.\n```"
 
 
@@ -279,7 +284,7 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
     if resumed:
         run, file = json.loads(known.read_text())
     elif job:
-        run, file = (f"analyst-{job.group(2)}" if job.group(2) else "writer"), job.group(1)
+        run, file = JOBS[job.group(2)] + (f"-{job.group(3)}" if job.group(3) else ""), job.group(1)
     elif named:
         run, file = f"{named.group(2)}-{named.group(3)}", named.group(1)
     else:
@@ -320,6 +325,8 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
         verb, _, arg = step.partition(":")
         if verb == "write":
             write(file, arg)
+        elif verb == "text":
+            file.write_text(f"# Findings\n\n{arg}\n")
         elif verb == "final":
             write(file, "final")
         elif verb == "steps":

@@ -322,7 +322,10 @@ def scan_study(cfg: dict) -> tuple[dict, dict, list[str], int]:
 def check_interviews(cfg: dict) -> tuple[list[str], int]:
     """The checks of an interview study (module docstring): the lines of the table and what
     stands under it, and how many interviews have a blocking problem. Every interview the study
-    has is checked, one that was never started too, each from its turn log in interviews/."""
+    has is checked, one that was never started too, each from its turn log in interviews/. The
+    report carries the synthetic panel notice (pl.NOTICE) under its title, as every report of an
+    interview study does where it is written: the file is then the same in the study, in an
+    archive of it, and when this script runs again inside the archive."""
     sd = cfg["_dir"]
     entries = pl.read_runs(sd) if (sd / "runs.json").exists() else pl.planned_runs(cfg)
     entries = {e["run"]: e for e in entries if e["role"] == "panellist"}
@@ -336,7 +339,8 @@ def check_interviews(cfg: dict) -> tuple[list[str], int]:
     bad = sum(bool(blocking) for _, _, blocking in found)
     expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
     held = sum(pl.turn_log(sd, r["run"]).exists() for r in records)
-    lines = ["# Run checks", "", *(["| Run | Blocking | Notes |", "|---|---|---|", *rows, ""] if rows else [])]
+    lines = ["# Run checks", "", pl.NOTICE, "",
+             *(["| Run | Blocking | Notes |", "|---|---|---|", *rows, ""] if rows else [])]
     lines += [f"{pl.plural(held, 'interview')} with a turn log, of {expected} expected; {bad} with blocking "
               "problems." + ("" if rows else " Nothing blocks, and nothing was noted of any interview.")]
     lines += interview.advice(cfg, found)
