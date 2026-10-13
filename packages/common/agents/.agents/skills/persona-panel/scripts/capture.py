@@ -27,7 +27,8 @@ order to go through them and never named after the file:
   image.<type>            an image, copied as it is
   part-NN.png             the same image cut into pieces from top to bottom, each overlapping the
                           next a little, when it is much taller than a screen: a very tall image is
-                          shrunk by whatever reads it until its text cannot be read. Needs ImageMagick
+                          shrunk by whatever reads it until its text cannot be read. Needs
+                          ImageMagick
   page-NN.png             the pages of a PDF, rendered with Poppler's pdftoppm, the long side
                           study.json capture.pdf_pixels (default 1600)
   page-text.txt           the text of a PDF, from Poppler's pdftotext -layout (set out as on the
@@ -69,6 +70,8 @@ concept no longer has are removed, so a panellist never reads a page that is gon
 Then scans the text of every kind for study.json "forbidden_terms" (build notes, internal terms)
 and "leak_terms", and reports any hit, because panellists read everything literally. It also
 brings forms.json up to date with the files it read (panel_lib.py, "Forms").
+
+A usability study has nothing to capture, and is refused in one line.
 
 Usage: capture.py <study-dir> [--label A] [--page index] [--jobs 3]
 """
@@ -381,6 +384,9 @@ def main():
     args = ap.parse_args()
 
     cfg = pl.load_study(args.study_dir)
+    if cfg["type"] == "usability":
+        raise SystemExit("A usability study has nothing to capture: its panellists use the running product in a "
+                         f"browser. Next: launch.py {cfg['_dir']} plan")
     sd = cfg["_dir"]
     materials = sd / "panel" / "materials"
     clear_scratch(sd, materials)

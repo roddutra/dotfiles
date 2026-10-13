@@ -23,6 +23,21 @@ Steps, in the order given:
     write:<n>       append the next n concept sections, scored, in the file's review order
     write:all       append every concept section still missing, then the final sections.
                     For a job, any write step writes its whole output file
+    steps:<n>       usability: how many steps each task attempted from here on takes (default 2)
+    act:<n>         usability: take n steps of the next task and write no section for it: a
+                    task that was under way when the run was cut off
+    intent:<n>      usability: write the intent entry of step n of the next task and nothing
+                    more: a panellist that begins a step, as one that ignores its step limit does.
+                    intent:<n>@<attempt> writes it under that attempt number, whatever number the
+                    run was told: a panellist that numbers a task's attempts itself
+    outcome:<words> usability: what the Outcome field of each task section written from here on
+                    opens with (default "completed")
+    leave           usability: the last step of each task attempted from here on leaves the task's
+                    form for the page /help: a panellist that goes looking for help, and stops
+    scribble        usability: append to the step log what no panellist should: a line that is
+                    no JSON, an entry for a task the study does not have, numbered far above any
+                    limit, an intent for step 1 of the first task again, and for the next task an
+                    entry that is no step at all, under attempt 999
     final           append the final sections only
     meddle:<run id> append a line to the persona file of another run, <pid>-<key>: a panellist
                     writing outside its own file
@@ -38,6 +53,7 @@ Steps, in the order given:
     starts:<n>      block until n runs have started in all (two runs holding here overlap for sure)
     stubborn        from now on, SIGTERM does not end the process: it appends one more section
                     at once, logs "term" and carries on
+    deaf            from now on, SIGTERM does not end the process: it logs "term" and carries on
     spawn           start a process of its own that ignores SIGTERM and outlives this one, and
                     log its pid: what a CLI leaves behind
     hang            print a run cut off part-way, then sleep until killed
@@ -48,9 +64,19 @@ Steps, in the order given:
 
 Sections have one score column for each factor in the score table of the panel instructions.
 
+A usability run is known by the "## Tasks" list in its persona file. Its units are the tasks
+listed there, in that order, and "write" attempts each before it writes the section: for every
+step an intent entry, a screenshot file and a result entry, in panel/evidence/<run id>/, as the
+usability instructions set them out. Every result entry gives the address <base>/<task>/form,
+with the step in its query, <base> being where the instructions say the product runs. A task
+that the resume message tells to start again as attempt n is logged as that attempt, with its
+screenshots named for it.
+
 $FAKE_CLI_LOG gets one JSON line per event instead of one per invocation:
 
-    {"event": "start", "cli", "run", "attempt", "resumed", "session", "pid", "argv", "stdin", "cwd"}
+    {"event": "start", "cli", "run", "attempt", "resumed", "session", "pid", "argv", "stdin", "cwd",
+     "browser": {"env", "daemon", "up"}, "account"}  (browser(), below; "account" is what
+                                               panel/scratch/<run id>/account.json held, null without one)
     {"event": "waiting", "run", "gate"}       {"event": "term", "run"}
     {"event": "spawn", "run", "pid"}
     {"event": "end", "run", "pid", "code"}    (absent when the process was killed)
@@ -83,19 +109,80 @@ def events():
     return [e for e in map(json.loads, lines) if "event" in e]
 
 
+def browser():
+    """The agent-browser session this process was given: the AGENT_BROWSER_* variables it sees, the
+    session's daemon as fake_agent_browser.py records it, and whether that process is running now."""
+    seen = {k: v for k, v in os.environ.items() if k.startswith("AGENT_BROWSER_")}
+    try:
+        daemon = int(Path(seen["AGENT_BROWSER_SOCKET_DIR"], seen["AGENT_BROWSER_SESSION"] + ".pid").read_text())
+        os.kill(daemon, 0)
+    except (KeyError, OSError, ValueError):
+        return {"env": seen, "daemon": None, "up": False}
+    return {"env": seen, "daemon": daemon, "up": True}
+
+
 def factors(path):
     """How many scores the panel instructions ask for in a section: the columns of their template row."""
     instructions = (path.parents[1] / "_panel-instructions.md").read_text()
     return re.search(r"^\| n(?: \| n)* \|$", instructions, re.M).group(0).count("n")
 
 
+TASK_LIST = re.compile(r"^\d+\. \*\*Task (\w+)\.\*\*", re.M)
+AGAIN = re.compile(r'Task (\w+) was under way.*?"attempt\\?": (\d+)')
+# How this process attempts tasks: play() sets it.
+USABILITY = {"steps": 2, "attempts": {}, "run": None, "outcome": "completed", "leave": False}
+INTENT = {"phase": "intent", "sees": "A page.", "expects": "The next page.", "action": "Click the button."}
+
+
+def step_log(path):
+    return path.parents[1] / "evidence" / USABILITY["run"] / "steps.jsonl"
+
+
+def next_task(path):
+    text = path.read_text()
+    return next(t for t in TASK_LIST.findall(text) if not re.search(rf"^### Task {t}\b", text, re.M))
+
+
+def act(path, task, steps):
+    """Take `steps` steps of a task: two entries in the run's step log and a screenshot for each."""
+    evidence = step_log(path).parent
+    attempt = USABILITY["attempts"].get(task, 1)
+    base = re.search(r"running at `([^`]+)`", (path.parents[1] / "_panel-instructions.md").read_text()).group(1)
+    with open(evidence / "steps.jsonl", "a") as log_file:
+        for n in range(1, steps + 1):
+            shot = f"{task}-{n}.png" if attempt == 1 else f"{task}-a{attempt}-{n}.png"
+            who = {"task": task, "attempt": attempt, "step": n}
+            log_file.write(json.dumps({**who, **INTENT}) + "\n")
+            (evidence / shot).write_bytes(b"\x89PNG fake")
+            page = "help" if USABILITY["leave"] and n == steps else f"{task}/form?step={n}"
+            log_file.write(json.dumps({**who, "phase": "result", "happened": "It moved on.",
+                                       "url": f"{base}/{page}", "screenshot": shot}) + "\n")
+
+
+def attempt_tasks(path, count):
+    """write(), for a usability run: attempt and write up the next `count` tasks."""
+    text = path.read_text()
+    missing = [task for task in TASK_LIST.findall(text) if not re.search(rf"^### Task {task}\b", text, re.M)]
+    n = factors(path)
+    row = "| " + " | ".join(["7"] * n) + " |"
+    for task in missing if count == "all" else [] if count == "final" else missing[:int(count)]:
+        act(path, task, USABILITY["steps"])
+        text += f"### Task {task}\n**Outcome:** {USABILITY['outcome']}, as it went.\n\n{row.replace('7', 'F')}\n" \
+                f"|{'---|' * n}\n{row}\n\n"
+    if count in ("all", "final"):
+        text += "## Overall verdict\nIt was fine.\n\n## Out of character: researcher notes\nNotes.\n"
+    path.write_text(text)
+
+
 def write(path, count):
     """Append `count` concept sections ("all": every one missing, then the final sections).
-    A job's output file is written whole instead."""
+    A job's output file is written whole instead, and a usability run attempts its tasks."""
     if path.parent.name == "analysis":
         path.write_text(f"# Findings\n\n- Written to {path.name} by the job itself.\n")
         return
     text = path.read_text()
+    if "\n## Tasks\n" in text:
+        return attempt_tasks(path, count)
     listed = re.search(r"\| Review order \| (.+?) \|", text)  # a study with one concept lists no order
     order = ([x.strip() for x in listed.group(1).split(",")] if listed else
              re.findall(r"^### Concept (\w+)$", (path.parents[1] / "_panel-instructions.md").read_text(), re.M))
@@ -156,8 +243,11 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
     steps = (plan.get(run) or [["write:all"]])
     steps, file = steps[min(attempt, len(steps) - 1)], Path(file)
 
+    lent = file.parents[1] / "scratch" / run / "account.json"
+    USABILITY.update(run=run, attempts={task: int(n) for task, n in AGAIN.findall(prompt)})
     log(event="start", cli=cli, run=run, attempt=attempt + 1, resumed=resumed, session=session, pid=os.getpid(),
-        argv=sys.argv[1:], stdin=prompt, cwd=os.getcwd())
+        argv=sys.argv[1:], stdin=prompt, cwd=os.getcwd(), browser=browser(),
+        account=json.loads(lent.read_text()) if lent.exists() else None)
     cut_off = recording("killed").splitlines(keepends=True)
     sys.stdout.write("".join(cut_off[:1]))  # a CLI that prints events names its session before anything else
     sys.stdout.flush()
@@ -181,6 +271,26 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
             write(file, arg)
         elif verb == "final":
             write(file, "final")
+        elif verb == "steps":
+            USABILITY["steps"] = int(arg)
+        elif verb == "act":
+            act(file, next_task(file), int(arg))
+        elif verb == "intent":
+            task, (n, _, numbered) = next_task(file), arg.partition("@")
+            with open(step_log(file), "a") as steps_file:
+                steps_file.write(json.dumps({"task": task, "attempt": int(numbered or USABILITY["attempts"].get(task, 1)),
+                                             "step": int(n), **INTENT}) + "\n")
+        elif verb == "outcome":
+            USABILITY["outcome"] = arg
+        elif verb == "leave":
+            USABILITY["leave"] = True
+        elif verb == "scribble":
+            with open(step_log(file), "a") as steps_file:
+                steps_file.write("not an entry\n" + json.dumps({"task": "T99", "attempt": 1, "step": 99, **INTENT})
+                                 + "\n" + json.dumps({"task": TASK_LIST.findall(file.read_text())[0], "attempt": 1,
+                                                      "step": 1, **INTENT})
+                                 + "\n" + json.dumps({"task": next_task(file), "attempt": 999, "step": "one",
+                                                      "phase": "note"}) + "\n")
         elif verb == "meddle":
             pid, _, key = arg.partition("-")
             other = next(file.parent.glob(f"{pid}-*--{key}.md"))
@@ -203,6 +313,8 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
             block(lambda: sum(e["event"] == "start" for e in events()) >= int(arg), f"{arg} runs to start")
         elif verb == "stubborn":
             signal.signal(signal.SIGTERM, on_term)
+        elif verb == "deaf":
+            signal.signal(signal.SIGTERM, lambda *_: log(event="term", run=run))
         elif verb == "spawn":  # the last argument does nothing: it marks the process as this test's
             left = subprocess.Popen(
                 [sys.executable, "-c", "import time; time.sleep(600)", str(home)], stdin=subprocess.DEVNULL,

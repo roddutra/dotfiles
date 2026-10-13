@@ -3,10 +3,12 @@
 
 Usage:
   followup.py <study-dir> ask --runs <ids> --question-file <file> [--skip-unfit]
-  followup.py <study-dir> ask --runs all --question-file <file>      # every finished panellist run
-  followup.py <study-dir> ask --runs <ids>|all --question-file <file> --dry-run   # what it would ask and cost
-  followup.py <study-dir> list [--json]                              # the questions asked, and how each run answered
-                                                                     # (settles what a killed launcher left)
+  followup.py <study-dir> ask --runs all --question-file <file>   # every finished panellist run
+  followup.py <study-dir> ask --runs <ids>|all --question-file <file> --dry-run
+                                                                  # what it would ask and cost
+  followup.py <study-dir> list [--json]                           # the questions asked, and how
+                                                                  # each run answered (settles
+                                                                  # what a killed launcher left)
 
 One "ask" is one follow-up: the question in the file, sent to every run named, under the next
 number of the study. Each panellist appends a "## Follow-up <n>" section to its own persona file
@@ -30,7 +32,9 @@ What it does, on a study that runs through runners:
   asked. To put a question to a run that could not be reached, ask again: it becomes the next
   follow-up.
 - The question is sent word for word, inside a fixed frame (assets/followup-message.md) that says
-  what a follow-up is and what the panellist may do. An empty question file is refused.
+  what a follow-up is and what the panellist may do. An empty question file is refused. A run of
+  a usability study gets the frame assets/usability-followup-message.md and no browser session:
+  its test account is gone, so it answers from what it saw, its step log and its screenshots.
 - Each run has limits.followup for each question, 5 minutes and $0.50 unless study.json says
   otherwise, apart from the run's own limits. Before anything starts, the number of runs and
   the most they can use are printed. That spend is outside the plan's ceiling.
@@ -76,16 +80,19 @@ import launch_plan as planning  # noqa: E402
 import panel_lib as pl  # noqa: E402
 import runners  # noqa: E402
 
-MESSAGE = "followup-message.md"  # what a panellist is sent: the question, word for word, inside this frame
+# What a panellist is sent: the question, word for word, inside the frame for its type of study.
+MESSAGE = {"review": "followup-message.md", "usability": "usability-followup-message.md"}
 DRY_RUN = "Dry run: nothing was asked and nothing was recorded. Leave out --dry-run to ask."
 
 say, agree, plural = launch.say, pl.agree, pl.plural
 
 
-def message(number: int, question: str, file: Path) -> str:
+def message(number: int, question: str, file: Path, study: str = "review") -> str:
     """The message that puts follow-up question `number` to the panellist whose persona file is
-    file: assets/followup-message.md with its placeholders filled."""
-    return pl.fill_brief(MESSAGE, {"NUMBER": number, "QUESTION": question, "PERSONA_FILE": file})
+    file: assets/followup-message.md with its placeholders filled, or for a run of a usability
+    study assets/usability-followup-message.md, which says that its browser and its test account
+    are gone."""
+    return pl.fill_brief(MESSAGE[study], {"NUMBER": number, "QUESTION": question, "PERSONA_FILE": file})
 
 
 def read_question(path: str | None) -> str:
@@ -246,7 +253,7 @@ def ask(args, cfg: dict) -> int:
         sup = launch.Supervisor(cfg, runs, args.grace, args.poll, stop=stop)
         sup.reconcile()  # an earlier follow-up that no launcher lived to settle is settled first
         fit, number = choose(cfg, runs, args.runs, args.skip_unfit), next_number(cfg)
-        sup.question = {"n": number, "message": lambda e: message(number, question, sd / e["file"])}
+        sup.question = {"n": number, "message": lambda e: message(number, question, sd / e["file"], cfg["type"])}
         say(opening(number, fit), *allowance_lines(cfg, fit))
         pl.write_followups(sd, [*pl.read_followups(sd), {
             "n": number, "question": question, "asked": round(time.time()), "mode": "runner",

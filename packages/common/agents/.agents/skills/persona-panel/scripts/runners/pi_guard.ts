@@ -15,7 +15,9 @@
 //   is under the path, and neither tool follows a symbolic link it finds there.
 // - bash: refused, unless the run was launched with `--panel-guard browse`. Then one
 //   agent-browser command is allowed and nothing else: no second command, pipe, redirection,
-//   substitution, variable or assignment. Its arguments are plain words or quoted text.
+//   substitution, variable or assignment. Its arguments are plain words or quoted text. The
+//   browser session a command reaches is named in the run's environment, which the launcher
+//   sets: with no assignment allowed, a command cannot name another that way.
 // - any other tool: refused.
 //
 // It fails closed. Only this file defines --panel-guard, so Pi refuses to start when the file

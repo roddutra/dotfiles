@@ -8,8 +8,9 @@ limit, the stop, ending the processes a CLI leaves behind, and the record of whe
 attempt ended. Standard library only, and nothing of the skill is imported: this start-up is
 paid once per attempt.
 
-    run_watchdog.py <pid fd> <end record> <seconds> <grace> <command> [<argument> ...]
+    run_watchdog.py [--hooks <json>] <pid fd> <end record> <seconds> <grace> <command> [<argument> ...]
 
+    --hooks      commands to run around the CLI (see "Hooks"): one JSON object
     pid fd       the attempt's pid file (logs/<run id>.<attempt>.pid), open and locked by the
                  launcher that starts this process
     end record   the file to write when the attempt has ended (logs/<run id>.<attempt>.end)
@@ -19,7 +20,7 @@ paid once per attempt.
 
 The launcher gives this process the CLI's standard input, output and error, its environment and
 its working directory, and the CLI inherits them. Once the CLI is running the watchdog lets go
-of all three streams, and it writes to nothing but its two files.
+of all three streams, and it writes to nothing but its two files. Its hooks write to a third.
 
 What it does, in order:
 
@@ -28,23 +29,58 @@ What it does, in order:
 2. Writes the pid file, two lines: "<pid> <start identity>" for itself, then for the CLI. The
    identity is the process's start time (process()), which tells it from a later process that
    was given the same id.
-3. Lets the child become the CLI. The lock on the pid file drops when both have closed it: the
-   child by becoming the CLI, the watchdog once it knows the child did, or once it has written
-   the end record of a child the system refused. So whoever waits for that lock (launch.py
-   recorded()) reads about a process that is the CLI, or one that never will be. A child whose
-   watchdog dies before step 2 is done never becomes the CLI: nothing runs unrecorded.
+3. Runs the "before" hook, when there is one, with its process on a third line of the pid file
+   for as long as it runs (see "Hooks"). Then lets the child become the CLI, or, when the
+   hook failed, lets it end without becoming anything. The lock on the pid file drops when
+   both have closed it: the child by becoming the CLI, the watchdog once it knows the child
+   did, or once it has written the end record of a child that never became the CLI. So
+   whoever waits for that lock (launch.py recorded()) reads about a process that is the CLI,
+   or one that never will be. A child whose watchdog dies before this step is done never
+   becomes the CLI: nothing runs unrecorded.
 4. Waits for the CLI to end, and learns that it has without reaping it (ended()). At the time
    limit, or when asked to stop, it sends SIGTERM to the CLI's process group and, after the
    grace, SIGKILL.
 5. When the CLI has ended, for whatever reason, ends what is left of its process group the
    same way: SIGTERM unless the group already had one, what is left of the grace, then SIGKILL.
    A process that left the group by starting a session of its own is beyond its reach.
-6. Reaps the CLI, writes the end record in one step, and exits.
+6. Reaps the CLI, runs the "after" hook when there is one, writes the end record in one step,
+   and exits.
+
+Hooks. The JSON object is {"before": [<command>, <argument>, ...], "after": [...], "seconds":
+{"before": <n>, "after": <n>}, "log": <file>}. Each command is optional. The watchdog knows
+nothing of what they do: launch.py uses them for whatever an attempt needs that must not depend
+on a launcher being alive, such as a browser session that is started for the CLI and stopped
+after it. A hook runs to its end in a process group of its own, in the CLI's working directory
+and environment, with nothing on its standard input and its output appended to "log", which is
+opened as every file of an attempt is (see "The files of an attempt"): with a symbolic link or
+a FIFO at that name the command is not run, and the hook has failed. It
+succeeds by exiting with code 0. One that outlasts its seconds (HOOK when none are given) is
+killed with its group, and has failed. A request to stop does not cut a hook short.
+- "before" runs once the attempt is on record in the pid file and before the CLI exists. When it
+  fails the CLI is never executed: the end record says so under "refused", as it does of a
+  command the system refused. Its process, the leader of its group, is the third line of the pid
+  file, "<pid> <start identity>", from before it can do anything until it has ended and been
+  reaped: it waits for that line as the CLI's child waits for its own, and ends without running
+  the command when the watchdog dies first. The line is taken out before the CLI is let go. So
+  a pid file with a third line is of an attempt whose watchdog was killed while "before" ran,
+  whose CLI was never executed, and whose "before" may still be running with no one to wait
+  for it: launch.py ends it before it undoes what the hook was to do.
+- "after" runs once "before" has been attempted, however that and the CLI ended: by itself, at
+  the time limit, on a request to stop, or never having been executed. It runs after the CLI
+  and its process group have gone and before the end record is written, so a reader of the end
+  record knows that it has run. The time it takes is not in "ended".
 
 The invariant: the CLI, the leader of its group, is reaped only after the last signal to that
 group. Until then it is at least a zombie, so its process id, which is the group's id, cannot
 have been given to another process or group, and every signal sent here reaches this attempt's
 processes or nothing. After the reap the group is never signalled again.
+
+The files of an attempt. Whatever an attempt keeps in logs/ and reads back is read as a file
+that another process may have put there, here and in launch.py and browser_session.py, which
+use the two functions of this file for it. opened() opens one without following a symbolic
+link and without waiting for anyone, as an open of a FIFO would, and gives it up unread
+(Unsafe) unless it is a regular file of this user of a record's size. fresh() makes one anew:
+what had its name is unlinked, never followed and never written through.
 
 The end record is one JSON object:
 
@@ -57,6 +93,8 @@ The end record is one JSON object:
     argv       the command
     error      present only when the watchdog itself failed while waiting: what went wrong. It
                has then killed the process group
+    hooks      present only when the watchdog was given hooks: {"before", "after"}, each null
+               when the hook succeeded or there was none, else what went wrong, in words
 
 Signals. SIGTERM is a request to stop the CLI: launch.py sends it for "stop" and for its own
 SIGINT, SIGTERM and SIGHUP. A second one skips the grace, also for a process already being
@@ -65,14 +103,18 @@ Ctrl-C reaches an attempt only as a stop request from its launcher, and never en
 watchdog before it has written its record. The CLI gets back the signal settings the watchdog
 was started with. A watchdog that is killed outright leaves no end record: launch.py then kills
 the process group recorded in the pid file if its leader is still running, and otherwise only
-names what is left of it (launch.py kill_group()).
+names what is left of it (launch.py kill_group()): the group of a "before" hook that was still
+running, then the CLI's. Its "after" hook has then not run: what the hook was to undo is the
+launcher's to undo.
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import select
 import signal
+import stat
 import sys
 import time
 
@@ -81,6 +123,43 @@ SWEEP = 0.02    # seconds between looks at a process group whose leader has ende
 GIVE_UP = 5.0   # seconds a process group gets to disappear after SIGKILL
 LOOK = 5.0      # seconds between looks at a CLI where os.waitid is missing: see ended()
 RESTORED = ("SIGPIPE", "SIGXFSZ")  # ignored by Python at start-up: the CLI gets the system's default
+HOOK = 60.0     # seconds a hook gets when the launcher names none
+RECORD = 1 << 20  # bytes a record in logs/ may have, and far more than one holds: a larger file is not read as one
+
+
+class Unsafe(OSError):
+    """A file that is not opened as an attempt's: a symbolic link, or anything but a regular file
+    of this user that is no larger than it may be."""
+
+
+def opened(path, flags: int = os.O_RDONLY, mode: int = 0o644, dir_fd: int | None = None, most: int = RECORD) -> int:
+    """Open a file an attempt keeps in logs/, which another process may have put there, to read
+    it or to work on it: a descriptor. A symbolic link is never followed, and the open never
+    waits, as it would for the other end of a FIFO. Raises Unsafe, with nothing read, unless
+    the descriptor is of a regular file of this user that holds at most `most` bytes."""
+    try:
+        fd = os.open(path, flags | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, mode, dir_fd=dir_fd)
+    except OSError as err:
+        if err.errno in (errno.ELOOP, errno.EMLINK):  # what O_NOFOLLOW says of a link, on Linux and macOS, and on BSD
+            raise Unsafe(f"{path} is a symbolic link") from None
+        raise
+    st = os.fstat(fd)
+    why = ("is not a regular file of this user" if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid()
+           else f"holds {st.st_size} bytes, more than such a file may" if st.st_size > most else None)
+    if why:
+        os.close(fd)
+        raise Unsafe(f"{path} {why}")
+    return fd
+
+
+def fresh(path, flags: int = os.O_WRONLY, mode: int = 0o644) -> int:
+    """Make a file anew at a path, to write it: a descriptor. Whatever had that name is unlinked
+    first, a symbolic link and not what it points at, and none is followed or written through."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    return os.open(path, flags | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, mode)
 
 
 def process(pid) -> tuple[str, str] | None:
@@ -138,7 +217,7 @@ def write_end(path: str, record: dict):
     """Write the end record in one step, so a reader never sees half of it."""
     import json  # not needed until an attempt has ended, and the CLI starts sooner without it
     tmp = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.{os.getpid()}.tmp")
-    with open(tmp, "w") as f:
+    with os.fdopen(fresh(tmp), "w") as f:
         f.write(json.dumps(record) + "\n")
         f.flush()
         os.fsync(f.fileno())
@@ -159,6 +238,80 @@ def become(argv: list[str], inherited: dict, go: int, held: int, said: int):
         os.write(said, str(err).encode())
     finally:
         os._exit(126)
+
+
+def hook(hooks: dict, name: str, inherited: dict, wake: int, note: int | None = None) -> str | None:
+    """Run the attempt's "before" or "after" command to its end (see "Hooks"). None when there is
+    no such command or it exited with code 0, else what went wrong, with the last line it wrote.
+    note is the open pid file, for "before": the command's process is on record there, as one
+    more line, from before it runs the command until it has been reaped."""
+    argv, seconds = hooks.get(name), float((hooks.get("seconds") or {}).get(name) or HOOK)
+    if not argv:
+        return None
+    try:
+        try:
+            written = os.path.getsize(hooks["log"])
+        except OSError:
+            written = 0
+        go, go_w = os.pipe()
+        pid = os.fork()
+        if not pid:
+            try:
+                os.setpgid(0, 0)
+                for sig, was in inherited.items():
+                    signal.signal(sig, was)
+                os.close(go_w)  # the watchdog's end: with it open here, a dead watchdog would never be noticed
+                if os.read(go, 1):  # on record, when it is to be: a watchdog that died first wrote nothing
+                    out = opened(hooks["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND, most=sys.maxsize)
+                    os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
+                    os.dup2(out, 1)
+                    os.dup2(out, 2)
+                    try:
+                        os.execvp(argv[0], argv)
+                    except OSError as err:
+                        os.write(2, f"{argv[0]}: {err}\n".encode())
+            finally:
+                os._exit(127)
+        os.close(go)
+        try:
+            os.setpgid(pid, pid)  # here too, so that the group is there whichever of the two runs first
+        except OSError:
+            pass
+        at = None
+        try:
+            if note is not None:
+                at = os.lseek(note, 0, os.SEEK_CUR)
+                os.write(note, f"{pid} {identity(pid) or ''}\n".encode())
+            os.write(go_w, b"\n")
+        finally:
+            os.close(go_w)  # with nothing written, the child ends without running the command
+        give_up, late = time.time() + seconds, False
+        while True:
+            done, status = os.waitpid(pid, os.WNOHANG)
+            if done:
+                break
+            if time.time() >= give_up:
+                signal_group(pid, signal.SIGKILL)  # not reaped yet, so the group's id is still its own
+                status, late = os.waitpid(pid, 0)[1], True
+                break
+            nap(wake, give_up - time.time())
+        if at is not None:  # reaped: its id is no longer its own, and no longer on record
+            os.ftruncate(note, at)
+            os.lseek(note, at, os.SEEK_SET)
+        if late:
+            return f'its "{name}" command did not end within {seconds:g} s and was killed'
+        if status == 0:
+            return None
+        how = f"signal {os.WTERMSIG(status)}" if os.WIFSIGNALED(status) else f"exit code {os.WEXITSTATUS(status)}"
+        try:
+            with os.fdopen(opened(hooks["log"]), errors="replace") as f:
+                f.seek(written)
+                said = [line.strip() for line in f.read().splitlines() if line.strip()]
+        except OSError as err:  # no log of the hook's to read: a link, a FIFO, or none
+            said = [str(err)]
+        return f'its "{name}" command failed ({how})' + (f": {said[-1][:500]}" if said else "")
+    except Exception as err:
+        return f'its "{name}" command could not be run: {err!r}'
 
 
 def forget(wake: int):
@@ -200,8 +353,11 @@ def main():
     inherited[signal.SIGCHLD] = signal.signal(signal.SIGCHLD, lambda *_: None)  # only to wake the wait
     inherited = {sig: was if was == signal.SIG_IGN else signal.SIG_DFL for sig, was in inherited.items()}
     inherited.update((getattr(signal, name), signal.SIG_DFL) for name in RESTORED if hasattr(signal, name))
-    handle, end, seconds, grace, argv = int(sys.argv[1]), sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), \
-        sys.argv[5:]
+    args, hooks = sys.argv[1:], None
+    if args[:1] == ["--hooks"]:
+        import json  # only for an attempt with hooks: the others start their CLI sooner without it
+        hooks, args = json.loads(args[1]), args[2:]
+    handle, end, seconds, grace, argv = int(args[0]), args[1], float(args[2]), float(args[3]), args[4:]
     os.set_inheritable(handle, False)  # or the CLI would hold the lock on the pid file for as long as it runs
     wake, wake_w = os.pipe()
     os.set_blocking(wake, False)
@@ -216,8 +372,10 @@ def main():
     os.close(go)
     os.close(said_w)
     os.write(handle, f"{os.getpid()} {identity(os.getpid()) or ''}\n{cli} {identity(cli) or ''}\n".encode())
-    os.write(go_w, b"\n")
-    os.close(go_w)
+    failed = hook(hooks, "before", inherited, wake, handle) if hooks else None
+    if not failed:
+        os.write(go_w, b"\n")
+    os.close(go_w)  # with nothing written, the child ends without becoming the CLI
     refused = b""
     while True:  # ends when the child is the CLI, or has given up
         chunk = os.read(said, 4096)
@@ -226,9 +384,19 @@ def main():
         refused += chunk
     os.close(said)
     record = {"ended": None, "exit_code": None, "stopped": None, "refused": None, "argv": argv}
-    if refused:
+    if hooks:
+        record["hooks"] = {"before": failed, "after": None}
+
+    def finish(**fields):
+        """Run the "after" hook and write the end record: the time is from before the hook."""
+        at = round(time.time(), 3)
+        if hooks:
+            record["hooks"]["after"] = hook(hooks, "after", inherited, wake)
+        write_end(end, {**record, "ended": at, **fields})
+
+    if failed or refused:
         os.waitpid(cli, 0)
-        write_end(end, {**record, "ended": round(time.time(), 3), "refused": refused.decode(errors="replace")})
+        finish(refused=failed or refused.decode(errors="replace"))
         return
     os.close(handle)
     null = os.open(os.devnull, os.O_RDWR)
@@ -270,7 +438,7 @@ def main():
     # The last signal to the group has been sent. Only now is the CLI reaped, and its id let go.
     status = os.waitpid(cli, 0)[1]
     record["exit_code"] = -os.WTERMSIG(status) if os.WIFSIGNALED(status) else os.WEXITSTATUS(status)
-    write_end(end, {**record, "ended": round(time.time(), 3)})
+    finish()
 
 
 if __name__ == "__main__":

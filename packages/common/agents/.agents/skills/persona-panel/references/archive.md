@@ -22,6 +22,7 @@ Keep two tiers:
       panel/round-<n>/               one folder per panel round (archive.py)
         study.json  study-brief.md  key.md  forms.json  runs.json  followups.json  panel-instructions.md
         personas/  prompts/  analysis/  scripts/ (only if the round used one-off scripts)
+        evidence/<run id>/           usability only: steps.jsonl and the screenshots of its steps
 ```
 
 Dropped because they regenerate: the site copies, in `panel/sites` or in `sites/` when the study did not browse (from `concepts/` + `key.md`), `panel/materials` (`capture.py`), scratch screenshots, designer verification shots.
@@ -43,6 +44,38 @@ What travels with a round besides the persona files:
 - `study-brief.md`: what was agreed with the user, hypotheses included.
 - `forms.json`: whether each `files` concept is images, PDFs or both. An archive without `--concepts` has no source file to tell them apart, and `analyze.py` needs it for the format caution (`references/method.md`). `archive.py` writes it from the source files while they can be read, else from the study's own copy.
 - `followups.json`: the follow-up questions asked and how each run answered. The answers themselves are in the persona files. `archive.py` refuses a study with a follow-up that is not settled: its persona file may hold what settling will reject, and an archive has no `logs/` to put it back from. It also refuses a study that a launcher has, and holds the study lock while it copies the round, so no follow-up starts under the copy.
+
+## Usability studies
+
+A usability study has no concepts and no `key.md`, so `--concepts` copies nothing. Its round keeps the other files above, with `analysis/tasks.csv` and `steps.csv`, and each run's evidence, `panel/evidence/<run id>/` as `evidence/<run id>/`. Every step the synthesis cites is found there under the name it was cited by.
+
+| In the archive | How |
+|---|---|
+| `steps.jsonl` | Byte for byte |
+| Screenshots | Every PNG whose name gives its step (`T1-7.png`, `T2-a2-3.png`, and `T1-7b.png` for a further view of step 7 after scrolling) or that a `result` entry names, under its own name. At half size and 256 colours, still a PNG. Without ImageMagick they are copied whole, and a line says so |
+| `<screenshot name>.left-out.txt` | One line in place of a screenshot that was left out, saying why. The step log entry stays, so the finding can still be cited |
+| `study.json` | Byte for byte, unless it has an `accounts.map`: then each secret is replaced with "(removed from the archive)", identifiers are kept, and a line says so. It still loads |
+
+Screenshots cannot be scanned for text, so three kinds are left out:
+
+- every screenshot of a run whose panellist was given a secret to type (`"signin": "panellist"`)
+- the screenshot of a step whose log entry is marked `sensitive`, with every further view of that step
+- a file named as a screenshot that is not a PNG image
+
+Never copied:
+
+- anything else in an evidence folder, a link least of all. A line counts what was passed over.
+- `panel/scratch/`, which holds each panellist's `account.json`
+- `accounts/`: the account records, the fingerprint record and what a command of the study wrote when it failed
+- saved browser states and `logs/`
+
+Three more refusals, each before anything is copied:
+
+- **A test account is still in force:** its run is not `done`, `limited` or `failed`, or its teardown failed. The archive would describe credentials that work. Finish the run, release it with `launch.py <study> release --runs <ids>`, or fix the teardown.
+- **A secret value is in a file the archive would hold.** Every kept file is scanned: persona files, step logs, prompts, `analysis/`, `runs.json`, `followups.json` and the archived `study.json`. Each file is named with its lines and whose secret it was, never the value. A kept file or folder with a secret value in its name is refused too, an empty folder included. Remove the value from the file or the name, log the edit in `analysis/lead-notes.md`, and archive again.
+- **A kept file, a kept folder or an evidence folder cannot be read as the study's own.** A file that may not be read, or a folder that may not be listed, is not known to be clean, and a symbolic link among the kept files, at the evidence root or at a run's evidence folder could bring in a file from outside the study. Each is named with the reason, and no link is followed. Put a plain file or folder at the name, or remove it, and archive again.
+
+The scan has limits, and the harness's own session records are outside it (`references/usability.md`, Safety). Run `launch.py <study> purge-sessions --yes` once the study is archived.
 
 ## Synthetic panel notice
 

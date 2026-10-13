@@ -18,8 +18,8 @@ its address is not an http://, https:// or file:// URL: one screenshot would rep
 land outside <out>. ImageMagick writes to a name of this script's choosing in a temporary folder,
 and the image is moved to its place from there, so no page name reaches a tool.
 
-Usage: snapshot.py [<site-dir> ...] [--url <name>=<address> ...] --out <dir> [--width 1440] [--scale 50]
-                   [--quality 78] [--jobs 4]
+Usage: snapshot.py [<site-dir> ...] [--url <name>=<address> ...] --out <dir> [--width 1440]
+                   [--scale 50] [--quality 78] [--jobs 4]
 """
 
 from __future__ import annotations

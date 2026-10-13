@@ -23,13 +23,37 @@ The line is there so that nothing read on its own is taken for research with rea
 
 Report at milestones, not per run: panel launched (with the run matrix), mid-way only if something changes the plan (a systematic misreading, a broken capture), all runs in, analysis done. A line per finished run buries the signal and repeats itself. Keep per-run observations in `analysis/lead-notes.md` for the analysts instead.
 
-At the end, give the user:
+At the end of a review study, give the user:
 - the synthetic panel notice, first
 - the winner and for whom, the size of the gap, and whether it holds across models
 - the ICP signal: who it resonated with most and least, and why
 - what is still missing, and what regressed since the last round
 - decisions only they can make, including claims the concepts invented
 - a recommendation, and whether another round is worth running
+
+## Reporting a usability study
+
+Lead with what blocked people and the evidence for it, not with a score. Give the user:
+
+- the synthetic panel notice, first
+- the worst stuck points: the task, the screen, how many runs hit it, and the steps that show it, each cited as run, task, step and screenshot ("P05-opus, T2 step 7, `T2-7.png`")
+- completion for each task, as claimed beside as checked. Never one figure called "completion", and say which tasks had no check
+- every mismatch between a claim and a check, with what you found when you opened its last steps
+- who struggled, by persona and by model, and which differences follow the model
+- what was not measured: "N of M runs complete", runs stopped at a limit, checks that failed to run
+- what to fix first, each fix tied to its stuck point or mismatch
+- what to test with real people, and the decisions only they can make
+
+Rules for the report:
+
+- **Both standing cautions, wherever a result could be read as a fact.** An agent reads a page more thoroughly than a person and does not get bored, so real people will do worse wherever a task takes patience or close reading. Every result is a hypothesis to test with real people, not a measurement of them.
+- **Counts with their base, not bare percentages:** "5 of 8 runs", and how many personas and models those runs are.
+- **A task every run completed is not shown to be easy.** Say what it took: the steps used against the limit, and whether runs got there by reading everything.
+- **Open every screenshot you cite** before you send the report. A stuck point from `quant.md` alone is a script's guess from page addresses.
+- **A test account's name is the test's.** Where a screen greets a name that is not the persona's, the name came from the provision script: never report it as a finding about the product.
+- **Never quote a secret.** Identifiers of test accounts may appear. Show no screenshot from a run whose panellist was given a secret to type.
+
+On a visual summary page, replace the leaderboard, matrix and answer sections below with: completion by task as paired bars (claimed, checked), the stuck points with their screenshots, where runs stopped, and a persona x model grid of each task's outcome. `analysis/quant.json` has `completion`, `steps`, `stopped` and `stuck_points`.
 
 ## Visual summary page
 

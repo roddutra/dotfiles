@@ -9,6 +9,11 @@ model_status().
     materials(cfg)                what is captured under panel/materials, per concept and in all
     no_materials(cfg, mat)        why no panellist run may start as the materials stand. The
                                   plan lists it as missing, and "run" refuses on it
+    usability(cfg)                what the plan says of a usability study: its target, tasks,
+                                  step limits, success checks, accounts and time rule. It
+                                  provisions nothing and runs no check
+    no_browser(cfg, names)        why no run that browses can start: the agent-browser CLI is
+                                  not on PATH. The plan lists it as a problem, and "run" refuses
     usage_of(entry)               a run's own usage: its sessions' totals, less its follow-ups
     followup_usage(entry)         what the follow-up questions put to a run used
     unallocated(entry)            what a follow-up reported in one total with a process of the
@@ -47,10 +52,12 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import browser_session as browser
 import panel_lib as pl
 import runners
 
@@ -155,6 +162,9 @@ def unfit(cfg: dict, entry: dict, status: dict | None = None) -> tuple[list[str]
     errors = [effort["error"]] if effort["error"] else []
     if status["known"] is False or status["signed_in"] is False:
         errors.append(status["message"] or f'{entry["runner"]} cannot run the model "{entry["model"]}"')
+    elif entry["role"] == "panellist" and cfg["type"] == "usability" and not caps["browser"]:
+        errors.append(f'{entry["runner"]} cannot drive a browser, and a usability study is done in one: its runs '
+                      "could attempt no task. Take the model entry out, or put it on a runner that can browse")
     elif entry["role"] == "panellist" and cfg["materials"] == "full" and not reads_images(caps, status):
         who = entry["runner"] if status["images"] is None else f'{entry["model"]} on {entry["runner"]}'
         errors.append(f'{who} cannot open images, and this study\'s "materials" is "full", so its '
@@ -173,7 +183,7 @@ def lacks(cfg: dict, entry: dict, caps: dict, status: dict) -> list[dict]:
         out.append(("budget cap", "the harness enforces no spend cap, so the time limit is what bounds its runs"))
     if not caps["resume"]:
         out.append(("resume", "an interrupted run cannot be continued in its session"))
-    if panellist and cfg["browse"] and not caps["browser"]:
+    if panellist and cfg["browse"] and not caps["browser"] and cfg["type"] != "usability":  # there it is refused
         out.append(("browser", "the study allows browsing, but its runs review from the files alone"))
     if not caps["purge"]:
         out.append(("purge", "its sessions cannot be deleted, so purge-sessions leaves them in place"))
@@ -313,7 +323,10 @@ def no_materials(cfg: dict, mat: dict) -> str | None:
     """Why no panellist run may start as the materials stand, else None: nothing is captured,
     nothing for one of the study's concepts, or one of them is short of a page, state or item
     (materials(), "incomplete"), each named. The plan lists it as missing, and "run", "pilot" and
-    "resume" refuse on it (launch.preflight), so what one says the other does."""
+    "resume" refuse on it (launch.preflight), so what one says the other does. A usability study
+    has no materials, and none to wait for."""
+    if cfg["type"] == "usability":
+        return None
     if not mat["captured"]:
         return f"panel/materials has no captured page. Run capture.py {cfg['_dir']} before the runs."
     short = []
@@ -324,6 +337,122 @@ def no_materials(cfg: dict, mat: dict) -> str | None:
     short += [f"{c['concept']} has no capture of {listed(c['lacks'])}, so a run would review it with that missing"
               for c in mat["incomplete"]]
     return f"{', and '.join(short)}. Run capture.py {cfg['_dir']} before the runs." if short else None
+
+
+def no_browser(cfg: dict, names) -> str | None:
+    """Why no run that browses can start, else None: the study's runs may browse, on one of the
+    runners named, and the agent-browser CLI that the launcher starts each run's browser session
+    with (browser_session.py) is not on PATH. The plan lists it as a problem, and "run", "pilot"
+    and "resume" refuse on it (launch.preflight)."""
+    if not cfg["browse"] or not any(runners.get(name).capabilities()["browser"] for name in names if name):
+        return None
+    if shutil.which(browser.CLI):
+        return None
+    return (f"the {browser.CLI} CLI is not on PATH, and the launcher starts a browser session with it for every run "
+            "that may browse: none could be started. Install it, or add its folder to PATH"
+            + ("" if cfg["type"] == "usability" else ', or set "browse": false to review from the materials alone'))
+
+
+# ---------------------------------------------------------------- usability studies
+
+def usability(cfg: dict) -> dict | None:
+    """What the plan says of a usability study, None for a review: the target and whether it is
+    a local development host, the tasks, the accounts arrangement, whether runs are sequential,
+    and the rule a run's time limit comes from. Read from study.json alone: no command of the
+    study is run, so nothing is provisioned."""
+    if cfg["type"] != "usability":
+        return None
+    acc, steps = cfg["accounts"], sum(t["steps"] for t in cfg["tasks"])
+    states = [bool(a.get("state")) for a in (acc or {}).get("map", {}).values()]
+    return {
+        "base_url": cfg["target"]["base_url"], "local": not cfg["_remote"],
+        "tasks": [{"id": t["id"], "goal": " ".join(t["goal"].split()), "start": pl.task_url(cfg, t),
+                   "steps": t["steps"], "success_check": t.get("success_check"), "read_only": t["read_only"]}
+                  for t in cfg["tasks"]],
+        "accounts": None if not acc else {
+            "source": "map" if "map" in acc else "provision", "provision": acc.get("provision"),
+            "signin": acc["signin"], "teardown": acc.get("teardown"), "reset": acc.get("reset"),
+            # with a map, how many of its accounts name a saved browser state: a command says only when it is run
+            "with_state": sum(states) if "map" in acc else None, "accounts": len(states) if "map" in acc else None},
+        "sequential": cfg["sequential"],
+        "time": {"minutes": pl.usability_minutes(cfg), "steps": steps, "step_seconds": pl.STEP_SECONDS,
+                 "run_minutes": pl.RUN_MINUTES, "set": "minutes" in (cfg["limits"].get("run") or {})}}
+
+
+def usability_lines(plan: dict) -> list[str]:
+    """The plan's section on a usability study, in place of the materials."""
+    u = plan["usability"]
+    out = ["", "Usability study, what each run does in the running product:"]
+    if u["local"]:
+        out.append(f"  Target: {u['base_url']}, a local development host. It must be running during the runs.")
+    else:
+        out += [f"  REMOTE TARGET: {u['base_url']} is not a local development host, and study.json allows it "
+                '("allow_remote").',
+                "  Every task is read-only: panellists are told to submit nothing, sign in nowhere and change "
+                "nothing, and no account is used.",
+                "  Only that instruction stands between a panellist and a form: nothing limits what its browser "
+                "submits, and every visit reaches the site's server and its analytics."]
+    out.append(f"  {plural(len(u['tasks']), 'task')}, attempted in this order by every run:")
+    out += table([["Task", "Step limit", "Starts at", "Success check", "Goal"],
+                  *([t["id"], t["steps"], t["start"], t["success_check"] or "none", t["goal"]] for t in u["tasks"])],
+                 "    ")
+    out += ["  Step limits: a panellist is told each task's limit and keeps to it itself. At the limit it records "
+            '"ran out of steps" and goes on to the next task.',
+            "    The launcher is the backstop: it reads each run's step log while the run is in flight, and an "
+            "intent entry numbered above its task's limit stops the run as limited, after the grace period."]
+    checked = [t for t in u["tasks"] if t["success_check"]]
+    if checked:
+        out += [f"  Success checks: {plural(len(checked), 'task')} of {len(u['tasks'])} "
+                f"{agree(len(checked), 'has', 'have')} one ({', '.join(t['id'] for t in checked)}). Each is run with "
+                "the run id when a run is done, limited or failed, before its test account is torn down.",
+                "    Exit code 0 says the task was really completed, 1 that it was not, and any other that the "
+                "check failed to run, which is no verdict. A check is the lead's: no panellist is shown one."]
+        unchecked = [t["id"] for t in u["tasks"] if not t["success_check"]]
+        if unchecked:
+            out.append(f"    No success check for {listed(unchecked)}: whether "
+                       f"{agree(len(unchecked), 'it was', 'they were')} completed is each panellist's own claim.")
+    else:
+        out.append("  Success checks: none. Whether a task was completed is each panellist's own claim.")
+    time = u["time"]
+    if not time["set"]:
+        out.append(f"  Time limit: {time['minutes']:g} min a run, from the tasks: {time['step_seconds']} s for each "
+                   f"of the {plural(time['steps'], 'step')} they permit, plus {time['run_minutes']} min. Set "
+                   "limits.run.minutes to choose another.")
+    acc = u["accounts"]
+    if acc:
+        how = (f"its entry of accounts.map ({plural(acc['accounts'], 'account')})" if acc["source"] == "map"
+               else f"accounts.provision ({acc['provision']} <run id>), run once for it")
+        out.append(f"  Accounts: each run gets a test account from {how}, just before it starts. This plan "
+                   "provisions nothing.")
+        if acc["signin"] == "panellist":
+            out += ['    SECRETS ARE GIVEN TO PANELLISTS: accounts.signin is "panellist", so each panellist reads '
+                    "its account's secrets in panel/scratch/<run id>/account.json and types them. Use it only when "
+                    "signing in is the task under test.",
+                    "    Those secrets reach each model's provider and stay in its harness's session record, and "
+                    "any screenshot of such a run may show one."]
+        elif acc["source"] == "map":
+            without = acc["accounts"] - acc["with_state"]
+            out.append(f"    Signed-in start: {plural(acc['with_state'], 'run')} "
+                       f"{agree(acc['with_state'], 'starts', 'start')} signed in, from the saved browser state "
+                       "its account names, and no panellist is given a secret."
+                       + (f" {plural(without, 'account')} {agree(without, 'names', 'name')} no state: "
+                          f"{agree(without, 'that run starts', 'those runs start')} signed out, with nothing to "
+                          "sign in with." if without else ""))
+        else:
+            out.append("    Signed-in start: a run whose account names a saved browser state starts signed in, and "
+                       "no panellist is given a secret. A run whose account names none starts signed out, with "
+                       "nothing to sign in with.")
+        out.append(f"    Teardown: accounts.teardown ({acc['teardown']} <run id>) is run once when a run is done, "
+                   "limited or failed." if acc["teardown"] else
+                   "    No accounts.teardown: an account outlives its run, and so does its saved session.")
+        out.append("    A panellist is given the account's identifiers. What it reads or types stays in its "
+                   "harness's session record: purge-sessions deletes those where the harness allows it.")
+    elif u["local"]:
+        out.append("  No accounts: every task is attempted without signing in.")
+    out.append("  Runs: one at a time, across all runners (\"sequential\": true)"
+               + (f", with accounts.reset ({acc['reset']} <run id>) between runs." if acc and acc["reset"] else ".")
+               if u["sequential"] else "  Runs: side by side, within each runner's concurrency.")
+    return out
 
 
 def host(url: str) -> str:
@@ -626,7 +755,9 @@ def usage_markdown(figures: dict) -> str:
 def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
     """What the runs still to go are likely to use, per model entry and in all. rows are
     usage_figures() rows with "entry" added, the name of each run's model entry, and pages is
-    what a run opens (materials(), "opens"), for a model entry with no finished run to measure."""
+    what a run opens (materials(), "opens"), for a model entry with no finished run to measure.
+    text_only: the method has no figure for a run of this study, a text-only one or a usability
+    one, so a model entry with no finished run gets none."""
     entries = []
     for name, role in dict.fromkeys((r["entry"], r["role"]) for r in rows):
         own = [r for r in rows if (r["entry"], r["role"]) == (name, role)]
@@ -649,7 +780,7 @@ def estimate(rows: list[dict], pages: int, text_only: bool) -> dict:
         elif role == "panellist" and not text_only:
             basis, per["tokens"] = "method", TOKENS_PER_CONCEPT_PAGE * pages
         else:
-            basis = "none"  # the method has no figure for a text-only run or for a synthesis job
+            basis = "none"  # the method has no figure for a text-only or usability run, or for a synthesis job
         entries.append({
             "entry": name, "role": role, "runner": own[0]["runner"], "runs": len(own),
             "done": sum(r["state"] == "done" for r in own), "to_go": to_go, "basis": basis,
@@ -739,6 +870,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         problem = pl.source_problem(cfg, c) if needed else None
         if problem:
             missing.append(f"{stop(problem)} init_study.py and capture.py stop on it, so no run can start.")
+    problems += pl.usability_problems(cfg)  # a command of the study whose file is not there
     no_poppler = pl.poppler_missing(cfg)
     if no_poppler and short:
         missing.append(f"{no_poppler}. capture.py cannot turn a PDF into materials without it.")
@@ -800,6 +932,16 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         if not check["ok"]:
             problems.append(f"{name}: cannot be used: {check['message']}")
 
+    # The browser sessions: every run in flight that may browse holds one of its own (browser_session.py).
+    at_once = sum(min(r["concurrency"], sum(m["runs"] for m in models if m["runner"] == r["runner"]
+                                            and m["role"] == "panellist"))
+                  for r in checked if cfg["browse"] and runners.get(r["runner"]).capabilities()["browser"])
+    at_once = min(at_once, 1) if cfg.get("sequential") else at_once  # one panellist at a time
+    sessions = {"at_once": at_once, "mib_each": browser.MEMORY_MIB, "policy": browser.REFUSES} if at_once else None
+    missing_cli = None if native else no_browser(cfg, {m["runner"] for m in models if m["role"] == "panellist"})
+    if missing_cli:
+        problems.append(missing_cli[0].upper() + missing_cli[1:])
+
     there = f"{held(mat)}, {size(mat['bytes'])}" if mat["captured"] else "not captured yet"
     browse = browsing(cfg, mat)
     # With browsing on, the instructions every run reads give the address of each live page.
@@ -810,8 +952,16 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                 + (f"{plural(mat['text_files'], 'file')}, {size(mat['text_bytes'])}" if mat["captured"] else there)
                 + "), with no images",
     }[cfg["materials"]]
+    study = usability(cfg)
+    if study:
+        lent = study["accounts"] and ("identifiers and secrets" if study["accounts"]["signin"] == "panellist"
+                                      else "identifiers")
+        receives = ("its run prompt, the usability instructions, its persona file with the tasks"
+                    + (f", its test account's {lent}" if lent else ""))
     opens = []  # what a run that browses can open, besides what it reads
-    if not browse or browse["sites"]:
+    if study:
+        opens.append(f"every page it opens at {study['base_url']}, with what it types there")
+    elif not browse or browse["sites"]:
         opens.append("any page of panel/sites it opens in the browser")
     if browse and browse["hosts"]:
         opens.append(f"any page it opens at {listed(browse['hosts'])}, as that page is at the time")
@@ -839,7 +989,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     costed = {name: runners.get(name).capabilities()["usage"]["cost"] for name in {e["runner"] for e in runs + planned}
               if name}
     rows = [{**r, "entry": names[r["run"]], "reports_cost": costed.get(r["runner"], False)} for r in usage["runs"]]
-    forecast = estimate(rows, mat["opens"], cfg["materials"] == "text")
+    forecast = estimate(rows, mat["opens"], cfg["materials"] == "text" or bool(study))
     if browse and browse["not_browsable"] and any(e["basis"] == "method" for e in forecast["entries"]):
         unread = mat["pdfs"] and mat["pdf_pages"] is None  # its pages are not known until it is captured
         notes.append("the estimate's figure per page was measured on captured web pages. It counts every page of a "
@@ -848,7 +998,9 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
     return {
         "study": cfg.get("study") or sd.name, "dir": str(sd), "native": native, "launcher": launcher,
         "missing": missing, "notes": notes,
-        "materials": mat, "browsing": browse, "models": models, "runs": run_rows, "runners": checked,
+        "materials": mat, "usability": study, "browsing": browse, "browser_sessions": sessions, "models": models,
+        "runs": run_rows,
+        "runners": checked,
         "providers": providers,
         "synthesis": None if native else {
             "pool": pool, "share": pl.synthesis_share(cfg), "shares": cfg["synthesis"].get("analysts", 1) + 1,
@@ -863,7 +1015,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
 
 def render(plan: dict) -> list[str]:
     """The plan as the lines the plan command prints."""
-    sd, native, mat = plan["dir"], plan["native"], plan["materials"]
+    sd, native = plan["dir"], plan["native"]
     out = [f"Plan for {plan['study']} ({sd}). This command starts no run and changes no file of the study. "
            "A runner's sign-in check may let its harness refresh its own login."]
     if plan["launcher"]:
@@ -882,22 +1034,17 @@ def render(plan: dict) -> list[str]:
     def entry_cells(row):
         return [row["runner"] or "-", row["model"] or "default", row["effort"] or "-"]
 
-    out += ["", "Materials, what each run can read under panel/materials:"]
-    if mat["mode"] == "text":
-        dropped = mat["text_only"]["dropped_factors"]
-        out.append("  Text-only study: panellists receive the page text only, page-text.txt for each page, with no "
-                   "images and no browser." + (f" They do not score {listed(dropped)}." if dropped else ""))
-    if not mat["captured"]:
-        out.append(f"  Not captured yet. {held(mat, captured=False)} to capture, counted from {mat['pages_from']}.")
-    elif mat["mode"] == "text":
-        out.append(f"  {plural(mat['text_files'], 'page text file')}, {size(mat['text_bytes'])} "
-                   f"({held(mat, images=False)}).")
-    else:
-        out.append(f"  {held(mat)}, {size(mat['bytes'])} in all, of which page text {size(mat['text_bytes'])}.")
-        kinds = plan["browsing"] is not None  # a study of sites alone has no kind to tell apart
-        out += table([[c["concept"], *([pl.KIND_NAMES.get(c["kind"], "no concept of this study")] if kinds else []),
-                       held(c), size(c["bytes"])] for c in mat["concepts"]], "    ")
-    out += browsing_lines(plan)
+    out += usability_lines(plan) if plan["usability"] else materials_lines(plan)
+    sessions = plan["browser_sessions"]
+    if sessions:
+        n, each = sessions["at_once"], sessions["mib_each"]
+        out += ["", "Browser sessions, for the runs that may browse:",
+                "  The launcher starts an agent-browser session for each attempt of such a run before its process, "
+                "and stops it after. A run only sends it commands.",
+                f"  Each holds about {each} MiB while its run is in flight: about {n * each / 1024:.1f} GiB with "
+                f"{plural(n, 'such run')} at once, the most the concurrency in force allows.",
+                f"  {sessions['policy']}",
+                "  What that leaves open is listed for each runner under Runners, below."]
 
     panel = [m for m in plan["models"] if m["role"] == "panellist"]
     out += ["", f"Model entries ({len(panel)})"
@@ -960,6 +1107,27 @@ def render(plan: dict) -> list[str]:
         out += ["", 'Problems, which stop "run" as they stop this plan:', *(f"  {stop(p)}" for p in plan["problems"])]
     out.append("")
     return out
+
+
+def materials_lines(plan: dict) -> list[str]:
+    """The plan's section on what each run of a review study can read."""
+    mat = plan["materials"]
+    out = ["", "Materials, what each run can read under panel/materials:"]
+    if mat["mode"] == "text":
+        dropped = mat["text_only"]["dropped_factors"]
+        out.append("  Text-only study: panellists receive the page text only, page-text.txt for each page, with no "
+                   "images and no browser." + (f" They do not score {listed(dropped)}." if dropped else ""))
+    if not mat["captured"]:
+        out.append(f"  Not captured yet. {held(mat, captured=False)} to capture, counted from {mat['pages_from']}.")
+    elif mat["mode"] == "text":
+        out.append(f"  {plural(mat['text_files'], 'page text file')}, {size(mat['text_bytes'])} "
+                   f"({held(mat, images=False)}).")
+    else:
+        out.append(f"  {held(mat)}, {size(mat['bytes'])} in all, of which page text {size(mat['text_bytes'])}.")
+        kinds = plan["browsing"] is not None  # a study of sites alone has no kind to tell apart
+        out += table([[c["concept"], *([pl.KIND_NAMES.get(c["kind"], "no concept of this study")] if kinds else []),
+                       held(c), size(c["bytes"])] for c in mat["concepts"]], "    ")
+    return out + browsing_lines(plan)
 
 
 def browsing_lines(plan: dict) -> list[str]:

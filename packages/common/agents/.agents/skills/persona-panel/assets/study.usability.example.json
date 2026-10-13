@@ -1,0 +1,117 @@
+{
+  "study": "borrowing-estimate-usability",
+  "type": "usability",
+  "product": "Acme Home Loans",
+  "product_phrase": "a home loan website called **Acme Home Loans**",
+  "context_notes": [
+    "This is a test build. The lender, its rates and every figure it shows are made up.",
+    "Your test account has no real money or history behind it. Enter figures as your persona would give them."
+  ],
+  "target": {
+    "base_url": "http://acme.localhost:8080"
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "goal": "You want to know roughly how much you could borrow for a home. See how far you get.",
+      "start": "/",
+      "steps": 25,
+      "success_check": "scripts/check-estimate.sh"
+    },
+    {
+      "id": "T2",
+      "goal": "You'd like someone from the lender to ring you about the figure you were given. Arrange that.",
+      "start": "/",
+      "steps": 15,
+      "success_check": "scripts/check-callback.sh"
+    }
+  ],
+  "accounts": {
+    "provision": "scripts/make-account.sh",
+    "teardown": "scripts/drop-account.sh",
+    "signin": "session"
+  },
+  "sequential": false,
+  "runner": "claude",
+  "models": [
+    "opus",
+    {
+      "key": "sol",
+      "runner": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "medium"
+    }
+  ],
+  "limits": {
+    "run": {
+      "budget_usd": 3.0
+    },
+    "synthesis": {
+      "minutes": 30,
+      "budget_usd": 6.0
+    },
+    "followup": {
+      "minutes": 5,
+      "budget_usd": 0.5
+    }
+  },
+  "runners": {
+    "claude": {
+      "concurrency": 3
+    },
+    "codex": {
+      "concurrency": 2
+    }
+  },
+  "synthesis": {
+    "analysts": 1,
+    "analyst": {
+      "runner": "claude",
+      "model": "opus"
+    },
+    "writer": {
+      "runner": "claude",
+      "model": "opus"
+    },
+    "decision_maker": "the product team"
+  },
+  "capture": {
+    "desktop": [
+      1440,
+      900
+    ]
+  },
+  "segments": {
+    "first": "First home buyers",
+    "refinance": "Refinancers"
+  },
+  "leak_terms": [
+    "internal-codename"
+  ],
+  "personas": [
+    {
+      "id": "P01",
+      "name": "Priya Raman",
+      "role": "Nurse buying a first home with her partner",
+      "personality": "Careful and a little anxious about money: reads every label, and stops when a form asks for something she does not have to hand",
+      "segment": "first",
+      "bio": [
+        "Age 31. Rents a two-bedroom unit and has saved a deposit over six years.",
+        "Has never applied for a loan and does not know the terms lenders use.",
+        "Does this on a laptop after a late shift, and will leave a form that asks for payslips before it has told her anything."
+      ]
+    },
+    {
+      "id": "P02",
+      "name": "Tom Nguyen",
+      "role": "Self-employed electrician looking to refinance",
+      "personality": "Impatient and practical: skims, clicks the biggest button, and rings someone when a website slows him down",
+      "segment": "refinance",
+      "bio": [
+        "Age 46. Owns his home and has refinanced twice through a broker.",
+        "His income varies from month to month, and forms that assume a salary annoy him.",
+        "Does this between jobs and gives a website about two minutes before he picks up the phone."
+      ]
+    }
+  ]
+}

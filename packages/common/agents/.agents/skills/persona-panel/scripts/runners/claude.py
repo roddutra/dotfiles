@@ -10,7 +10,7 @@ Launch (the caller starts the process in workdir and writes the prompt to stdin)
       --safe-mode --restricted --strict-mcp-config --disable-slash-commands
       --settings {"includeGitInstructions":false}
       --tools Read,Write,Edit,Glob,Grep[,Bash]
-      --allowed-tools Read,Write,Edit,Glob,Grep[,Bash(agent-browser:*)]
+      --allowed-tools Read,Write,Edit,Glob,Grep[,Bash(agent-browser open:*),...]
       --permission-mode dontAsk --output-format stream-json --verbose
 
 Resume is the same with `--resume <session id>` in place of `--session-id <uuid>`. Nothing
@@ -45,13 +45,27 @@ What each option is for (all verified unless marked):
 - `--settings {"includeGitInstructions":false}`: removes the git snapshot (branch, user name,
   status, recent commit messages), which is otherwise a leak path for internal terms.
 - `--tools` and `--allowed-tools`: the tools that exist, and the ones allowed without asking.
-  Bash is present only when run["browse"] is true, and then only `agent-browser` commands
-  are allowed; compound commands are checked part by part. Images are opened with Read.
+  Bash is present only when run["browse"] is true, and then with one allow rule for each
+  agent-browser command a panellist may run (browser_session.COMMANDS): `Bash(agent-browser
+  open:*)` and so on, and `Bash(agent-browser get url)` with nothing after it. A rule is a
+  prefix: `agent-browser eval ...`, `cookies`, `state` and the commands that never reach a
+  session (`profiles`, `connect`, `upgrade`) match none and are denied before they run, and so
+  is `agent-browser --session other ...`, and a command with a variable assignment in front.
+  An option after the command still matches (`agent-browser snapshot -i --session other`
+  ran), so the session's own action policy, which refuses every option that would start the
+  browser again, is the control, and these rules the second layer. Compound commands are
+  checked part by part, and redirection is refused. Images are opened with Read.
 - `--permission-mode dontAsk`: anything not allowed is denied at once, so nothing waits for
   an approval. Denials come back to the model as tool errors.
 - `--output-format stream-json --verbose`: one JSON object per line, each with `session_id`,
   ending in a `result` line. `--verbose` is required with stream-json. Plain `json` prints
   only the final object, so a killed process would leave nothing.
+
+Browsing. The caller starts the agent-browser session and passes run["browser_env"], which the
+child's environment gets (child_env()). The shell tool hands it on to each command, so a
+panellist runs `agent-browser <command>` with no session name (verified with a session started
+outside the run: the signed-in page opened, and a screenshot was saved by a relative path and
+read back). Nothing else is needed: the CLI has no sandbox between its shell and a socket.
 
 Environment. The child gets the caller's environment minus the variables a Claude Code session
 sets for its own children: CLAUDECODE, CLAUDE_PID, CLAUDE_EFFORT, AI_AGENT, CLAUDE_AGENT_SDK_*
@@ -61,6 +75,11 @@ leave token refresh to a host process that is not there (inferred). Stripped, a 
 from a terminal and from inside Claude Code. CLAUDE_CONFIG_DIR and every ANTHROPIC_* variable
 pass through, because they decide which login is used and who is billed. A desktop-hosted
 Claude Code session sets ANTHROPIC_BASE_URL (verified), so a plan made inside one reports it.
+
+System prompt. The CLI's default is kept on purpose (decided 13 October 2026: replacing it did
+not change a panellist's output). `--system-prompt <text>` would replace it; never pass it an
+empty string (the run failed) or add `--system-prompt-snapshot off`. The record is "System
+prompt override" in docs/specs/persona-panel-expansion.md.
 
 Results. The result is the last line with "type": "result". Session id: `session_id`, on every
 line. Reply: `result`. An error result can say "subtype": "success", so `is_error` decides.
@@ -97,12 +116,16 @@ import os
 import re
 import uuid
 
-from . import exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
+import browser_session
+
+from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
 
 CLI = "claude"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 FILE_TOOLS = "Read,Write,Edit,Glob,Grep"
-BROWSER_RULE = "Bash(agent-browser:*)"
+# One allow rule for each agent-browser command a panellist may run: a prefix rule for a command
+# of one word, and an exact one for a command of two (`get url`), which takes nothing after it.
+BROWSER_RULES = ",".join(f"Bash(agent-browser {c}{'' if ' ' in c else ':*'})" for c in browser_session.COMMANDS)
 ISOLATION = ["--safe-mode", "--restricted", "--strict-mcp-config", "--disable-slash-commands",
              "--settings", '{"includeGitInstructions":false}']
 OUTPUT = ["--permission-mode", "dontAsk", "--output-format", "stream-json", "--verbose"]
@@ -156,10 +179,11 @@ def capabilities() -> dict:
             "The model is told whether the working directory is inside a git repository.",
         ],
         "browse_gaps": [
-            "With browsing on, the agent-browser CLI can open any file:// path the user can read "
-            "and any address on the network, and save screenshots outside the working directory.",
+            *BROWSER_GAPS,
             "With browsing on, read-only shell commands inside the working directory (such as "
             "ls) run without being asked for.",
+            "With browsing on, an agent-browser command is allowed by how it starts, so an option "
+            "placed after the command gets through to the session, whose policy has to refuse it.",
         ],
     }
 
@@ -185,9 +209,9 @@ def _command(run: dict, limits: dict | None, session: list[str], stdin: str, ses
     browse = bool(run.get("browse"))
     argv += [*ISOLATION,
              "--tools", FILE_TOOLS + (",Bash" if browse else ""),
-             "--allowed-tools", FILE_TOOLS + ("," + BROWSER_RULE if browse else ""),
+             "--allowed-tools", FILE_TOOLS + ("," + BROWSER_RULES if browse else ""),
              *OUTPUT]
-    return {"argv": argv, "stdin": stdin, "env": _env(), "session_id": session_id}
+    return {"argv": argv, "stdin": stdin, "env": child_env(run, _env()), "session_id": session_id}
 
 
 def launch_command(run: dict, prompt: str, workdir, limits: dict | None) -> dict:

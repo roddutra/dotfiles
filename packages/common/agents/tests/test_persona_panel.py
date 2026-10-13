@@ -4,8 +4,10 @@ import csv
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -109,10 +111,12 @@ class PersonaPanelTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def study(self, name, **overrides):
-        """A study directory holding the base config with overrides, not yet scaffolded."""
+        """A study directory holding the base config with overrides, not yet scaffolded. A key
+        overridden with None is left out."""
         sd = Path(self.tmp.name) / name
         sd.mkdir()
-        (sd / "study.json").write_text(json.dumps({**self.cfg, **overrides}))
+        (sd / "study.json").write_text(json.dumps({k: v for k, v in {**self.cfg, **overrides}.items()
+                                                   if v is not None}))
         return sd
 
     def labels_for(self, cid):
@@ -200,6 +204,12 @@ class PersonaPanelTest(unittest.TestCase):
 
     def test_invalid_model_entries_and_options_are_refused(self):
         dana, sam = self.cfg["personas"]
+        look = {"id": "T1", "goal": "See what it costs."}
+
+        def usability(target, **more):  # a usability study, which has tasks and no concepts
+            return {"type": "usability", "runner": "claude", "concepts": None, "find_the_answer": None,
+                    "target": target, "tasks": [look], **more}
+        remote = {"base_url": "https://bank.example.com", "allow_remote": True}
         cases = {
             "variant of no persona": ({"personas": [dana, {**sam, "variant_of": "P09"}]}, '"P09" is not a persona id'),
             "variant of itself": ({"personas": [dana, {**sam, "variant_of": "P02"}]}, "names the persona itself"),
@@ -254,6 +264,35 @@ class PersonaPanelTest(unittest.TestCase):
             "a pinned label that leaves the materials folder": (
                 {"labels": {"A/../../x": "01-plain", "B": "02-story", "C": "03-console"}},
                 'the label "A/../../x" must be letters and digits only'),
+            # The local-host rule of a usability study.
+            "a usability target that is not a local host": (
+                usability({"base_url": "https://bank.example.com"}), "is not a local development host"),
+            "a host that only begins like a local one": (
+                usability({"base_url": "http://localhost.example.com:8080"}), "is not a local development host"),
+            # An address a browser would take somewhere else than it reads, or read as another host.
+            "a target with a backslash, which a browser reads as a slash": (
+                usability({"base_url": "http://example.com\\.localhost"}), "is not http:// or https://, a host and"),
+            "a target with a user name before another host": (
+                usability({"base_url": "http://localhost@example.com"}), "is not http:// or https://, a host and"),
+            "a target whose host ends in a dot": (
+                usability({"base_url": "http://localhost."}), "has a host that is not a plain name"),
+            "a local name with a punycode label": (
+                usability({"base_url": "http://xn--pp-fka.localhost"}), '"xn--", is never taken as one'),
+            "a target that is one number": (
+                usability({"base_url": "http://2130706433"}), "has a host that ends in a number"),
+            "a target in hexadecimal": (
+                usability({"base_url": "http://0x7f.1"}), "has a host that ends in a number"),
+            "a start that leaves the target": (
+                usability({"base_url": "http://app.localhost:8080"}, tasks=[{**look, "start": "//example.com/login"}]),
+                'must be a path on the target, beginning with one "/"'),
+            "a remote target, allowed, with a task that may change something": (
+                usability(remote), 'task T1: it must say "read_only": true'),
+            "a remote target, allowed, with test accounts": (
+                usability(remote, tasks=[{**look, "read_only": True}], accounts={"provision": "make-account.sh"}),
+                '"accounts" cannot be used with a remote target'),
+            "a usability study with a phrase for its product and no name": (
+                usability({"base_url": "http://app.localhost:8080"}, product=None, product_phrase="a bank's site"),
+                'a usability study needs "product"'),
         }
         for i, (name, (overrides, message)) in enumerate(cases.items()):
             with self.subTest(name):
@@ -262,6 +301,11 @@ class PersonaPanelTest(unittest.TestCase):
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn(message, r.stderr)
                 self.assertFalse((sd / "runs.json").exists())
+        # A local name is local in any case, and panellists are given the address as its parts say, not as written.
+        sd = self.study("mixed-case", **usability({"base_url": "HTTP://App.LocalHost:8080/"}))
+        run("init_study.py", sd)
+        instructions = sd.joinpath("panel/_panel-instructions.md").read_text()
+        self.assertEqual(("`http://app.localhost:8080/`" in instructions, "LocalHost" in instructions), (True, False))
 
     def test_folder_of_images_alone_in_a_text_only_study_is_refused_and_the_plan_says_why(self):
         mock_ups = Path(self.tmp.name) / "mock"
@@ -308,26 +352,41 @@ class PersonaPanelTest(unittest.TestCase):
 
     def test_browse_setting_decides_what_panellists_are_told_about_the_browser(self):
         offered, ruled_out = "If you use agent-browser, your run id is `P01-", "agent-browser CLI is not available"
-        both = [{"key": "a", "runner": "claude"}, {"key": "b", "runner": "codex"}]
-        cases = {  # study settings: (the instructions offer the browser, {model key: what its run prompt says})
-            "native study, browsing by default": ({}, True, {"opus": offered, "fable": offered}),
-            "browsing switched off": ({"browse": False, "models": both}, False, {"a": None, "b": None}),
-            "a runner that cannot drive a browser": ({"models": both}, True, {"a": offered, "b": ruled_out}),
+        # Every runner of the skill can drive a browser, so one that cannot is added to a copy of the skill.
+        skill = Path(self.tmp.name) / "skill"
+        shutil.copytree(SCRIPTS.parent, skill, ignore=shutil.ignore_patterns("__pycache__"))
+        (skill / "scripts/runners/plain.py").write_text(
+            "from . import codex\nfrom .codex import *  # noqa: F401,F403\n\n\ndef capabilities():\n"
+            "    return {**codex.capabilities(), 'browser': False, 'browse_gaps': []}\n")
+        both = [{"key": "a", "runner": "claude"}, {"key": "b", "runner": "plain"}]
+        # Whose browser session a run uses: one it starts and closes itself, in native mode, where there is
+        # no launcher, or the one a launcher has open for it. (What the instructions say, what a run prompt says.)
+        own = ("Use your own session: `agent-browser --session <your run id> ...`", "Use it as the session name")
+        given = ("A browser session is already open for you", "Your browser session is open already")
+        cases = {  # study settings: (the session the instructions offer, {model key: what its run prompt says})
+            "native study, browsing by default": ({}, own, {"opus": offered, "fable": offered}),
+            "browsing switched off": ({"browse": False, "models": both}, None, {"a": None, "b": None}),
+            "a runner that cannot drive a browser": ({"models": both}, given, {"a": offered, "b": ruled_out}),
             "a live URL beside a site, with browsing not asked for": (
                 {"concepts": [*self.cfg["concepts"][:1], {"id": "live", "kind": "url", "url": "https://a.test/"}]},
-                False, {"opus": None, "fable": None}),
+                None, {"opus": None, "fable": None}),
         }
-        for i, (name, (settings, in_instructions, prompts)) in enumerate(cases.items()):
+        for i, (name, (settings, session, prompts)) in enumerate(cases.items()):
             with self.subTest(name):
                 sd = self.study(f"browse-{i}", **settings)
-                run("init_study.py", sd)
-                instructions = sd.joinpath("panel/_panel-instructions.md").read_text()
+                subprocess.run([sys.executable, str(skill / "scripts/init_study.py"), str(sd)], check=True,
+                               capture_output=True, text=True)
+                instructions, in_instructions = sd.joinpath("panel/_panel-instructions.md").read_text(), bool(session)
                 self.assertEqual("agent-browser" in instructions, in_instructions)
+                self.assertEqual([said for said in (own, given) if said[0] in instructions],
+                                 [session] if session else [])
                 self.assertIn("3. **Write only to your own persona file.**", instructions)
                 for key, says in prompts.items():
                     prompt = sd.joinpath(f"prompts/P01-{key}.md").read_text()
                     self.assertEqual([x for x in (offered, ruled_out) if x in prompt], [says] if says else [])
                     self.assertEqual("agent-browser" in prompt, bool(says))
+                    self.assertEqual([said for said in (own, given) if said[1] in prompt],
+                                     [session] if says == offered else [])
                     # A run allowed agent-browser and no other command cannot make its screenshot folder.
                     self.assertEqual((sd / f"panel/scratch/P01-{key}").is_dir(), says == offered)
                 # A site copy is the page source under its own file names: it is inside panel/, which a
@@ -1102,6 +1161,16 @@ CODEX_OPTIONS = ["exec", "--json", "--skip-git-repo-check", "--ignore-user-confi
                  "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
                  "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest",
                  "-s", "workspace-write"]
+# With browsing: one allow rule for each agent-browser command a panellist may run, and for Codex a way
+# out of its sandbox to the session's socket, with no temporary directory to start a session of its own in.
+CLAUDE_BROWSER = ",".join(
+    [f"Bash(agent-browser {c}:*)" for c in (
+        "open", "back", "forward", "reload", "snapshot", "screenshot", "click", "dblclick", "fill", "type", "press",
+        "keyboard", "select", "check", "uncheck", "hover", "focus", "scroll", "scrollintoview", "wait", "dialog")]
+    + ["Bash(agent-browser get url)", "Bash(agent-browser get title)"])
+CODEX_BROWSER = ["-c", "sandbox_workspace_write.network_access=true",
+                 "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+                 "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true"]
 PI_ISOLATION = ["-nc", "-ns", "-ne", "-np", "--no-themes", "--no-mcp", "--no-approve",
                 "--system-prompt", "", "--append-system-prompt", ""]
 PI_GUARD = ["-e", str(SCRIPTS / "runners/pi_guard.ts"), "--panel-guard"]  # then what the guard allows
@@ -1185,7 +1254,7 @@ class RunnerTest(unittest.TestCase):
     def test_runner_commands_for_a_run(self):
         panel = str(self.workdir)
         left = {"minutes": 4, "budget_usd": 0.75}
-        browsing = ["--tools", CLAUDE_FILES + ",Bash", "--allowed-tools", CLAUDE_FILES + ",Bash(agent-browser:*)"]
+        browsing = ["--tools", CLAUDE_FILES + ",Bash", "--allowed-tools", CLAUDE_FILES + "," + CLAUDE_BROWSER]
         files_only = ["--tools", CLAUDE_FILES, "--allowed-tools", CLAUDE_FILES]
         # Pi's own folder for the sessions of this working directory, whatever its settings say.
         pi_sessions = str(self.tmp / "home/.pi/agent/sessions"
@@ -1200,12 +1269,13 @@ class RunnerTest(unittest.TestCase):
             ("claude", "default model, no effort, no cap, no browsing", False): (
                 BARE, {"minutes": 30, "budget_usd": None},
                 ["-p", "--session-id", "<new>", *CLAUDE_ISOLATION, *files_only, *CLAUDE_OUTPUT]),
-            ("codex", "model and effort", False): (RUN, LIMITS, [
-                *CODEX_OPTIONS, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high", "-"]),
+            ("codex", "model, effort, browsing", False): (RUN, LIMITS, [
+                *CODEX_OPTIONS, *CODEX_BROWSER, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high", "-"]),
             ("codex", "resumed, options before the word resume", True): (RUN, left, [
-                *CODEX_OPTIONS, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high",
+                *CODEX_OPTIONS, *CODEX_BROWSER, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high",
                 "resume", SESSION, "-"]),
-            ("codex", "default model, no effort", False): (BARE, LIMITS, [*CODEX_OPTIONS, "-C", panel, "-"]),
+            ("codex", "default model, no effort, no browsing", False): (
+                BARE, LIMITS, [*CODEX_OPTIONS, "-C", panel, "-"]),
             ("pi", "model, effort, browsing", False): (RUNS["pi"], LIMITS, [
                 "-p", "--mode", "text", "--session-id", "<new>", "--session-dir", pi_sessions,
                 "--provider", "openai-codex", "--model", PI_MODEL, "--thinking", "high",
@@ -1479,6 +1549,77 @@ def most_at_once(steps):
     return peak
 
 
+class BrowserSessionTest(unittest.TestCase):
+    """browser_session.py stop run as a subprocess, on records written by hand. PATH holds the
+    fake agent-browser, whose `close` signals whatever a pid file names, as the real one can."""
+
+    def test_stop_signals_and_removes_only_what_is_proven_to_be_its_sessions(self):
+        base = Path(tempfile.mkdtemp(prefix="persona-panel-browser-"))
+        self.addCleanup(shutil.rmtree, base, True)
+        fakes.install(base, "agent-browser")
+        bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])  # not of any session
+        self.addCleanup(bystander.wait)
+        self.addCleanup(bystander.kill)
+        unrelated = base / "unrelated.txt"
+        unrelated.write_text("the user's own")
+        cases = {  # what is wrong: (the record's changes, a token in the socket directory, what the record is,
+            #                       exit code, what stop says, the socket directory and the policy are still there)
+            "the daemon on record has gone, and another process has its id": (
+                {}, True, "file", 0, "no browser session was running", False),
+            "the record names another file as its policy": (
+                {"policy": str(unrelated)}, True, "file", 2, "cannot be trusted, so nothing was stopped or removed: "
+                ".* is not as \"start\" wrote it: its policy", True),
+            "the record is a symbolic link": (
+                {}, True, "link", 2, "cannot be trusted, so nothing was stopped or removed: .* is a symbolic link",
+                True),
+            "the record is a FIFO, which no one ever writes to": (
+                {}, True, "fifo", 2, "cannot be trusted, so nothing was stopped or removed: .* is not a regular file",
+                True),
+            "the socket directory does not hold the session's token": (
+                {}, False, "file", 1, "Left in place: .*: it does not hold this session's token", True),
+        }
+        for i, (name, (changed, token, kind, code, says, stays)) in enumerate(cases.items()):
+            with self.subTest(name):
+                log = base / f"logs-{i}" / "P01-opus.1"
+                log.parent.mkdir()
+                record, policy = Path(f"{log}.browser"), Path(f"{log}.policy")
+                sockets = Path(tempfile.gettempdir()) / f"pp-{secrets.token_hex(4)}"
+                sockets.mkdir(mode=0o700)
+                self.addCleanup(shutil.rmtree, sockets, True)
+                # As a start left them, with the daemon killed since and its id given to the bystander: the
+                # pid file still names it, and the record holds the start identity of the daemon that was.
+                (sockets / "P01-opus.pid").write_text(str(bystander.pid))
+                (sockets / ".pp-session").write_text("0" * 32 if token else "another session's")
+                policy.write_text(json.dumps({"default": "deny", "allow": []}))
+                written = json.dumps({
+                    "session": "P01-opus", "socket_dir": str(sockets), "policy": str(policy), "token": "0" * 32,
+                    "cwd": str(base), "started": 1.0, "launching": False, "daemon": [bystander.pid, "another's start"],
+                    "browser": None, "profile": None, "stopped": None, **changed})
+                kept = base / f"record-{i}.json"
+                if kind == "fifo":
+                    os.mkfifo(record)
+                else:
+                    (kept if kind == "link" else record).write_text(written)
+                if kind == "link":
+                    record.symlink_to(kept)
+                try:  # a stop that waits for a record, as an open of a FIFO to read it does, never ends
+                    r = subprocess.run(
+                        [sys.executable, str(SCRIPTS / "browser_session.py"), "stop", "--log", str(log)],
+                        env={**os.environ, "PATH": f"{base}{os.pathsep}{os.environ['PATH']}"},
+                        capture_output=True, text=True, timeout=60)
+                except subprocess.TimeoutExpired:
+                    self.fail("stop did not end within 60 s")
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertRegex(r.stdout + r.stderr, says)
+                self.assertIsNone(bystander.poll())
+                self.assertEqual(unrelated.read_text(), "the user's own")
+                self.assertEqual(((sockets / "P01-opus.pid").exists(), policy.exists()), (stays, stays))
+                if kind == "fifo":  # refused: still the FIFO it was
+                    self.assertTrue(stat.S_ISFIFO(os.lstat(record).st_mode))
+                elif code == 2:  # refused: the record is as it was, and so is what a link to it points at
+                    self.assertEqual((kept if kind == "link" else record).read_text(), written)
+
+
 class LauncherTest(unittest.TestCase):
     """launch.py run as a subprocess, with the fake CLIs playing whole runs from a plan (see
     persona_panel_fakes/panellist.py). PATH holds the fakes and nothing else, so no real CLI
@@ -1519,6 +1660,20 @@ class LauncherTest(unittest.TestCase):
                     os.kill(e["pid"], signal.SIGKILL)
             except OSError:
                 pass
+        # The browser sessions a failed test left: each fake daemon names its socket directory in its command.
+        lines = map(json.loads, self.log.read_text().splitlines() if self.log.exists() else [])
+        used = {x["env"].get("AGENT_BROWSER_SOCKET_DIR") for x in lines if x.get("cli") == "agent-browser"}
+        for e in self.events("open hung"):  # an `open` that a test left hanging
+            try:
+                os.kill(e["pid"], signal.SIGKILL)
+            except OSError:
+                pass
+        for sockets in used - {None}:
+            for pid_file in Path(sockets).glob("*.pid"):
+                r = subprocess.run(["ps", "-o", "command=", "-p", pid_file.read_text()], capture_output=True, text=True)
+                if sockets in r.stdout:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+            shutil.rmtree(sockets, True)
 
     def study(self, plan=None, personas=2, models=None, name="study", **settings):
         """Scaffold a study, with the text of each site page standing in for its capture, and set the
@@ -1621,6 +1776,14 @@ class LauncherTest(unittest.TestCase):
     def plan(self):
         return json.loads(self.launch("plan", "--json").stdout)
 
+    def browser_sessions(self):
+        """The record of the browser session of each run's attempt, logs/<run id>.<attempt>.browser."""
+        return {p.name.split(".")[0]: json.loads(p.read_text()) for p in sorted(self.sd.glob("logs/*.browser"))}
+
+    def left_of(self, record):
+        """What is still there of a browser session: its socket directory, its policy file."""
+        return [name for name in ("socket_dir", "policy") if os.path.exists(record[name])]
+
     def test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap(self):
         synthesis = {"analyst": {"runner": "claude", "model": "sonnet"}, "writer": {"runner": "claude"}}
         self.study(limits={"run": {"minutes": 10}, "overrides": {"opus": {"budget_usd": 1.5}}}, synthesis=synthesis)
@@ -1650,12 +1813,18 @@ class LauncherTest(unittest.TestCase):
         self.assertNotIn("sk-never-shown", printed.stdout + as_json.stdout)
         browsing = runners.get("claude").capabilities()["browse_gaps"][0]  # what browsing opens, where runs browse
         self.assertIn(browsing, printed.stdout)
+        # Each run in flight that may browse holds a browser: two at once on each of the two runners.
+        self.assertIn("Each holds about 330 MiB while its run is in flight: about 1.3 GiB with 4 such runs at once",
+                      printed.stdout)
+        self.assertIn("Each session refuses, whatever its harness allows: running JavaScript in the page",
+                      printed.stdout)
 
         # Every run and job capped: a maximum, and never called one without what can take a run past its cap.
         self.study(name="capped", models=[self.CLAUDE], synthesis=synthesis, browse=False)
         note = runners.get("claude").capabilities()["budget_cap_note"]
         capped, ceiling = self.launch("plan").stdout, self.plan()["ceiling"]
         self.assertNotIn(browsing, capped)
+        self.assertNotIn("Browser sessions", capped)
         self.assertIn("Ceiling: $9.00, a guaranteed maximum apart from the caveats below", capped)
         self.assertIn(f"Caveat: on claude, {note}.", capped)
         self.assertEqual((ceiling["label"], ceiling["caveats"][0]), ("guaranteed maximum", f"on claude, {note}"))
@@ -1861,7 +2030,7 @@ class LauncherTest(unittest.TestCase):
         self.assertIn(f"Concept {filed} cannot be opened in a browser", rules)
         self.assertEqual(instructions.count("shop.example.test"), 1)
         self.assertEqual(leaked(), {"panel/_panel-instructions.md"})
-        self.assertIn("Bash(agent-browser:*)", argv_of_a_run())
+        self.assertIn("Bash(agent-browser open:*)", argv_of_a_run())
         self.assertIn("External hosts the instructions send panellists to: shop.example.test.", self.launch("plan").stdout)
 
     def test_item_that_cannot_be_captured_leaves_no_folder_keeps_an_earlier_capture_and_holds_the_runs_back(self):
@@ -2103,9 +2272,121 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(limited["session"], started["session"])
         self.assertTrue(self.gone(started["pid"]))  # it never left by itself: it was killed
         self.assertEqual(self.entries()["P01-opus"]["attempts"][0]["exit_code"], -signal.SIGKILL)
-        closed = [json.loads(line) for line in self.log.read_text().splitlines() if '"agent-browser"' in line]
-        self.assertEqual([c["argv"] for c in closed if c.get("cli") == "agent-browser"],
-                         [["--session", "P01-opus", "close"]])
+
+    def test_run_that_may_browse_has_a_browser_session_of_its_own_from_before_its_cli_until_after_it(self):
+        # One run on each runner, each ending another way: by itself, at its time limit, on a request to stop.
+        self.study({"P01-opus": [["write:all"]], "P01-cx": [["stubborn", "write:1", "hang"]],
+                    "P01-local": [["write:1", "wait:never"]]},
+                   personas=1, models=[self.CLAUDE, self.CODEX, self.PI],
+                   limits={"overrides": {"cx": {"minutes": 1.5 / 60}}})
+        self.env["AGENT_BROWSER_HEADED"] = "1"  # the user's own setting, for other work: no run's browser gets it
+        launcher, output = self.launch_in_background("run")
+        self.wait_for(lambda: self.waiting() == {"P01-local"} and "P01-opus: done" in output.read_text()
+                      and "P01-cx: limited" in output.read_text(), "two runs to end and the third to wait")
+        self.assertEqual({r["run"]: r["browser"] for r in self.status()["runs"]},
+                         {"P01-opus": None, "P01-cx": None, "P01-local": "up"})
+        self.assertEqual(self.launch("stop").returncode, 0)
+        self.assertEqual(launcher.wait(timeout=30), 1)
+        self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "limited", "P01-local": "partial"})
+        records, lines = self.browser_sessions(), [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual(len({record["socket_dir"] for record in records.values()}), 3)
+        for started in self.starts():
+            with self.subTest(started["run"]):
+                seen, record = started["browser"], records[started["run"]]
+                # Its CLI found the session running, reached it by three variables and was given no other.
+                self.assertEqual(seen["env"], {"AGENT_BROWSER_SOCKET_DIR": record["socket_dir"],
+                                               "AGENT_BROWSER_SESSION": started["run"],
+                                               "AGENT_BROWSER_ACTION_POLICY": record["policy"]})
+                self.assertTrue(seen["up"])
+                # The session was told to refuse what a visitor could not do before the CLI ran.
+                refused = next(i for i, x in enumerate(lines) if x.get("argv") == ["eval", "1"]
+                               and x["env"] == seen["env"])
+                self.assertLess(refused, lines.index(started))
+                # However the CLI ended, nothing of the session is left.
+                self.wait_for(lambda: self.gone(seen["daemon"]), "the session's daemon to end")
+                self.assertEqual((self.left_of(record), bool(record["stopped"])), ([], True))
+        # The session was closed after the CLI that used it had ended.
+        closed = lines.index({"event": "session closed", "session": "P01-opus"})
+        self.assertLess(next(i for i, x in enumerate(lines) if x.get("event") == "end"), closed)
+        # It was asked through its socket: agent-browser's own "close" can signal whatever a pid file names.
+        self.assertEqual([x["argv"] for x in lines if "close" in x.get("argv", [])], [])
+
+        # A run that may not browse has no session, and its environment is as the launcher's.
+        del self.env["AGENT_BROWSER_HEADED"]
+        self.study(name="files-alone", personas=1, models=[self.CLAUDE], browse=False)
+        self.log.unlink()
+        self.assertEqual(self.launch("run").returncode, 0)
+        [alone] = self.starts()
+        self.assertEqual((alone["browser"]["env"], self.browser_sessions(),
+                          [line for line in self.log.read_text().splitlines() if '"agent-browser"' in line]),
+                         ({}, {}, []))
+
+    def test_run_whose_browser_session_cannot_be_started_never_runs_its_cli_and_is_not_marked_failed(self):
+        self.study(models=[self.CLAUDE])
+        r = self.launch("run", FAKE_AGENT_BROWSER="no_launch")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertRegex(r.stdout, r"P01-opus: could not be started\. Its browser session could not be started: .*"
+                                   r"agent-browser open about:blank failed \(exit code 1\): . Chrome exited early.*"
+                                   r"Nothing was marked as failed")
+        # No CLI ran, for this run or the next on its runner, and what the start had made is gone again.
+        self.assertEqual((self.starts(), self.states()), ([], {"P01-opus": "pending", "P02-opus": "pending"}))
+        self.assertNotIn("attempts", self.entries()["P01-opus"])
+        [record] = self.browser_sessions().values()
+        self.assertEqual(self.left_of(record), [])
+
+    def test_watchdog_killed_while_the_browser_session_starts_leaves_no_command_and_no_session_behind(self):
+        self.study(personas=1, models=[self.CLAUDE])
+        self.env["FAKE_AGENT_BROWSER"] = "hang"  # the session's daemon is up, and its start never returns
+        first, _ = self.launch_in_background("run")
+        self.wait_for(lambda: self.events("open hung"), "the start of the browser session to hang")
+        first.kill()
+        first.wait()
+        watchdog, _, starting = [int(line.split()[0]) for line in
+                                 self.sd.joinpath("logs/P01-opus.1.pid").read_text().splitlines()]
+        os.kill(watchdog, signal.SIGKILL)
+        self.wait_for(lambda: self.gone(watchdog), "the watchdog to go")
+        [opening] = [e["pid"] for e in self.events("open hung")]
+        [record] = self.browser_sessions().values()
+        daemon = int(Path(record["socket_dir"], "P01-opus.pid").read_text())
+        # No one waits for the command that starts the session, and it has not got as far as recording a daemon.
+        self.assertEqual(([self.gone(pid) for pid in (starting, opening, daemon)], record["daemon"]),
+                         ([False, False, False], None))
+
+        r = self.launch("stop")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for pid in (starting, opening, daemon):
+            self.wait_for(lambda: self.gone(pid), "the command and the session it had started to go")
+        [record] = self.browser_sessions().values()
+        self.assertEqual((self.left_of(record), bool(record["stopped"]), record["left"], record["kept"]),
+                         ([], True, [], []))
+        # Its CLI never ran: the run is as it was before the attempt, and nothing is marked failed.
+        self.assertRegex(r.stdout, r"P01-opus: could not be started\. Its browser session could not be started: .*"
+                                   r"its watchdog was killed while the session was being started.*"
+                                   r"Nothing was marked as failed")
+        self.assertEqual((self.starts(), self.states()), ([], {"P01-opus": "pending"}))
+        self.assertNotIn("attempts", self.entries()["P01-opus"])
+
+    def test_browser_session_record_that_is_a_fifo_is_refused_once_and_no_command_waits_for_it(self):
+        self.study({"P01-opus": [["write:1", "wait:never"]]}, personas=1, models=[self.CLAUDE])
+        launcher, output = self.launch_in_background("run")
+        self.wait_for(lambda: self.waiting() == {"P01-opus"}, "the run to be under way")
+        record = self.sd / "logs/P01-opus.1.browser"
+        session = json.loads(record.read_text())
+        record.unlink()
+        os.mkfifo(record)  # an open of it to read it waits for a writer, and none ever comes
+        # Neither status nor the launcher that settles the attempt waits for it: launch() gives a command 60 s.
+        self.assertEqual([(r["process"], r["browser"]) for r in self.status()["runs"]], [("alive", "down")])
+        self.assertEqual(self.launch("stop").returncode, 0)
+        self.assertEqual(launcher.wait(timeout=30), 1)
+        said = output.read_text()
+        self.assertEqual(said.count("P01-opus: the record of its browser session cannot be trusted"), 1, said)
+        self.assertRegex(said, r"P01-opus\.1\.browser is not a regular file of this user\), so nothing of the session "
+                               r"was stopped or removed")
+        # The attempt is settled as any other, with the refusal on record for status, and the session is untouched.
+        self.assertEqual(self.states(), {"P01-opus": "partial"}, said)
+        self.assertRegex(self.launch("status").stdout, r"THE RECORD OF ITS BROWSER SESSION CANNOT BE TRUSTED \(.*"
+                                                       r"P01-opus\.1\.browser is not a regular file of this user\)")
+        self.assertEqual((self.left_of(session), self.gone(session["daemon"][0])), (["socket_dir", "policy"], False))
 
     def test_limits_add_up_across_a_runs_attempts(self):
         self.study({"P01-opus": [["write:1"], ["write:1"], ["write:all"]], "P01-cx": [["write:1"], ["write:all"]]},
@@ -2187,9 +2468,17 @@ class LauncherTest(unittest.TestCase):
         unwatched_for = time.time() - self.entries()["P01-opus"]["attempts"][0]["started"]
         cli = {e["run"]: e["pid"] for e in self.starts()}
         [left] = [e["pid"] for e in self.events("spawn")]
+        browsers = [e["browser"]["daemon"] for e in self.starts()]  # no watchdog is left to stop them
+        self.assertEqual([self.gone(daemon) for daemon in browsers], [False, False])
 
         r = self.launch("stop")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # The browser session of each run is the launcher's own to stop, and it says that it did.
+        for daemon in browsers:
+            self.wait_for(lambda: self.gone(daemon), "a browser session to be stopped")
+        self.assertEqual([self.left_of(record) for record in self.browser_sessions().values()], [[], []])
+        self.assertEqual(r.stdout.count("its watchdog left its browser session running, and the launcher stopped it."),
+                         2)
         # The CLI that is still there is its group for certain, and is killed. A group that has
         # lost its CLI cannot be proved to be the run's: it is named and not signalled.
         # kill_leftovers() ends that process when the test is over.
@@ -2203,8 +2492,10 @@ class LauncherTest(unittest.TestCase):
         for e in after.values():
             self.assertIn("its watchdog was killed, so how it ended is not on record", e["reason"])
         self.assertGreaterEqual(after["P01-opus"]["seconds_used"], unwatched_for - 0.01)
-        self.assertEqual({row["run"]: row["leftover"] for row in self.status()["runs"]},
-                         {"P01-opus": None, "P02-opus": {"group": cli["P02-opus"], "pids": [left]}})
+        self.assertEqual({row["run"]: (row["leftover"], row["browser_left"]) for row in self.status()["runs"]},
+                         {"P01-opus": (None, {"found": True, "left": [], "kept": []}),
+                          "P02-opus": ({"group": cli["P02-opus"], "pids": [left]},
+                                       {"found": True, "left": [], "kept": []})})
         self.assertIn(f"process group {cli['P02-opus']} still holds pid {left}", self.launch("status").stdout)
 
     def test_resume_of_a_session_that_is_gone_restarts_only_a_run_that_wrote_nothing(self):
@@ -2456,6 +2747,637 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(sorted(e["run"] for e in self.starts()), ["P01-cx", "P01-opus"])
         self.assertEqual(self.states(), {"P01-opus": "done", "P02-opus": "pending", "P01-cx": "done",
                                          "P02-cx": "pending"})
+
+    # ---- usability studies
+
+    ACCOUNT_SCRIPT = """#!{python}
+import json, os, signal, sys, time
+from pathlib import Path
+study, (what, *task, run) = Path(__file__).resolve().parents[1], sys.argv[1:]
+def note(what):
+    with open(study / "accounts.log", "a") as log:
+        log.write(what + " " + run + "\\n")
+if what == "check":  # a task's success check: what is left of the run's account, then the verdict it is told to give
+    held, verdicts = study / "accounts" / (run + ".json"), study / "checks.json"
+    what += ":" + task[0] + ":" + ("held" if held.exists() and json.loads(held.read_text())["secrets"] else "gone")
+note(what)
+if task:
+    sys.exit(json.loads(verdicts.read_text()).get(run, {{}}).get(task[0], 0) if verdicts.exists() else 0)
+if what == "teardown" and (study / "teardown-fails").exists():
+    sys.exit("the product said no to pw-" + run)
+if what == "provision" and (study / "provision-waits").exists():  # the first to find it never gets further
+    if (study / "worker-stays").exists():  # and has a process of its own, in its group, that no SIGTERM ends
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        worker = os.fork()
+        if not worker:
+            time.sleep(30)
+            os._exit(0)
+        (study / "worker.pid").write_text(str(worker))
+    signal.signal(signal.SIGTERM, lambda *_: (note("stopped"), sys.exit(1)))
+    (study / "provision.pid").write_text(str(os.getpid()))
+    (study / "provision-waits").unlink()
+    time.sleep(30)
+    sys.exit(3)
+if what == "provision":
+    (study / "states").mkdir(exist_ok=True)
+    (study / "states" / (run + ".json")).write_text(json.dumps({{"cookies": [{{"name": "sid", "value": "cookie-" + run}}]}}))
+    print(json.dumps({{"identifiers": {{"username": "test-" + run}}, "secrets": {{"password": "pw-" + run}},
+                      "state": "states/" + run + ".json"}}))
+"""
+
+    def usability(self, plan=None, personas=1, accounts=None, **settings):
+        """Scaffold a usability study of two tasks, T1 and T2, and set the plan the fakes follow.
+        Becomes self.sd. accounts: its "accounts" besides the commands, which are one script,
+        scripts/account.py, that notes each call in accounts.log as "<command> <run id>" and, to
+        provision, saves a browser state and prints an account whose every value names the run.
+        Its teardown fails while the study has a file teardown-fails, and says the account's
+        password as it does. The first provision to find a file provision-waits takes the file
+        away, notes its pid in provision.pid and waits to be stopped, which it notes as
+        "stopped <run id>". While the study has a file worker-stays it first starts a process in
+        its own process group that ignores SIGTERM, and notes that one's pid in worker.pid. A
+        study that gives a "map" has its accounts from that, and no commands. None for a study
+        without accounts."""
+        self.sd = self.tmp / "usability"
+        (self.sd / "scripts").mkdir(parents=True)
+        script = self.sd / "scripts/account.py"
+        script.write_text(self.ACCOUNT_SCRIPT.format(python=sys.executable))
+        script.chmod(0o755)
+        commands = {name: f"scripts/account.py {name}" for name in ("provision", "teardown")}
+        self.settings({
+            "type": "usability", "study": "u", "product": "Acme", "models": [self.CLAUDE, self.CODEX],
+            "target": {"base_url": "http://app.localhost:8080"},
+            "tasks": [{"id": "T1", "goal": "Find out what you could borrow."},
+                      {"id": "T2", "goal": "Change your email address.", "start": "/account", "steps": 10}],
+            "personas": [{"id": f"P{i:02d}", "name": f"Person {i}", "role": "Owner", "personality": "Sceptic"}
+                         for i in range(1, personas + 1)],
+            **({} if accounts is None else {"accounts": {**({} if "map" in accounts else commands), **accounts}}),
+            **settings})
+        subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd)], check=True,
+                       capture_output=True, text=True)
+        shutil.rmtree(self.fake, True)
+        (self.fake / "go").mkdir(parents=True)
+        (self.fake / "plan.json").write_text(json.dumps(plan or {}))
+
+    def tasks(self, checked=False, steps=None):
+        """The two tasks of usability(), to pass as its `tasks`: with a step limit of `steps` each,
+        and when checked with a success check each, "scripts/account.py check <task>". That script
+        notes "check:<task>:<held or gone> <run id>" in accounts.log, by whether the run's account
+        still has its secrets, and exits with the code the study's checks.json has for the run and
+        the task, {run id: {task id: exit code}}, else with 0."""
+        return [{"id": task, "goal": goal, "start": start, **({"steps": steps} if steps else {}),
+                 **({"success_check": f"scripts/account.py check {task}"} if checked else {})}
+                for task, goal, start in (("T1", "Find out what you could borrow.", "/"),
+                                          ("T2", "Change your email address.", "/account"))]
+
+    def account_calls(self, run_id=None):
+        """What the study's account script was called for, in order: for one run, or for all."""
+        log = self.sd / "accounts.log"
+        calls = log.read_text().splitlines() if log.exists() else []
+        return [c.split()[0] for c in calls if c.endswith(f" {run_id}")] if run_id else calls
+
+    def test_usability_run_is_done_by_its_task_sections_and_a_resumed_run_is_told_which_tasks_are_left(self):
+        self.usability({"P01-opus": [["write:1", "act:1"], ["write:all"]],  # cut off one step into its second task
+                        "P01-cx": [["write:2"], ["final"]]})                # every task scored, no final sections
+        r = self.launch("run")
+        self.assertEqual(self.states(), {"P01-opus": "partial", "P01-cx": "partial"}, r.stdout + r.stderr)
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, self.states()), (0, {"P01-opus": "done", "P01-cx": "done"}), r.stdout)
+        told = {e["run"]: e["stdin"] for e in self.starts() if e["resumed"]}
+        for said in ("Tasks already written: T1.", "Tasks left, in this order: T2.", "Your browser was restarted"):
+            self.assertIn(said, told["P01-opus"])
+        # The task that was under way starts again, as an attempt the step log can tell from the first.
+        self.assertRegex(told["P01-opus"], r'Task T2 was under way.*`http://app\.localhost:8080/account`.*'
+                                           r'"attempt": 2.*`T2-a2-<step>\.png`')
+        self.assertIn("Every task has its section.", told["P01-cx"])
+        self.assertNotIn("was under way", told["P01-cx"])
+        evidence = self.sd / "panel/evidence/P01-opus"
+        steps = [json.loads(line) for line in evidence.joinpath("steps.jsonl").read_text().splitlines()]
+        self.assertEqual([(x["task"], x["attempt"], x["step"]) for x in steps if x["phase"] == "result"],
+                         [("T1", 1, 1), ("T1", 1, 2), ("T2", 1, 1), ("T2", 2, 1), ("T2", 2, 2)])
+        self.assertEqual(sorted(f.name for f in evidence.glob("*.png")),
+                         ["T1-1.png", "T1-2.png", "T2-1.png", "T2-a2-1.png", "T2-a2-2.png"])
+        # The checks, the scores and the analysis take the task as their unit.
+        checks = run("check_runs.py", self.sd).stdout  # nothing blocking, and no ranking or review order missed
+        self.assertIn("| P01-opus | - | flat scoring (sd 0.00) |\n\n2 run files of 2 expected; 0 with blocking", checks)
+        run("extract_scores.py", self.sd)
+        with open(self.sd / "analysis/scores.csv") as f:
+            self.assertEqual([(r["model"], r["task"], r["position"], r["complete"], r["overall"])
+                              for r in csv.DictReader(f)],
+                             [("opus", "T1", "1", "1", "7"), ("opus", "T2", "2", "1", "7"),
+                              ("cx", "T1", "1", "1", "7"), ("cx", "T2", "2", "1", "7")])
+        run("analyze.py", self.sd)
+        self.assertRegex(self.sd.joinpath("analysis/quant.md").read_text(), r"\| T1 \| 2 \| 7\.0 .*\n\| T2 \| 2 \|")
+
+    def test_usability_run_has_a_test_account_of_its_own_that_is_torn_down_once_at_every_final_state(self):
+        self.usability({"P01-opus": [["write:all"]],              # done
+                        "P01-cx": [["write:1", "end:budget"]],    # limited
+                        "P02-opus": [["end:error"]]},             # failed, retried once, failed again
+                       personas=2, accounts={}, tasks=self.tasks(checked=True))
+        before = self.tree()
+        self.assertEqual(self.launch("plan").returncode, 0)
+        self.assertEqual((self.tree(), self.account_calls()), (before, []))  # the plan provisions nothing
+        r = self.launch("run", "--runs", "P01-opus,P01-cx,P02-opus")
+        self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "limited", "P02-opus": "failed",
+                                         "P02-cx": "pending"}, r.stdout + r.stderr)
+        # One provisioning for each start from nothing, each with its teardown, and none for a run not started.
+        # A run in a final state has its tasks checked first, while its account is whole: not one about to be retried.
+        checked = ["check:T1:held", "check:T2:held"]
+        self.assertEqual({run_id: self.account_calls(run_id) for run_id in self.states()},
+                         {"P01-opus": ["provision", *checked, "teardown"],
+                          "P01-cx": ["provision", *checked, "teardown"],
+                          "P02-opus": ["provision", "teardown", "provision", *checked, "teardown"], "P02-cx": []})
+        loaded = {x["env"]["AGENT_BROWSER_SESSION"]: x for x in map(json.loads, self.log.read_text().splitlines())
+                  if x.get("cli") == "agent-browser" and x["argv"][:1] == ["--state"]}
+        for started in self.starts():
+            with self.subTest(started["run"]):
+                # The panellist was told who it is signed in as, and was given no secret.
+                self.assertEqual({k: v for k, v in started["account"].items() if k != "note"},
+                                 {"signed_in": True, "identifiers": {"username": f"test-{started['run']}"}})
+                # Its browser session started from its own account's saved state, in a copy that is gone again.
+                state = loaded[started["run"]]
+                self.assertEqual(state["state"], {"cookies": [{"name": "sid", "value": f"cookie-{started['run']}"}]})
+                self.assertTrue(state["argv"][1].startswith(str(self.sd / "logs")), state["argv"])
+        self.assertEqual(list(self.sd.glob("logs/*.state")), [])
+        # Torn down: the secrets are gone from the lead's record, and the identifiers stay.
+        record = json.loads(self.sd.joinpath("accounts/P01-opus.json").read_text())
+        self.assertEqual((record["identifiers"], record["secrets"], record["state"], bool(record["torn_down"])),
+                         ({"username": "test-P01-opus"}, {}, None, True))
+        self.assertFalse(self.sd.joinpath("states/P01-opus.json").exists())
+
+        # A launcher that is killed before its run has ended leaves the teardown to the next command.
+        first, _ = self.launch_in_background("run", "--runs", "P02-cx", "--poll", 30)
+        self.wait_for(lambda: any(e["run"] == "P02-cx" for e in self.events("end")), "P02-cx to end unwatched")
+        first.kill()
+        first.wait()
+        self.assertEqual(self.account_calls("P02-cx"), ["provision"])
+        # While the account is in force, its secrets are in the lead's record alone.
+        held = self.sd / "accounts/P02-cx.json"
+        self.assertEqual((json.loads(held.read_text())["secrets"], held.stat().st_mode & 0o777),
+                         ({"password": "pw-P02-cx"}, 0o600))
+        self.assertEqual([str(f) for f in self.sd.joinpath("panel").rglob("*") if f.is_file()
+                          and (b"pw-P02-cx" in f.read_bytes() or b"cookie-P02-cx" in f.read_bytes())], [])
+        # A teardown that fails is said aloud and leaves the account in force, for the next command to try again.
+        self.sd.joinpath("teardown-fails").touch()
+        r = self.launch("stop")
+        wrote = self.sd / "accounts/P02-cx.teardown.output"
+        self.assertIn("P02-cx: TEARDOWN OF ITS TEST ACCOUNT FAILED: accounts.teardown exited with code 1 "
+                      "(scripts/account.py teardown P02-cx). What it wrote is in accounts/P02-cx.teardown.output",
+                      r.stdout)
+        self.assertEqual((self.states()["P02-cx"], json.loads(held.read_text())["secrets"]),
+                         ("done", {"password": "pw-P02-cx"}))
+        # The command said the password as it failed. That is in a file for the lead alone, and in nothing the
+        # launcher prints or keeps: not its own lines, runs.json, status or the usage record.
+        self.assertEqual(("no to pw-P02-cx" in wrote.read_text(), wrote.stat().st_mode & 0o777), (True, 0o600))
+        self.assertIn("exited with code 1", next(x for x in self.status()["runs"] if x["run"] == "P02-cx")
+                      ["account"]["teardown_error"])
+        kept = [self.sd / "runs.json", *self.sd.glob("analysis/*")]
+        self.assertNotIn("pw-", r.stdout + r.stderr + self.launch("status").stdout
+                         + self.launch("status", "--json").stdout + "".join(f.read_text() for f in kept))
+        self.sd.joinpath("teardown-fails").unlink()
+        self.assertIn("P02-cx: its test account was torn down", self.launch("resume").stdout)
+        self.assertFalse(wrote.exists())  # of a try that failed: it goes when the command has worked
+        self.launch("resume")  # and once it has worked, never again: the checks ran once, before the first try
+        self.assertEqual(self.account_calls("P02-cx"), ["provision", *checked, "teardown", "teardown"])
+        self.assertEqual((self.entries()["P02-cx"]["account"]["teardown_error"], json.loads(held.read_text())["secrets"]),
+                         (None, {}))
+
+    def test_sequential_usability_study_runs_one_panellist_at_a_time_and_resets_the_product_between_them(self):
+        # Signing in is the task under test here, so each panellist is handed its secrets.
+        self.usability({"P01-opus": [["wait:go", "write:all"]], "P01-cx": [["wait:go", "write:all"]]},
+                       sequential=True, accounts={"reset": "scripts/account.py reset", "signin": "panellist"})
+        launcher, _ = self.launch_in_background("run")
+        self.wait_for(lambda: self.waiting(), "a run to be under way")
+        self.assertEqual(len(self.starts()), 1)
+        self.release("go")
+        self.assertEqual(launcher.wait(timeout=30), 0)
+        order = [e["event"] for e in map(json.loads, self.log.read_text().splitlines())
+                 if e.get("event") in ("start", "end")]
+        self.assertEqual(order, ["start", "end", "start", "end"])
+        first, second = (e["run"] for e in self.starts())
+        self.assertEqual(self.account_calls(), [f"provision {first}", f"teardown {first}", f"reset {second}",
+                                                f"provision {second}", f"teardown {second}"])
+        for started in self.starts():
+            # Handed the secrets to type, with no saved state loaded for it, and marked for good as a run
+            # whose screenshots may show one. Once the account is torn down the secrets are gone again.
+            self.assertEqual((started["account"]["signed_in"], started["account"]["secrets"]),
+                             (False, {"password": f"pw-{started['run']}"}))
+            self.assertTrue(self.entries()[started["run"]]["account"]["secrets_given"])
+            self.assertNotIn("pw-", self.sd.joinpath(f"panel/scratch/{started['run']}/account.json").read_text())
+        self.assertNotIn('"--state"', self.log.read_text())
+
+    def analysed(self):
+        """Extract and analyse the study: (the rows of tasks.csv by run and task, quant.json, quant.md)."""
+        run("extract_scores.py", self.sd)
+        run("analyze.py", self.sd)
+        with open(self.sd / "analysis/tasks.csv") as f:
+            rows = {(r["run"], r["task"]): r for r in csv.DictReader(f)}
+        return rows, json.loads(self.sd.joinpath("analysis/quant.json").read_text()), \
+            self.sd.joinpath("analysis/quant.md").read_text()
+
+    def test_task_that_uses_its_step_limit_keeps_its_last_step_and_a_run_that_passes_the_limit_is_stopped(self):
+        self.usability({
+            # Keeps to the limit itself: three steps of T1, the last of them off to look for help, then on to T2.
+            "P01-opus": [["steps:3", "outcome:ran out of steps", "leave", "write:1", "steps:2", "outcome:completed",
+                          "write:all"]],
+            # Begins a fourth step of T2, in a step log that already holds what none should: an entry of T2 that is
+            # no step, under attempt 999, among it.
+            "P01-cx": [["write:1", "scribble", "act:3", "intent:4", "hang"], ["write:all"]],
+            # Begins a fourth step of T1 as step 1 of an attempt the launcher never gave it, and is slow to stop.
+            "P02-opus": [["act:3", "intent:1@2", "deaf", "hang"]],
+        }, personas=2, tasks=self.tasks(steps=3))
+        r = self.launch("run", "--runs", "P01-opus,P01-cx")
+        entries, evidence = self.entries(), self.sd / "panel/evidence"
+
+        def logged(run_id, phase):  # the (task, step) of each entry of that phase a run's step log holds
+            lines = evidence.joinpath(run_id, "steps.jsonl").read_text().splitlines()
+            return [(x["task"], x["step"]) for x in map(json.loads, filter(lambda line: line[:1] == "{", lines))
+                    if x["phase"] == phase and x["task"] != "T99"]
+
+        # At the limit the panellist stops the task itself: the last step it was allowed has its result and its
+        # screenshot, and the run goes on to the next task.
+        self.assertEqual((entries["P01-opus"]["state"], logged("P01-opus", "result")),
+                         ("done", [("T1", 1), ("T1", 2), ("T1", 3), ("T2", 1), ("T2", 2)]), r.stdout + r.stderr)
+        self.assertTrue(evidence.joinpath("P01-opus/T1-3.png").is_file())
+        # A run that begins a step beyond the limit is stopped as limited, and keeps everything it wrote. The
+        # line that is no entry and the entry for a task the study does not have, numbered 99, stop nothing,
+        # and the entry under attempt 999 does not pass for a later attempt that the limit would then be read in.
+        stopped = entries["P01-cx"]
+        self.assertEqual((stopped["state"], stopped["reason"], stopped["limited_by"]),
+                         ("limited", "step limit: task T2, step 4 of 3", "steps"), r.stdout + r.stderr)
+        self.assertIn("P01-cx: its step log has 1 line that cannot be read as an entry (line 5)", r.stdout)
+        self.assertEqual((self.sd.joinpath(stopped["file"]).read_text().count("### Task "),
+                          logged("P01-cx", "result")[-1], logged("P01-cx", "intent")[-1],
+                          evidence.joinpath("P01-cx/T2-3.png").is_file()), (1, ("T2", 3), ("T2", 4), True))
+
+        # The reason is on record before the run is asked to stop, so a launcher killed after asking loses none of it.
+        first, _ = self.launch_in_background("run", "--runs", "P02-opus", "--grace", 2)
+        self.wait_for(lambda: any(e["run"] == "P02-opus" for e in self.events("term")), "P02-opus to be asked to stop")
+        first.kill()
+        first.wait()
+        before, cli = len(self.starts()), self.starts()[-1]["pid"]
+        self.wait_for(lambda: self.gone(cli), "P02-opus to be ended by its watchdog")
+        r = self.launch("run")
+        # A step under an attempt number of the panellist's own is one more step of the task: the count goes on.
+        self.assertIn("P02-opus: limited: step limit: task T1, step 4 of 3", r.stdout)
+        self.assertEqual([e["run"] for e in self.starts(before)], ["P02-cx"])  # "run" restarts no limited run
+        # It is continued like any limited run, and the task that was under way starts again as a new attempt.
+        r = self.launch("resume", "--runs", "P01-cx", "--extend")
+        self.assertEqual((self.states()["P01-cx"], '"attempt": 2' in self.starts()[-1]["stdin"]), ("done", True),
+                         r.stdout + r.stderr)
+
+        rows, quant, report = self.analysed()
+        self.assertEqual({k: (x["stopped"], x["steps"], x["attempts"]) for k, x in rows.items()}, {
+            ("P01-opus", "T1"): ("ran out of steps", "3", "1"), ("P01-opus", "T2"): ("completed", "2", "1"),
+            ("P01-cx", "T1"): ("completed", "2", "1"), ("P01-cx", "T2"): ("completed", "2", "2"),
+            ("P02-opus", "T1"): ("step limit", "3", "1"), ("P02-opus", "T2"): ("not reached", "0", "0"),
+            ("P02-cx", "T1"): ("completed", "2", "1"), ("P02-cx", "T2"): ("completed", "2", "1")})
+        # Both ways of running out of steps on T1 make its form the first stuck point: the screen that held each
+        # run, with the steps that left it there. The run that went for help last did not end on that screen.
+        top = quant["stuck_points"]["points"][0]
+        self.assertEqual((top["task"], top["page"], [(e["run"], e["end"], e["ended_on"], e["steps"], e["screenshots"])
+                                                    for e in top["evidence"]]),
+                         ("T1", "/T1/form", [
+                             ("P01-opus", "ran out of steps", "/help", [1, 2], ["T1-1.png", "T1-2.png"]),
+                             ("P02-opus", "step limit", "/T1/form", [1, 2, 3], ["T1-1.png", "T1-2.png", "T1-3.png"])]))
+        self.assertIn("- P01-opus: ran out of steps after step 3 on `/help`, reached from here. 2 of its last 3 "
+                      "steps left it here: steps 1, 2 (`T1-1.png`, `T1-2.png`)", report)
+        self.assertIn("| T1 | 3 | 4 | 2 of 4 (50%) | no check |", report)  # the stopped run counts against the task
+        self.assertIn("- P01-cx: entries for a task this study does not have (T99).", report)
+        # What is not a step, or is of an attempt the launcher never gave, hides none of the steps above.
+        self.assertIn("- P02-opus: 1 entry with an attempt number the launcher did not give its task", report)
+
+    def test_claim_that_the_success_check_denies_is_flagged_and_a_check_that_fails_to_run_is_no_verdict(self):
+        self.usability({"P01-cx": [["write:1", "outcome:gave up", "write:all"]]}, tasks=self.tasks(checked=True),
+                       accounts={}, synthesis={"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}})
+        verdicts = self.sd / "checks.json"  # exit codes: 1 says not completed, 3 is no verdict at all
+        verdicts.write_text(json.dumps({"P01-opus": {"T1": 1}, "P01-cx": {"T1": 3}}))
+        r = self.launch("run")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("P01-cx: SUCCESS CHECK FAILED TO RUN: the success check of task T1 exited with code 3", r.stdout)
+        # A success check is the lead's: no panellist can read of one.
+        self.assertEqual([str(f) for f in self.sd.joinpath("panel").rglob("*")
+                          if f.is_file() and b"account.py" in f.read_bytes()], [])
+        rows, quant, report = self.analysed()
+        self.assertEqual({k: (x["claimed"], x["checked"], x["mismatch"]) for k, x in rows.items()}, {
+            ("P01-opus", "T1"): ("completed", "no", "check_denies"), ("P01-opus", "T2"): ("completed", "yes", ""),
+            ("P01-cx", "T1"): ("completed", "error", ""), ("P01-cx", "T2"): ("gave up", "yes", "check_passes")})
+        t1 = quant["completion"]["by_task"]["T1"]  # two claims, one verdict, and the check that failed is in neither
+        self.assertEqual((t1["claimed"], t1["checked"], t1["verdicts"], t1["check_errors"], t1["mismatches"]),
+                         (2, 0, 1, 1, 1))
+        self.assertEqual([(m["run"], m["task"], m["mismatch"]) for m in quant["completion"]["mismatches"]],
+                         [("P01-opus", "T1", "check_denies"), ("P01-cx", "T2", "check_passes")])
+        self.assertIn("| P01-opus | Person 1 | opus | T1 | completed | not completed | claimed completed, and the "
+                      "check says it was not |", report)
+        # Once the check is mended, the lead runs it again by hand. The run's account is torn down by then, so
+        # only the task with no verdict is tried: a verdict made while the account was there is kept.
+        verdicts.write_text(json.dumps({"P01-cx": {"T2": 3}}))
+        r = self.launch("check", "--runs", "P01-cx")
+        self.assertEqual((r.returncode, self.entries()["P01-cx"]["checks"]["T1"]["checked"]), (0, True), r.stdout)
+        self.assertIn("P01-cx: task T2 kept: the account is gone, so the check cannot be run again", r.stdout)
+        self.assertEqual((self.entries()["P01-cx"]["checks"]["T2"]["checked"], self.account_calls("P01-cx")[-2:]),
+                         (True, ["teardown", "check:T1:gone"]))
+        r = self.launch("check", "--runs", "P01-cx", "--force")  # unless the lead says to run it all the same
+        self.assertIn("The earlier verdict, completed, was replaced", r.stdout)
+        self.assertEqual((r.returncode, self.entries()["P01-cx"]["checks"]["T2"]["checked"]), (1, None), r.stdout)
+
+        # The writer waits for the analysts, and an analyst is given each run's step log and screenshots to read.
+        refused = self.launch("run", "--role", "writer")
+        self.assertIn("The writer waits for the analysts: analyst-1 is pending", refused.stderr)
+        r = self.launch("run", "--role", "analyst")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        brief = self.sd.joinpath("prompts/analyst-1.md").read_text()
+        for run_id, e in self.entries().items():
+            if e["role"] == "panellist":
+                self.assertIn(f"- `{self.sd / e['file']}`, with its step log and screenshots in "
+                              f"`{self.sd}/panel/evidence/{run_id}/`", brief)
+        r = self.launch("run", "--role", "writer")
+        self.assertEqual((r.returncode, self.states()["writer"]), (0, "done"), r.stdout + r.stderr)
+
+    def test_release_lets_go_of_the_account_of_an_unfinished_run_which_is_then_started_only_when_asked_to(self):
+        self.usability({"P01-opus": [["write:1", "end:error"], ["act:1", "end:error"], ["act:1", "end:error"],
+                                     ["write:all"]]}, accounts={}, tasks=self.tasks(checked=True))
+        self.launch("run")
+        self.assertEqual((self.states()["P01-opus"], self.account_calls("P01-opus")), ("partial", ["provision"]))
+        self.launch("resume")  # cut off again: an unfinished run keeps its account, and is told so
+        self.assertEqual((self.states()["P01-opus"], self.account_calls("P01-opus")), ("partial", ["provision"]))
+        self.assertIn("signed in to the same test account again", self.starts()[-1]["stdin"])
+        # What it got done is checked while the account is whole, then the account goes, once.
+        finished = ["check:T1:held", "check:T2:held", "teardown"]
+        r = self.launch("release", "--runs", "P01-opus")
+        self.assertEqual((r.returncode, self.account_calls("P01-opus")), (0, ["provision", *finished]), r.stdout)
+        before = len(self.starts())
+        r = self.launch("resume")
+        self.assertIn("P01-opus: released by the lead", r.stdout)
+        self.assertEqual((self.starts(before), self.states()["P01-opus"], self.account_calls("P01-opus")),
+                         ([], "partial", ["provision", *finished]))
+        self.assertTrue(next(x for x in self.status()["runs"] if x["run"] == "P01-opus")["released"])
+        # Named with --released it is continued after all, with an account of its own again, and its panellist
+        # is told the account is another one.
+        self.launch("resume", "--runs", "P01-opus", "--released")  # cut off once more
+        told = self.starts()[-1]["stdin"]
+        self.assertIn("Your test account is a new one", told)
+        self.assertNotIn("the same test account", told)
+        # The task it had written up is not attempted again, so its check stands as it was made, with the
+        # account that is gone, through every later attempt: only the other task is checked on the new one.
+        r = self.launch("resume")
+        self.assertEqual((self.states()["P01-opus"], "released" in self.entries()["P01-opus"],
+                          self.account_calls("P01-opus")),
+                         ("done", False, ["provision", *finished, "provision", "check:T2:held", "teardown"]), r.stdout)
+        self.assertEqual(sorted(self.entries()["P01-opus"]["checks"]), ["T1", "T2"])
+
+    # ---- usability: secrets and the archive (check_runs.py, archive.py)
+
+    def test_secret_value_in_a_persona_file_or_step_log_fails_its_run_and_is_never_printed(self):
+        self.usability(personas=2, accounts={})
+        r = self.launch("run", "--runs", "P01-opus,P01-cx,P02-opus")
+        self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "done", "P02-opus": "done", "P02-cx": "pending"},
+                         r.stdout + r.stderr)
+        # Each run's account is torn down by now, and its secrets are off every record: the scan knows them all the same.
+        self.assertEqual([json.loads(f.read_text())["secrets"] for f in self.sd.glob("accounts/P*.json")], [{}] * 3)
+        files = {run_id: self.sd / e["file"] for run_id, e in self.entries().items()}
+        log = self.sd / "panel/evidence/P01-cx/steps.jsonl"
+        # One run was shown another's password, one logged its own, and the synthesis quotes a third.
+        files["P01-opus"].write_text(files["P01-opus"].read_text() + "The page said the password is pw-P01-cx.\n")
+        log.write_text(log.read_text().replace("It moved on.", "The field showed pw-P01-cx.", 1))
+        # And a password where a task id belongs, which a note on the log's form would repeat.
+        log.write_text(log.read_text() + json.dumps({"task": "pw-P02-opus", "step": 1, "phase": "intent"}) + "\n")
+        self.sd.joinpath("analysis/SYNTHESIS.md").write_text("# Findings\n\nOne run read out pw-P02-opus.\n")
+        # An identifier may be seen: a run's own says nothing, and another run's is worth a look.
+        files["P02-opus"].write_text(files["P02-opus"].read_text() + "I was test-P02-opus, and saw test-P01-opus.\n")
+
+        def checked():
+            r = run("check_runs.py", self.sd, check=False)
+            return r.returncode, r.stdout + r.stderr + self.sd.joinpath("analysis/checks.md").read_text()
+
+        code, said = checked()
+        self.assertEqual(code, 1, said)
+        self.assertRegex(said, r"\| P01-opus \| a secret value in its persona file: line \d+ "
+                               r"\(a secret of P01-cx's account \(\"password\"\)\) \|")
+        self.assertRegex(said, r"\| P01-cx \| a secret value in its step log: line 2 "
+                               r"\(a secret of P01-cx's account \(\"password\"\)\); line 9 "
+                               r"\(a secret of P02-opus's account \(\"password\"\)\) \|")
+        self.assertIn("entries for a task this study does not have ((a value that is not a task id, 11 characters))",
+                      said)
+        self.assertRegex(said, r"\| P02-opus \| - \| .*names an identifier of P01-opus's test account "
+                               r"\(\"test-P01-opus\"\)")
+        self.assertIn("A secret value in analysis/SYNTHESIS.md: line 3 (a secret of P02-opus's account", said)
+        self.assertNotIn("pw-", said)
+        run("extract_scores.py", self.sd)  # nor is it copied into what the analysis reads
+        self.assertNotIn("pw-", "".join(f.read_text() for f in self.sd.glob("analysis/*.csv")))
+
+    def test_evidence_that_cannot_be_read_as_the_runs_own_fails_the_checks_and_is_never_archived(self):
+        self.usability()
+        self.launch("run")
+        self.assertEqual(self.states(), {"P01-opus": "done", "P01-cx": "done"})
+        evidence, outside, dest = self.sd / "panel/evidence", self.tmp / "outside", self.tmp / "archive/panel/round-1"
+
+        def unreadable():  # a step log that may not be read: nothing says it holds no secret
+            evidence.joinpath("P01-cx/steps.jsonl").chmod(0)
+            return lambda: evidence.joinpath("P01-cx/steps.jsonl").chmod(0o644)
+
+        def linked():  # a panellist put a link where its evidence folder was: what it points at is not the study's
+            evidence.joinpath("P01-cx").rename(outside)
+            evidence.joinpath("P01-cx").symlink_to(outside)
+            return lambda: (evidence.joinpath("P01-cx").unlink(), outside.rename(evidence / "P01-cx"))
+
+        cases = {"a step log that may not be read": (unreadable, "panel/evidence/P01-cx/steps.jsonl: Permission denied"),
+                 "an evidence folder that is a link": (linked, "panel/evidence/P01-cx is a symbolic link")}
+        for name, (change, named) in cases.items():
+            if name.startswith("a step log") and not os.geteuid():
+                continue  # nothing is unreadable to root
+            with self.subTest(name):
+                undo = change()
+                checked = run("check_runs.py", self.sd, check=False)
+                archived = subprocess.run([sys.executable, str(self.scripts / "archive.py"), str(self.sd), "--dest",
+                                           str(dest)], capture_output=True, text=True)
+                undo()
+                self.assertRegex(checked.stdout, r"\| P01-cx \| its step log could not be scanned for secrets \(")
+                self.assertEqual((checked.returncode, archived.returncode, dest.exists()), (1, 1, False),
+                                 archived.stdout + archived.stderr)
+                self.assertIn(named, archived.stderr)
+        self.assertEqual(run("check_runs.py", self.sd, check=False).returncode, 0)  # as it was: nothing blocks
+
+    def test_teardown_that_failed_or_was_cut_short_is_finished_before_its_run_gets_another_account(self):
+        self.usability({"P01-opus": [["end:error"], ["write:all"]],  # failed, and its account cannot be torn down
+                        "P01-cx": [["write:1", "end:error"]]},       # partial: it keeps its account
+                       accounts={})
+        self.sd.joinpath("teardown-fails").touch()
+        r = self.launch("run")
+        # A failed run is retried with a new account. While the old one cannot be torn down it is not retried.
+        self.assertEqual((self.states(), [e["run"] for e in self.starts()].count("P01-opus"),
+                          self.account_calls("P01-opus"), self.account_calls("P01-cx")),
+                         ({"P01-opus": "failed", "P01-cx": "partial"}, 1, ["provision", "teardown"], ["provision"]),
+                         r.stdout + r.stderr)
+        # The other run's teardown was begun by a command that was killed after the product had removed the
+        # account and before the files were seen to: what such a kill leaves on record.
+        record, state = self.sd / "accounts/P01-cx.json", self.sd / "states/P01-cx.json"
+        left = json.loads(record.read_text())
+        record.write_text(json.dumps({**left, "cleanup": {"began": 1, "remove": [left["state"]], "rewrite": []}}))
+        self.sd.joinpath("teardown-fails").unlink()
+        before = len(self.starts())
+        r = self.launch("run", "--runs", "P01-opus")
+        # Any launcher command finishes it first, though its run is unfinished: the account is not one to resume in.
+        after = json.loads(record.read_text())
+        self.assertEqual((self.account_calls("P01-cx"), bool(after["torn_down"]), after["secrets"], "cleanup" in after,
+                          state.exists()), (["provision", "teardown"], True, {}, False, False), r.stdout + r.stderr)
+        # And the failed run is torn down again first, then given a new account and started.
+        self.assertEqual((self.states()["P01-opus"], self.account_calls("P01-opus"),
+                          [e["run"] for e in self.starts(before)], self.entries()["P01-opus"]["account"]["times"]),
+                         ("done", ["provision", "teardown", "teardown", "provision", "teardown"], ["P01-opus"], 2),
+                         r.stdout + r.stderr)
+
+    def test_provision_command_that_outlived_its_launcher_is_stopped_before_the_run_is_provisioned_again(self):
+        self.usability({"P01-opus": [["write:1", "end:error"]]}, personas=2, accounts={}, models=[self.CLAUDE])
+        gate, noted = self.sd / "provision-waits", self.sd / "provision.pid"
+        gate.touch()
+        first, _ = self.launch_in_background("run", "--runs", "P01-opus")
+        self.wait_for(lambda: noted.exists() and not gate.exists(), "the provision command to be under way")
+        command = int(noted.read_text())
+        self.addCleanup(lambda: self.gone(command) or os.kill(command, signal.SIGKILL))
+        first.kill()
+        first.wait()
+        self.assertFalse(self.gone(command))  # in a session of its own, it outlives its launcher
+        r = self.launch("run", "--runs", "P01-opus")
+        # Stopped and waited for, then cleared up after, and only then is the run provisioned again: the two
+        # never run side by side, and one account is in force for the run that follows.
+        self.assertEqual((self.gone(command), self.account_calls("P01-opus"), self.states()["P01-opus"]),
+                         (True, ["provision", "stopped", "teardown", "provision"], "partial"), r.stdout + r.stderr)
+        self.assertIn(f"accounts.provision for P01-opus ran. It was still running (pid {command}) and was stopped",
+                      r.stdout)
+        records = [json.loads(f.read_text()) for f in self.sd.glob("accounts/P*.json")]
+        self.assertEqual([(x["run"], x["times"], bool(x["secrets"])) for x in records], [("P01-opus", 1, True)])
+
+        # A command can leave a process of its own behind: here it ends on a SIGTERM that its worker ignores. With
+        # the command gone nothing proves whose the worker is, so it is not killed, and nothing is run beside it.
+        gate.touch()
+        self.sd.joinpath("worker-stays").touch()
+        noted.unlink()
+        second, _ = self.launch_in_background("run", "--runs", "P02-opus")
+        self.wait_for(lambda: noted.exists() and not gate.exists(), "the second provision command to be under way")
+        command, worker = int(noted.read_text()), int(self.sd.joinpath("worker.pid").read_text())
+        for pid in (command, worker):
+            self.addCleanup(lambda pid=pid: self.gone(pid) or os.kill(pid, signal.SIGKILL))
+        second.kill()
+        second.wait()
+        os.killpg(command, signal.SIGTERM)
+        self.wait_for(lambda: self.gone(command), "the second provision command to end")
+        record, calls = self.sd / "accounts/command.running", self.account_calls()
+        on_record = record.read_bytes()
+        r = self.launch("run", "--runs", "P02-opus")
+        self.assertEqual((r.returncode, self.gone(worker), self.account_calls(),
+                          record.read_bytes() if record.exists() else None), (1, False, calls, on_record),
+                         r.stdout + r.stderr)
+        self.assertIn(f"process group {command} still holds pid {worker}", r.stderr)
+        self.assertIn(f"ps -o pid,pgid,command -p {worker} ", r.stderr)
+        # Once the lead has stopped it the group is empty, and the next command carries on from the record.
+        os.kill(worker, signal.SIGKILL)
+        self.wait_for(lambda: self.gone(worker), "the worker to end")
+        r = self.launch("run", "--runs", "P02-opus")
+        self.assertEqual((record.exists(), self.account_calls("P02-opus"), self.states()["P02-opus"]),
+                         (False, ["provision", "stopped", "teardown", "provision", "teardown"], "done"),
+                         r.stdout + r.stderr)
+
+    def test_usability_archive_keeps_the_evidence_without_a_secret_or_a_screenshot_that_could_show_one(self):
+        runs = ("P01-opus", "P01-cx", "P02-opus", "P02-cx")
+        accounts = {x: {"identifiers": {"username": f"user-{x}"}, "secrets": {"password": f"pw-{x}"}} for x in runs}
+        self.usability({"P02-cx": [["write:1"], ["write:all"]]}, personas=2, accounts={"map": accounts})
+        self.launch("run", "--runs", "P01-opus,P01-cx,P02-opus")  # these three are given no secret
+        self.settings({"accounts": {"map": accounts, "signin": "panellist"}})
+        self.launch("run", "--runs", "P02-cx")  # this one is given its password to type, and stops after one task
+        self.assertEqual(self.states(), {**dict.fromkeys(runs, "done"), "P02-cx": "partial"})
+        dest = self.tmp / "archive/panel/round-1"
+
+        def archive(path=os.environ.get("PATH", "")):
+            return subprocess.run([sys.executable, str(self.scripts / "archive.py"), str(self.sd), "--dest", str(dest)],
+                                  env={**os.environ, "PATH": path}, capture_output=True, text=True)
+
+        # Refused while a run still has its account, and while a step log holds a secret value: nothing is copied.
+        r = archive()
+        self.assertIn("The test account of P02-cx is still in force", r.stderr)
+        self.assertEqual(self.launch("resume", "--runs", "P02-cx").returncode, 0)
+        evidence = self.sd / "panel/evidence"
+        log = evidence / "P02-opus/steps.jsonl"
+        clean = log.read_text()
+        log.write_text(clean.replace("It moved on.", "The field showed pw-P02-cx.", 1))
+        r = archive()
+        self.assertIn("panel/evidence/P02-opus/steps.jsonl: line 2 (a secret of P02-cx's account", r.stderr)
+        self.assertNotIn("pw-", r.stdout + r.stderr)
+        self.assertEqual((r.returncode, dest.exists()), (1, False))
+        # A panellist can name a folder with one too, and put a link in it that cannot be read. Neither refusal
+        # repeats the path: each says where to look as far down as the path may be shown.
+        log.write_text(clean)
+        named = self.sd / "panel/personas/pw-P02-cx"
+        named.mkdir()
+        named.joinpath("note.md").write_text("A note.\n")
+        named.joinpath("link.md").symlink_to(self.log)
+        where = "panel/personas/(a path of 2 names that is not shown, 17 characters): "
+        for said in ("it is a symbolic link", "the name of the file or of a folder above it (a secret of P02-cx's"):
+            r = archive()
+            self.assertIn(where + said, r.stderr)
+            self.assertNotIn("pw-", r.stdout + r.stderr)
+            self.assertEqual((r.returncode, dest.exists()), (1, False))
+            named.joinpath("link.md").unlink(missing_ok=True)  # which leaves the folder's name for the next
+        # Nor is a folder passed over: one that cannot be listed is not known to be clean, and one with nothing in
+        # it would be copied under its name. Each is refused in a sentence, before the copy that would have met it.
+        named.joinpath("note.md").unlink()
+        self.addCleanup(lambda: named.is_dir() and named.chmod(0o755))  # so that the test's directory can be removed
+        where = "panel/personas/(a name that is not shown, 9 characters): "
+        for mode, said in ((0, "Permission denied"),
+                           (0o755, "the name of the folder or of a folder above it (a secret of P02-cx's")):
+            if not mode and not os.geteuid():
+                continue  # nothing is unreadable to root
+            named.chmod(mode)
+            r = archive()
+            self.assertIn(where + said, r.stderr)
+            self.assertNotIn("pw-", r.stdout + r.stderr)
+            self.assertEqual((r.returncode, "Traceback" in r.stderr, dest.exists()), (1, False, False))
+        shutil.rmtree(named)
+
+        # The second step of P02-opus's first task entered something secret, and its panellist said so.
+        entries = [json.loads(line) for line in clean.splitlines()]
+        marked = next(e for e in entries if (e["task"], e["step"], e["phase"]) == ("T1", 2, "result"))
+        marked["sensitive"] = True
+        log.write_text("".join(json.dumps(e) + "\n" for e in entries))
+        for shot in evidence.glob("*/*.png"):
+            shot.write_bytes(png(40, 20))
+        evidence.joinpath("P01-opus/notes.txt").write_text("Not evidence.\n")
+        # What a panellist saw after scrolling is a further view of its step, and evidence like the step's own.
+        for view in ("P01-opus/T2-1b.png", "P02-opus/T1-2b.png"):
+            evidence.joinpath(view).write_bytes(png(40, 20))
+        run("extract_scores.py", self.sd)
+        r = archive(str(self.bin))  # a PATH without ImageMagick
+        self.assertEqual(r.returncode, 0, r.stderr)
+        shots = ["T1-1.png", "T1-2.png", "T2-1.png", "T2-2.png"]
+        whole = {f"{x}/{name}" for x in ("P01-opus", "P01-cx") for name in ["steps.jsonl", *shots]}
+        self.assertEqual(
+            {f.relative_to(dest / "evidence").as_posix() for f in dest.joinpath("evidence").rglob("*") if f.is_file()},
+            whole | {"P01-opus/T2-1b.png", "P02-opus/steps.jsonl", "P02-opus/T1-1.png", "P02-opus/T1-2.png.left-out.txt",
+                     "P02-opus/T1-2b.png.left-out.txt", "P02-opus/T2-1.png", "P02-opus/T2-2.png", "P02-cx/steps.jsonl",
+                     *(f"P02-cx/{name}.left-out.txt" for name in shots)})
+        self.assertEqual(dest.joinpath("evidence/P02-opus/steps.jsonl").read_bytes(), log.read_bytes())  # still citable
+        self.assertIn("T1-2.png was left out of this archive: task T1, step 2, is marked sensitive",
+                      dest.joinpath("evidence/P02-opus/T1-2.png.left-out.txt").read_text())
+        self.assertIn("the panellist of P02-cx was given a secret to type",
+                      dest.joinpath("evidence/P02-cx/T2-1.png.left-out.txt").read_text())
+        # Nothing of the accounts travels but the identifiers, and the archive still loads, checks and scores.
+        self.assertEqual([f.name for f in dest.iterdir() if f.name in ("panel", "scratch", "accounts", "logs")], [])
+        self.assertEqual([str(f) for f in dest.rglob("*") if f.is_file()
+                          and (b"pw-" in f.read_bytes() or f.name == "account.json")], [])
+        self.assertEqual(json.loads(dest.joinpath("study.json").read_text())["accounts"]["map"]["P02-cx"],
+                         {"identifiers": {"username": "user-P02-cx"},
+                          "secrets": {"password": "(removed from the archive)"}})
+        self.assertIn("study.json: the 4 secrets of accounts.map were replaced", r.stdout)
+        checks = run("check_runs.py", dest).stdout
+        self.assertIn("4 run files of 4 expected; 0 with blocking problems", checks)
+        self.assertNotIn("evidence folder", checks)  # a note in place of a screenshot is no stray file, and none is missing
+        self.assertIn("8 score rows from 4 runs; 0 runs incomplete", run("extract_scores.py", dest).stdout)
+        # Without ImageMagick each screenshot is copied whole, and with it each is brought down to half its size.
+        self.assertIn("ImageMagick is not installed", r.stdout)
+        self.assertEqual(dest.joinpath("evidence/P01-opus/T1-1.png").read_bytes(), png(40, 20))
+        if shutil.which("magick") or shutil.which("convert"):
+            self.assertEqual(archive().returncode, 0)
+            self.assertEqual(struct.unpack(">II", dest.joinpath("evidence/P01-opus/T1-1.png").read_bytes()[16:24]),
+                             (20, 10))
 
     # ---- follow-up questions (followup.py)
 

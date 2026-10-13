@@ -10,7 +10,12 @@ process itself starts in does not matter):
     codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules
       -c project_doc_max_bytes=0 -c skills.include_instructions=false -c approval_policy=never
       --disable plugins --disable tool_suggest
-      -s workspace-write -C <workdir> [-m <model>] [-c model_reasoning_effort=<level>] -
+      -s workspace-write [-c sandbox_workspace_write.network_access=true
+      -c sandbox_workspace_write.exclude_slash_tmp=true
+      -c sandbox_workspace_write.exclude_tmpdir_env_var=true]
+      -C <workdir> [-m <model>] [-c model_reasoning_effort=<level>] -
+
+The three sandbox settings are there only for a run that may browse (see "Browsing").
 
 Resume is the same options followed by `resume <thread id> -`. A bare `codex exec resume <id>`
 inherits nothing: it runs read-only, in the process's own directory, on the default model, and
@@ -36,7 +41,8 @@ What each option is for (all verified unless marked):
   (checked to parse, not run in the validation launch).
 - `--disable plugins --disable tool_suggest`: removes the recommended-plugins block.
 - `-s workspace-write`: the sandbox. Writes are allowed in the working directory and /tmp,
-  the network is off, and the whole disk stays readable.
+  the network is off, and the whole disk stays readable. A run that may browse gets the
+  network and loses /tmp (see "Browsing" under the decisions).
 - `-m`: omitted when the run names no model, which leaves the CLI's default (the first model
   of the account's list). An unknown model fails at the first API call, exit code 1.
 - `-c model_reasoning_effort=low|medium|high|xhigh|max`: an invalid level also fails only at
@@ -50,12 +56,30 @@ Decisions this runner implements:
   passed through unchanged.
 - No budget cap. The only stop found, `features.rollout_budget`, is under development and
   writes a budget notice into the model's context. The caller's time limit bounds a run.
-- No browser. Each shell call gets its own process namespace, so the agent-browser daemon
-  dies between calls and the next command starts a blank browser. A run with "browse" true
-  still launches, without the network and socket settings browsing would need.
+- Browsing (run["browse"]), checked on 13 October 2026. A run cannot keep a browser of its
+  own: each shell call is a process namespace of its own, and whatever it started dies when
+  the call returns (verified, also with setsid and nohup). So the caller starts the
+  agent-browser session outside the sandbox, and the run reaches it through its socket.
+  - `-c sandbox_workspace_write.network_access=true`: with the network off the sandbox refuses
+    to connect to a Unix socket at all (`Operation not permitted`). Worse, a command that
+    cannot reach its session takes it for stale and deletes its socket files, which cuts the
+    session off for good (verified). The page loads happen in the session, outside: the run
+    needs the network for the socket alone, and gets all of it, which "browse_gaps" states.
+  - `-c sandbox_workspace_write.exclude_slash_tmp=true` and `exclude_tmpdir_env_var=true`: the
+    temporary directories, where the session's socket directory is, become read-only. A run
+    then cannot start a session of its own there, so dropping the session's policy from a
+    command ends its browsing instead of freeing it (verified: `Socket directory ... is not
+    writable`). The working directory stays writable, also when it is under /tmp.
+  - The environment is the caller's with run["browser_env"] applied (child_env()). Codex
+    passes those variables on to the shell (verified).
 - Images are opened by path (the `view_image` tool, which works in the sandbox). `-i` can
   attach images at launch, which is what "image_attach" reports, but is not used: it is
   variadic and would swallow the `-`.
+- The built-in instructions (Codex's default system prompt) are kept on purpose, decided 13
+  October 2026. `-c model_instructions_file=<absolute path>` would replace them, repeated
+  before `resume` on every resume. The key is undocumented and an unknown `-c` key is ignored
+  without a message, so a renamed key would restore the default unnoticed. The record is
+  "System prompt override" in docs/specs/persona-panel-expansion.md.
 
 Results. Session id: `thread_id` on the first line, `thread.started`, printed before any model
 call and again on resume. Reply: the text of the last `item.completed` whose item type is
@@ -79,8 +103,11 @@ event carries the plan's limit windows, which is where a usage limit's reset tim
 Sessions are deleted with the CLI's own `codex delete --force <thread id>`, which removes the
 session file and its database rows.
 
-Not settled: the real output at a usage limit; a network rule narrower than all or nothing;
-how to remove the sub-agent blocks; whether the trust entry can be prevented.
+Not settled: the real output at a usage limit; how to remove the sub-agent blocks; whether the
+trust entry can be prevented; and a network rule narrower than all or nothing. The experimental
+`network_proxy` feature with a permission profile allowed the socket and one host and nothing
+else under `codex sandbox`, but it puts proxy variables into the shell, agent-browser reads them
+as its own proxy setting, and the session restarts blank at the first command.
 """
 
 from __future__ import annotations
@@ -90,13 +117,18 @@ import json
 import os
 import re
 
-from . import exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, usage
+from . import BROWSER_GAPS, child_env, exited, json_lines, last_line, launch_effort, model_facts, result, run_cli, \
+    usage
 
 CLI = "codex"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 ISOLATION = ["--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
              "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
              "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest"]
+# What a run that may browse gets on top of the sandbox: a way to the session's socket, and no
+# writable temporary directory to start a session of its own in.
+BROWSING = ["-c", "sandbox_workspace_write.network_access=true", "-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+            "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true"]
 BILLING_ENV = ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME"]  # INFERRED: names in the binary
 
 # What a turn.failed message means: (text it contains, outcome, whether the plan's reset time
@@ -117,7 +149,7 @@ def capabilities() -> dict:
     return {
         "images_by_path": True,
         "image_attach": True,
-        "browser": False,
+        "browser": True,
         "budget_cap": False,
         "budget_cap_note": "",
         "effort_levels": list(EFFORTS),
@@ -132,7 +164,7 @@ def capabilities() -> dict:
             "keeping it out would mean moving the login.",
             "The whole disk is readable from the sandbox, the home directory included. Only "
             "writes are confined.",
-            "/tmp is writable as well as the working directory.",
+            "/tmp is writable as well as the working directory, except for a run that may browse.",
             "The working directory path, the shell, the date and the timezone are always in the "
             "model's context.",
             "Sub-agent tools and their instructions stay available.",
@@ -140,12 +172,20 @@ def capabilities() -> dict:
             "A run inside a git repository adds a trust entry for that repository to the "
             "user's Codex config.toml.",
         ],
-        "browse_gaps": [],  # no run browses on this runner
+        "browse_gaps": [
+            *BROWSER_GAPS,
+            "With browsing on, network access is all or nothing: the run's shell can reach the internet "
+            "and the pages under review directly, without the browser and its policy, and any Unix "
+            "socket the user can.",
+            "With browsing on, agent-browser commands that never reach a session are not refused: one "
+            "of them lists the names of the user's own browser profiles.",
+        ],
     }
 
 
 def _options(run: dict, workdir) -> list[str]:
-    argv = [CLI, "exec", "--json", *ISOLATION, "-s", "workspace-write", "-C", os.path.abspath(workdir)]
+    argv = [CLI, "exec", "--json", *ISOLATION, "-s", "workspace-write", *(BROWSING if run.get("browse") else []),
+            "-C", os.path.abspath(workdir)]
     if run.get("model"):
         argv += ["-m", run["model"]]
     effort = launch_effort(run, EFFORTS)
@@ -155,14 +195,14 @@ def _options(run: dict, workdir) -> list[str]:
 
 
 def launch_command(run: dict, prompt: str, workdir, limits: dict | None) -> dict:
-    return {"argv": [*_options(run, workdir), "-"], "stdin": prompt, "env": None, "session_id": None}
+    return {"argv": [*_options(run, workdir), "-"], "stdin": prompt, "env": child_env(run), "session_id": None}
 
 
 def resume_command(run: dict, session_id: str, message: str, workdir, limits: dict | None) -> dict:
     if not UUID.fullmatch(session_id or ""):
         raise ValueError(f"not a thread id: {session_id!r}")
     return {"argv": [*_options(run, workdir), "resume", session_id, "-"], "stdin": message,
-            "env": None, "session_id": session_id}
+            "env": child_env(run), "session_id": session_id}
 
 
 def _usage(reported) -> dict:
@@ -249,7 +289,8 @@ def check() -> dict:
     said = last_line(err) or last_line(out)  # the answer is the last line: warnings can come before it
     if code != 0:
         return {"ok": False, "message": said or f"{CLI} login status failed"}
-    probe = run_cli([*_options({"model": "default", "effort": EFFORTS[0]}, "."), "--help"]) or (1, "", "")
+    probe = run_cli([*_options({"model": "default", "effort": EFFORTS[0], "browse": True}, "."), "--help"]) or (
+        1, "", "")
     if probe[0] != 0:
         return {"ok": False, "message": next((x for x in probe[2].splitlines() if x.strip()), "")
                 or f"{CLI} refused the launch options"}

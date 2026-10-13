@@ -1,13 +1,13 @@
 ---
 name: persona-panel
-description: "Run a simulated customer research panel: AI agents play realistic prospect personas (buyers, users, managers, gatekeepers, sceptics, early adopters) across several models, from one vendor or more, review design concepts such as landing pages, websites, pricing pages or onboarding flows (site folders, live URLs, PDFs or screenshots) from screenshots and page text only, score them on fixed factors, and the results are analysed into a leaderboard, quotes, ICP signal and recommendations. Load whenever the user wants personas, a persona panel, simulated users or customers, synthetic user research, or AI agents to review, compare, score or give feedback on design concepts or pages 'like real customers would', wants to know which concept prospects prefer or who the ideal customer is, or wants to rerun or extend an earlier persona research round, even if they don't say 'panel'."
+description: "Run a simulated customer research panel: AI agents play prospect personas (buyers, users, managers, gatekeepers, sceptics, early adopters) across several models. In a review study they score design concepts such as landing pages, websites, pricing pages or onboarding flows (site folders, live URLs, PDFs or screenshots), giving a leaderboard, quotes, ICP signal and recommendations. In a usability study they attempt tasks in a running local build or prototype through a browser, giving task completion and stuck points. Load whenever the user wants personas, a persona panel, simulated users or customers, synthetic user research, AI agents to review, compare, score or give feedback on concepts or pages 'like real customers would', which concept prospects prefer or who the ideal customer is, usability testing with AI personas, a task-based test of a flow or prototype, whether users can complete a task or where they get stuck, or to rerun or extend an earlier persona research round, even if they don't say 'panel'."
 ---
 
 # Persona panel
 
-Simulated customer research: AI panellists review concepts the way busy prospects would, on more than one model, with bias controls. Each panellist is one headless process of a coding agent's CLI, started through a runner by `scripts/launch.py`, which also limits, tracks and resumes the runs. Scripts do everything deterministic (scaffolding, capture, launching, validation, scoring, statistics, archiving). The lead (an agent on any harness, or a person in a terminal) designs the study, reads the results and reports; it never hand-builds these steps.
+Simulated customer research: AI panellists review concepts the way busy prospects would, or attempt tasks in a running product (a usability study, below), on more than one model, with bias controls. Each panellist is one headless process of a coding agent's CLI, started through a runner by `scripts/launch.py`, which also limits, tracks and resumes the runs. Scripts do everything deterministic (scaffolding, capture, launching, validation, scoring, statistics, archiving). The lead (an agent on any harness, or a person in a terminal) designs the study, reads the results and reports; it never hand-builds these steps.
 
-Scripts are in `scripts/` (Python 3 standard library; capture also needs the `agent-browser` CLI and ImageMagick, and Poppler for PDFs; each runner needs its harness CLI installed and signed in). Every script takes the study directory and documents itself with `--help`.
+Scripts are in `scripts/` (Python 3 standard library; capture and every run that browses need the `agent-browser` CLI, capture also ImageMagick, and Poppler for PDFs; each runner needs its harness CLI installed and signed in). Every script takes the study directory and documents itself with `--help`.
 
 ## Study layout
 
@@ -19,7 +19,8 @@ Scripts are in `scripts/` (Python 3 standard library; capture also needs the `ag
 <study>/runs.json       one entry per run and synthesis job: state, session, attempts, usage
 <study>/followups.json  the follow-up questions asked, and how each run answered
 <study>/prompts/        one launch prompt per run, one filled brief per analyst and writer job
-<study>/panel/          the only folder panellists may read
+<study>/panel/          the only folder panellists may read; in a usability study, panel/evidence/<run id>/ holds each run's step log and screenshots
+<study>/accounts/       usability only: each run's test account with its secrets (lead only, never archived)
 <study>/sites/          the site copies, in a study whose panellists do not browse (else panel/sites/)
 <study>/analysis/       scores.csv, rankings.csv, runs.csv, answers.csv, lines.csv, checks, quant, usage.md, qual, synthesis
 <study>/logs/           input and output of every process the launcher started
@@ -53,6 +54,8 @@ One study directory per round (`round-1/`, `round-2/`). Keep the study outside t
 
 **One concept.** A study with one concept ranks and compares nothing: no ranking in the template, no leaderboard in the analysis, and scores with their spread across runs instead. Set `artefact`, add replicates, and report strengths and weaknesses rather than a level: `references/method.md`, Single-concept studies. `assets/study.files.example.json` is one.
 
+**Usability study.** `"type": "usability"` tests whether personas can complete tasks in a running local build, not which concept they prefer: each panellist drives a browser, logs every step with a screenshot, and the analysis sets the completion each claimed beside what your success checks found, with the stuck points. Read `references/usability.md` first: tasks, test accounts, the protocol, safety and how much to trust the result. Start from `assets/study.usability.example.json`. The workflow is the same with these differences: there are no concepts and nothing to capture (skip step 5 and `extract_answers.py`), `launch.py <study> check` runs the success checks again (it keeps a verdict made with a test account that is gone, unless `--force`), and `launch.py <study> release --runs <ids>` lets go of the test account of a run you will not continue.
+
 **Follow-up questions (optional, after the panel and before the analysts).** `followup.py <study> ask --runs <ids>|all --question-file <file>` puts one question to finished runs, each in the session it reviewed in, and each panellist appends a `## Follow-up <n>` section to its own file. Use it to probe what the reviews left unclear. Ask before `launch.py <study> run --role analyst`, so the analysts' and the writer's briefs name the questions. `followup.py <study> list` shows how each run answered.
 - A follow-up never reveals another panellist's answer, a result, or what the team hopes to hear.
 - It can only append that one section. Any other change is rejected and the file put back, so no score changes.
@@ -77,7 +80,9 @@ New concepts built from the findings get a smaller, cold panel: target personas 
 - `run` starts only `pending` and `failed` runs. It never restarts a `partial` or `limited` run, and neither should you: continue it with `resume`.
 - Concepts of different forms (a PDF, a screenshot, a captured page) are compared partly on format. When `quant.md` opens with a format caution, compare Visual design and Mobile within one form only, and say so when reporting.
 - Incomplete runs stay out of the headline tables. Report their scores only as what the "Incomplete runs" table shows.
-- Treat the output as a hypothesis to test with real people, and say so when reporting. Simulated readers read more than real ones.
+- A usability study uses throwaway test accounts on a local build, never real credentials or a real customer's account. A remote target is read-only and needs the user's agreement.
+- A test account's secrets never appear in a persona file, a step log, the synthesis or the archive. `check_runs.py` and `archive.py` scan for them: fix what they name, never work around it.
+- Treat the output as a hypothesis to test with real people, and say so when reporting. Simulated readers read more than real ones, and an agent is more patient with a task than a person is.
 - Every report and summary carries the synthetic panel notice under its title, word for word: "Synthetic panel: the feedback in this study was generated by AI personas, not by real people. It is not user research." The scripts put it in the persona files, the synthesis and the archive (`references/communicating.md`).
 
-Read `references/method.md` before launching runs: it covers when to run, runners and model choice across vendors, limits and the plan, piloting, what each run state means, capture pitfalls, concept kinds, single-concept studies, concept design for panels, replicates and variants, answer tallies, follow-up questions, and how much to trust each result.
+Read `references/method.md` before launching runs: it covers when to run, runners and model choice across vendors, limits and the plan, piloting, what each run state means, capture pitfalls, concept kinds, single-concept studies, concept design for panels, replicates and variants, answer tallies, follow-up questions, and how much to trust each result. Read `references/usability.md` before a usability study.

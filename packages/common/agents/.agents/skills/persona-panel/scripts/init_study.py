@@ -33,6 +33,14 @@ CLI. When false, the instructions and the run prompts leave the browser out. Whe
 on a runner that cannot drive a browser is told so in its run prompt, and reviews from the files.
 A run that may browse gets its screenshot folder, panel/scratch/<run id>/, here: a runner can
 allow it agent-browser and no other command, so it could not make the folder itself.
+In a study that runs through runners the instructions (assets/panel-instructions-browser.md) tell
+such a run that its browser session is open already and is closed for it, since the launcher
+starts and stops one for each attempt (browser_session.py): it names no session, runs one
+command per shell call, saves each screenshot by a path relative to panel/, which is where the
+session resolves it, and is told which commands the session takes. A native-mode study has no
+launcher and so no such session: its instructions (assets/panel-instructions-browser-native.md)
+and run prompts have each run start a session of its own, named by its run id, save screenshots
+by absolute paths, and close the session when it is done.
 With a "url" concept browsing is off unless study.json says "browse": true: the instructions then
 give the address of each of its pages, and tell panellists to submit nothing. A "files" concept
 has nothing to open, and the instructions say so when other concepts can be browsed.
@@ -43,6 +51,22 @@ that they cannot see the design and must not comment on it, the factors that nee
 (visual and mobile by default) are left out of every template, and nothing mentions the browser
 whatever "browse" says. Give a text pass its own study directory: its scores do not compare
 with a full panel's.
+
+A usability study ("type": "usability", panel_lib.py "Usability studies") has tasks in place of
+concepts, and nothing to copy or capture. Its instructions are assets/usability-instructions.md:
+the protocol (open the start page, an intent entry before every action, a screenshot and a
+result entry after it, when to stop, the task's section, the next task), what a step is, the step
+log and its entries, the browser, and the rules. Each run prompt is assets/usability-run-prompt.md.
+A persona file lists the tasks in order with their goals, in the user's words: no start page
+that the instructions do not give, no "success_check" and nothing else of the lead's. A run gets
+two folders here, because it may be allowed no shell command that could make one:
+panel/scratch/<run id>/, where the launcher puts its account.json, and panel/evidence/<run id>/
+for its step log and screenshots. What the instructions say of credentials follows from
+study.json: the test account in account.json, no account at all, or, for a remote target, to
+submit nothing, sign in nowhere and change nothing. Nothing is provisioned here: the launcher
+gives each run its account when the run starts (accounts.py). The summary ends with "Next:
+launch.py <study-dir> plan". An accounts command or a "success_check" whose file is not there
+stops the scaffold (panel_lib.usability_problems).
 
 These stop the scaffold before it writes anything, with or without --force:
   - a concept whose source is missing: a site without index.html, or a file that is not there
@@ -67,6 +91,15 @@ runs and jobs started, and that were not purged, are carried over to logs/earlie
 (format in panel_lib.py), and "launch.py <study-dir> purge-sessions" covers them as it does the
 sessions of the new runs.
 
+In a usability study --force also lets go of every test account still in force, as a run that
+reached a final state would (accounts.teardown), and removes the account records and the step
+logs and screenshots of the runs it resets. A teardown that fails stops it before anything is
+replaced, and names the file the command's output is in, never the output. Before that it does
+what every launcher command does first (accounts.py): a command of the study that a killed
+launcher left running is ended and waited for, and a teardown that was cut short is done again
+from the start, since its account is among those in force. A symbolic link where an evidence
+folder should be is removed, never followed.
+
 --force is refused while a launcher has the study, or while a run, job or follow-up question of
 it still has a process at work: it would replace runs.json and the persona files under them.
 Stop them first, with "launch.py <study-dir> stop". It holds the launcher's lock while it
@@ -84,6 +117,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import accounts  # noqa: E402
 import launch  # noqa: E402
 import panel_lib as pl  # noqa: E402
 import runners  # noqa: E402
@@ -105,12 +139,22 @@ DEFAULT_MODEL_NOTES = {
 }
 
 DEFAULT_IGNORE = [".git", "*.bak", ".DS_Store", "node_modules"]
+GRACE = 10.0  # seconds a command that a killed launcher left running gets after SIGTERM, as launch.py gives by default
 
 # The run prompt's line about the browser: for a run that may use it, and for one that cannot
-# because its runner has no browser. A study with "browse": false has neither.
-BROWSER_LINE = ("- If you use agent-browser, your run id is `{run_id}`. Use it as the session name, and save "
-                "screenshots to `{panel_dir}/scratch/{run_id}/`, which exists already. Run each agent-browser "
-                "command on its own: a line that holds any other shell command can be refused whole.\n")
+# because its runner has no browser. A study with "browse": false has neither. A run of a runner
+# study drives the session its launcher starts for it. A native-mode run has no launcher, and
+# starts and closes its own. BROWSER_RULES names the instructions' rules for each.
+BROWSER_LINE = {
+    "runner": "- If you use agent-browser, your run id is `{run_id}`. Your browser session is open already: name "
+              "no session, and never close it. Save screenshots to `scratch/{run_id}/<name>.png`, a relative "
+              "path: that folder exists already, in `{panel_dir}/`. Run each agent-browser command on its own: "
+              "a line that holds any other shell command can be refused whole.\n",
+    "native": "- If you use agent-browser, your run id is `{run_id}`. Use it as the session name, and save "
+              "screenshots to `{panel_dir}/scratch/{run_id}/`, which exists already. Run each agent-browser "
+              "command on its own: a line that holds any other shell command can be refused whole.\n",
+}
+BROWSER_RULES = {"runner": "panel-instructions-browser.md", "native": "panel-instructions-browser-native.md"}
 NO_BROWSER_NOTE = ("The agent-browser CLI is not available in your environment. Do not try to open a browser: "
                    "review from the files in the materials folders only.")
 
@@ -274,8 +318,9 @@ def final_template(cfg, labels):
     return "\n".join(t)
 
 
-def persona_doc(p, key, order):
-    """A persona file before its run. With one concept there is no order to follow, so no row."""
+def persona_doc(p, key, order, tasks=None):
+    """A persona file before its run. With one concept there is no order to follow, so no row.
+    tasks, in a usability study: the tasks in the order to attempt them, each with its goal."""
     rows = [
         f"# {p['id']} - {p['name']}, {p['role']}",
         "",
@@ -293,6 +338,9 @@ def persona_doc(p, key, order):
         f"You are **{p['name']}**.",
     ]
     rows += [f"- {b}" for b in p.get("bio", [])]
+    if tasks:
+        rows += ["", "## Tasks", pl.agree(len(tasks), "Attempt this task.", "Attempt these tasks in this order.")]
+        rows += [f"{i}. **Task {t['id']}.** {' '.join(t['goal'].split())}" for i, t in enumerate(tasks, start=1)]
     rows += ["", "## Feedback", ""]
     return "\n".join(rows)
 
@@ -406,14 +454,31 @@ def main():
             lock.release()
 
 
-def scaffold(cfg, force):
-    sd = cfg["_dir"]
-    panel = sd / "panel"
+def refuse_skeletons(cfg):
     unwritten = skeletons(cfg)
     if unwritten:
         raise SystemExit(f'study.json: still a roster skeleton, with the name "{pl.SKELETON_NAME}" or none: '
                          f"{', '.join(unwritten)}. Write the name and bio of each (references/personas.md), or "
                          "take it out, before scaffolding.")
+
+
+def refuse_existing(sd, force):
+    """Stop a scaffold that would replace persona files or runs.json without --force."""
+    existing = list((sd / "panel" / "personas").glob("*.md"))
+    if existing and not force:
+        have = len(existing)
+        raise SystemExit(f"{pl.plural(have, 'persona file')} already {pl.agree(have, 'exists', 'exist')}. Re-run with "
+                         f"--force to overwrite {pl.agree(have, 'it', 'them')}.")
+    if (sd / "runs.json").exists() and not force:
+        raise SystemExit("runs.json already exists. Re-run with --force to replace it and the run state it records.")
+
+
+def scaffold(cfg, force):
+    if cfg["type"] == "usability":
+        return scaffold_usability(cfg, force)
+    sd = cfg["_dir"]
+    panel = sd / "panel"
+    refuse_skeletons(cfg)
     text_only, sites = cfg["materials"] == "text", pl.sites_dir(cfg)
     # The folders of site concepts are copied into panel/sites only in a study that browses.
     copy = brief_copy(sd, [panel, *([c["_path"] for c in cfg["concepts"] if pl.concept_kind(c) == "site"]
@@ -429,14 +494,9 @@ def scaffold(cfg, force):
     # Which model entries can drive a browser. A runner that does not exist stops the scaffold here.
     can_browse = {name: runners.get(name).capabilities()["browser"] for name in {e["runner"] for e in entries} - {None}}
     browser = {e["key"]: cfg["browse"] and can_browse.get(e["runner"], True) for e in entries}
+    mode = "native" if all(e["runner"] is None for e in entries) else "runner"  # a study is all one or the other
 
-    existing = list((panel / "personas").glob("*.md"))
-    if existing and not force:
-        have = len(existing)
-        raise SystemExit(f"{pl.plural(have, 'persona file')} already {pl.agree(have, 'exists', 'exist')}. Re-run with "
-                         f"--force to overwrite {pl.agree(have, 'it', 'them')}.")
-    if (sd / "runs.json").exists() and not force:
-        raise SystemExit("runs.json already exists. Re-run with --force to replace it and the run state it records.")
+    refuse_existing(sd, force)
 
     n, one = len(labels), pl.single_concept(cfg)
     kinds = {label: pl.concept_kind(c) for label, c in lmap.items()}
@@ -528,7 +588,7 @@ def scaffold(cfg, force):
             "panel-instructions-items-text.md" if text_only else "panel-instructions-items.md",
             items_intro=ITEMS_INTRO["mixed" if paged else "only"].format(panel_dir=panel, made_of=made_of))
         if itemised else "",
-        browser_rules=(pl.render_template("panel-instructions-browser.md", panel_dir=str(panel),
+        browser_rules=(pl.render_template(BROWSER_RULES[mode], panel_dir=str(panel),
                                           page_addresses=page_addresses(panel, lmap))
                        if cfg["browse"] else ""),
         how_to_review=pl.render_template(
@@ -571,7 +631,7 @@ def scaffold(cfg, force):
             if cfg["browse"] and not browser[e["key"]]:
                 found = [NO_BROWSER_NOTE, *found]
             notes = "".join(f"- {x}\n" for x in found)
-            line = BROWSER_LINE.format(run_id=rid, panel_dir=panel) if browser[e["key"]] else ""
+            line = BROWSER_LINE[mode].format(run_id=rid, panel_dir=panel) if browser[e["key"]] else ""
             if line:  # a run may be allowed agent-browser and no other command, so it cannot make the folder
                 (panel / "scratch" / rid).mkdir(exist_ok=True)
             prompt = pl.render_template(
@@ -633,6 +693,184 @@ def scaffold(cfg, force):
               f"{pl.EARLIER_SESSIONS}. launch.py {sd} purge-sessions lists what is on that record and, with --yes, "
               "deletes it.")
     print(f"Next: capture.py {sd}")
+
+
+# ---------------------------------------------------------------- usability studies
+
+# What the instructions and the run prompt say of the test account, by what study.json has.
+ACCOUNT_BULLET = {
+    "account": "- You have a test account, described in `scratch/<your run id>/account.json`. Read it before the "
+               "first task: it says who you are signed in as, or what to sign in with. The account's name may "
+               "differ from your persona's, because the account is lent to you for the test: carry on as "
+               "yourself. That difference comes from the test, not from the product: do not report it as a "
+               "finding, and do not let it move a score.\n",
+    "none": "- You have no account, and you need none.\n",
+    "remote": "- This is a live site that real people use. You are a visitor who looks and moves around, and "
+              "nothing more.\n",
+}
+CREDENTIALS_RULE = {
+    "account": "**Enter only the test credentials you were given.** They are in your `account.json`, and they go "
+               "into the product's own sign-in page and nowhere else. Never create a real account, never pay for "
+               "anything, and never send a message, an invitation or an email to a real person.",
+    "none": "**You were given no credentials, so enter none.** If the product asks you to sign in, that is as far "
+            "as that path goes: say so in your step log and your task section. Never create a real account, never "
+            "pay for anything, and never send a message, an invitation or an email to a real person. Where a form "
+            "asks for details, make them up as your persona would give them.",
+    "remote": "**Submit nothing, sign in nowhere and change nothing.** This is a live site. You may open pages, "
+              "follow links, scroll, and open menus and tabs. Never submit a form, sign in, sign up, search with "
+              "personal details, add to a basket, buy, download, send or save anything. If a task cannot be "
+              "finished without one of these, stop there: the outcome is gave up, and say what you would have "
+              "had to do.",
+}
+ACCOUNT_LINE = {
+    "account": "- Before the first task, read `scratch/{run_id}/account.json`: it says which test account you have "
+               "and whether the browser is already signed in to it. The account's name may differ from your "
+               "persona's: it is lent to you for the test, so that difference is no finding about the product.\n",
+    "none": "",
+    "remote": "- This is a live site: submit nothing, sign in nowhere and change nothing.\n",
+}
+
+
+def task_template(cfg):
+    """The section a panellist writes for each task. The outcome opens with one of
+    pl.USABILITY_OUTCOMES, which is how a later reading tells a claimed success."""
+    return "\n".join([
+        "### Task <task id>",
+        f"**{pl.OUTCOME_LABEL}:** {' / '.join(pl.USABILITY_OUTCOMES)}: write exactly one of the three first, then "
+        "what happened, in my own words.",
+        "**Steps I took:** how many, of the limit.",
+        "**Where I hesitated or got stuck:** ... (give the step numbers)",
+        "**What I expected instead:** ...",
+        "**What I'd do in real life:** carry on / look for help / give up and go elsewhere, and why.",
+        '**Quote (my gut reaction, one line):** "..."',
+        "",
+        score_table(cfg),
+    ])
+
+
+USABILITY_FINAL = "\n".join([
+    "## Overall verdict",
+    "In my own voice: how it went, whether I got done what I came to do, and what I think of the product now.",
+    "",
+    "## What would make me trust it and use it",
+    "- What would have to change before I relied on this, most important first",
+    "- What already works and should stay as it is",
+    "- Any dealbreakers",
+    "",
+    "## Out of character: researcher notes",
+    "A few honest notes stepping outside the persona: what this person would likely do that an AI simulation might "
+    "miss, anything you could not properly assess, anything you learnt from the element list that the screen did "
+    "not show, and anything in the product that looked broken.",
+])
+
+
+def scaffold_usability(cfg, force):
+    sd = cfg["_dir"]
+    panel = sd / "panel"
+    refuse_skeletons(cfg)
+    copy = brief_copy(sd, [panel])
+    if copy:
+        raise SystemExit(f"{copy} is a copy of the study brief, inside {panel}, where panellists read everything. "
+                         "The brief holds the team's hypotheses, which they must never see. Delete that file: the "
+                         f"brief stays at {sd / pl.STUDY_BRIEF}, beside study.json.")
+    entries, tasks = pl.model_entries(cfg), cfg["tasks"]
+    for name in {e["runner"] for e in entries}:
+        runners.get(name)  # a runner that does not exist stops the scaffold here
+    refuse_existing(sd, force)
+    problems = pl.usability_problems(cfg)
+    if problems:
+        raise SystemExit("study.json: " + " ".join(problems) + " Nothing was written.")
+    for line in accounts.recover(cfg, GRACE):  # a command of the study that a killed launcher left running
+        print(line)
+    for record in accounts.records(sd):  # --force resets every run: none keeps an account
+        after = accounts.teardown(cfg, record["run"]) if accounts.in_force(record) else None
+        if after and after.get("teardown_error"):
+            raise SystemExit(f"{record['run']} still has its test account, and tearing it down failed: "
+                             f"{after['teardown_error']}. Nothing was replaced. Fix accounts.teardown, or remove the "
+                             f"account by hand and delete {accounts.record_path(sd, record['run'])}, then scaffold "
+                             "again.")
+        if after:
+            print(f"{record['run']}: its test account was {'torn down' if after['teardown'] == 'ran' else 'let go'}.")
+        elif record.get("provisioning") and record.get("provisioned") is None:
+            print(f"{record['run']}: a provisioning of its test account did not finish"
+                  + accounts.unfinished(cfg, record["run"], bool((cfg["accounts"] or {}).get("teardown"))) + ".")
+        accounts.record_path(sd, record["run"]).unlink()  # the record only: the folder may hold a lead's own files
+        for output in (sd / accounts.FOLDER).glob(f"{record['run']}.*.output"):  # and what its commands wrote
+            output.unlink()
+    if (sd / accounts.FOLDER).is_dir() and not any((sd / accounts.FOLDER).iterdir()):
+        (sd / accounts.FOLDER).rmdir()
+
+    if (panel / "evidence").is_symlink():  # a panellist's doing: the folder is made anew, and the link not followed
+        (panel / "evidence").unlink()
+    for sub in ("personas", "scratch", "evidence"):
+        (panel / sub).mkdir(parents=True, exist_ok=True)
+    for sub in ("prompts", "analysis"):
+        (sd / sub).mkdir(exist_ok=True)
+
+    n, base = len(tasks), cfg["target"]["base_url"].rstrip("/")
+    told = "remote" if cfg["_remote"] else "account" if cfg["accounts"] else "none"
+    product = cfg.get("product_phrase") or f"a product called **{cfg['product']}**"
+    the_tasks = "the task to attempt" if n == 1 else f"your {n} tasks, in the order to attempt them"
+    table = ["| Task | Start page | Step limit |", "|---|---|---|"]
+    table += [f"| {t['id']} | `{pl.task_url(cfg, t)}` | {t['steps']} |" for t in tasks]
+    (panel / "_panel-instructions.md").write_text(pl.render_template(
+        "usability-instructions.md",
+        what_to_do="one thing" if n == 1 else f"{n} things",
+        product_phrase=product, the_tasks=the_tasks, each_is="It is" if n == 1 else "Each is", base_url=base,
+        account_bullet=ACCOUNT_BULLET[told], context_bullets="".join(f"- {b}\n" for b in cfg["context_notes"]),
+        panel_dir=str(panel), credentials_rule=CREDENTIALS_RULE[told], task_table="\n".join(table),
+        factor_table=factor_table(cfg), task_template=task_template(cfg), final_template=USABILITY_FINAL))
+
+    attempt_step = ('Attempt the task. Append its section to your persona file under "## Feedback" as soon as you '
+                    "finish it, then write the final sections." if n == 1 else
+                    f"Attempt the {n} tasks in the order your persona file lists them. Append each task's section "
+                    'to your persona file under "## Feedback" as soon as you finish the task, then write the final '
+                    "sections.")
+    model_notes = cfg.get("model_notes", {})
+    reps, runs = cfg["replicates"], []
+    for p in cfg["personas"]:
+        for e, rep in ((e, rep) for e in entries for rep in range(1, reps + 1)):
+            entry = pl.run_entry(sd, p, e, rep)
+            pf, pp, rid = sd / entry["file"], sd / entry["prompt"], entry["run"]
+            pf.write_text(persona_doc(p, e["key"], [], tasks))
+            if pl.evidence_dir(sd, rid).is_symlink():  # never followed: it goes, and the folder is made anew
+                pl.evidence_dir(sd, rid).unlink()
+            shutil.rmtree(pl.evidence_dir(sd, rid), True)  # what a run that --force resets left
+            accounts.lent_path(sd, rid).unlink(missing_ok=True)
+            for folder in (panel / "scratch" / rid, pl.evidence_dir(sd, rid)):  # a run may be allowed no mkdir
+                folder.mkdir(exist_ok=True)
+            # Notes for a model key win over notes for the model it runs on.
+            found = model_notes[e["key"]] if e["key"] in model_notes else model_notes.get(e["model"], [])
+            pp.write_text(pl.render_template(
+                "usability-run-prompt.md", product_phrase=product, panel_dir=str(panel), persona_file=str(pf),
+                the_tasks=the_tasks, attempt_step=attempt_step, run_id=rid,
+                account_line=ACCOUNT_LINE[told].format(run_id=rid), model_notes="".join(f"- {x}\n" for x in found)))
+            runs.append(entry)
+    earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0
+    pl.write_runs(sd, runs)
+    for record in (pl.MODIFICATIONS, pl.FOLLOWUPS):  # what was recorded of the runs just replaced
+        (sd / record).unlink(missing_ok=True)
+
+    acc = cfg["accounts"] or {}
+    print(f"Usability study {sd.name}: {pl.plural(n, 'task')} ({', '.join(t['id'] for t in tasks)}) at {base}, "
+          f"{pl.plural(len(cfg['personas']), 'persona')} x {pl.plural(len(entries), 'model')}"
+          f"{f' x {reps} replicates' if reps > 1 else ''} = {pl.plural(len(runs), 'run')}")
+    if cfg["_remote"]:
+        print("The target is a remote site: panellists are told to submit nothing, sign in nowhere and change "
+              "nothing, and no account is used.")
+    elif acc:
+        print(f"Each run gets a test account from accounts.{'map' if 'map' in acc else 'provision'} when it starts"
+              + (", and its panellist is given the secrets to sign in with, because accounts.signin is "
+                 '"panellist".' if acc["signin"] == "panellist" else
+                 ", and starts signed in when the account names a saved browser state: its panellist is given "
+                 "no secret."))
+    else:
+        print("No accounts: panellists attempt the tasks without signing in.")
+    if earlier:
+        print(f"Harness sessions of the earlier scaffold still held by their harnesses: {earlier}, on record in "
+              f"{pl.EARLIER_SESSIONS}. launch.py {sd} purge-sessions lists what is on that record and, with --yes, "
+              "deletes it.")
+    print(f"Nothing is captured for a usability study. Next: launch.py {sd} plan")
 
 
 if __name__ == "__main__":

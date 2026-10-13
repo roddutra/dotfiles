@@ -17,6 +17,8 @@
 
 The working directory's full path is in every panellist's context on every runner. Give the study folders neutral names.
 
+Each harness's own default system prompt also stays in a panellist's context. That is deliberate: replacing it was tested and changed nothing in the research output (`references/runners.md`, System prompt).
+
 ## Models
 
 - Run every persona on at least 2 models. A single model's taste is indistinguishable from the persona's.
@@ -27,7 +29,7 @@ The working directory's full path is in every panellist's context on every runne
 - Default on the `claude` runner: `["opus", "fable"]` for follow-ups; add sonnet (and haiku only with its model notes) for a wide first round where model skew itself is a question.
 - A model entry without `model` uses the harness's default, which depends on the account. Name the model when rounds must compare.
 - A model reached through the `pi` runner, on a local or OpenAI-compatible endpoint above all, is a new model every time: in the pilot, check that it quotes text that appears only in a screenshot, since a model wrongly listed as reading images reviews without them and says nothing. Expect to need `model_notes` (`references/runners.md`, `pi`).
-- Capabilities differ between runners. When one runner can browse and another cannot, set `"browse": false` so every panellist works from the same materials (see the switches lesson under Capture).
+- Capabilities differ between runners. Every runner of the skill can browse, each with gaps of its own, which the plan lists. If a runner that cannot browse is ever in the panel, set `"browse": false` so every panellist works from the same materials (see the switches lesson under Capture).
 
 ## What agent panellists add (October 2026 trial)
 
@@ -88,11 +90,11 @@ Both are set in `study.json` before scaffolding, and both add runs: a study has 
 
 ## Limits and the plan
 
-Every run has two limits, and they cover all its attempts: the first, the retry and every resume.
+Every run has two limits, and they cover all its attempts: the first, the retry and every resume. A usability run has a third, a step limit for each task (`references/usability.md`).
 
 | Limit | Enforced by | Default |
 |---|---|---|
-| `minutes` | Each run's own watchdog process, on every runner. At the limit the process gets a stop signal, 10 seconds to finish its write (`--grace`), then is killed | 15 per run, 30 per synthesis job, 5 per follow-up question |
+| `minutes` | Each run's own watchdog process, on every runner. At the limit the process gets a stop signal, 10 seconds to finish its write (`--grace`), then is killed | 15 per run (in a usability study, 30 seconds for each step its tasks permit plus 5 minutes), 30 per synthesis job, 5 per follow-up question |
 | `budget_usd` | The harness, on runners with a budget cap. Elsewhere only the time limit bounds a run | $2 per run, $5 for the synthesis pool, $0.50 per follow-up question |
 
 - **Set limits from the materials.** A 14-concept run took about 7 minutes in Sept 2026. Raise one slow model entry with `limits.overrides` instead of raising everyone.
@@ -105,7 +107,9 @@ Every run has two limits, and they cover all its attempts: the first, the retry 
 - **The ceiling is a maximum only when every run and job has an enforced cap.** Otherwise it is labelled an estimate and the uncapped runs are left out of it.
 - **Read the ceiling's caveats.** The plan never calls the figure guaranteed without them. A cap checked after each turn (the `claude` runner) can be overshot by one turn. A process stopped at its time limit, or by `stop`, can end before it reports what it spent: `status` and `analysis/usage.md` show "not reported (process was stopped)", and until its session is resumed and reports its total, the attempt that resumes it can be given more budget than is left.
 - **Dollar figures are list-price equivalents** under a subscription login: how much allowance is used, not what is paid.
-- **Confirm three things with the user from the plan:** the estimate and ceiling, which provider receives the materials, and each runner's gaps (no budget cap, no browser, what it could not switch off). The plan also names any environment variable that can change who is billed.
+- **Confirm three things with the user from the plan:** the estimate and ceiling, which provider receives the materials, and each runner's gaps (no budget cap, what it could not switch off, what browsing opens). The plan also names any environment variable that can change who is billed.
+- **Browsing gives each run in flight a browser of its own,** about 330 MiB, which the launcher starts before the run and stops after it (`references/runners.md`, Browser sessions). The plan gives the total for the concurrency in force, and says what the session refuses: a panellist can click, type and take screenshots, and cannot run scripts or read page source, cookies or storage. On a small machine lower `runners.<name>.concurrency`. Set `"browse": false` when the captured materials are enough: a Codex run that may browse has network access in its shell.
+- **`plan`, `run`, `pilot` and `resume` need the `agent-browser` CLI on PATH** when a run may browse. The plan names its absence as a problem, and the others refuse.
 - **`resume --extend` breaks the ceiling.** It gives a `limited` run one more allowance. `plan` and `status` then say the ceiling no longer holds.
 
 ## Budget
@@ -135,6 +139,9 @@ Measured in the Sept 2026 study (Claude models, native mode):
 - **A missing or signed-out CLI stops the whole command.** A panel short of a model is a different study. `--allow-missing` goes ahead without that runner and leaves its runs untouched.
 - **After a resume, run `check_runs.py`.** Resumed runs sometimes duplicate a section.
 - **A usage limit, rate limit or capacity refusal stops one runner.** Its runs become `blocked` with the harness's own message as the reason, other runners carry on, and `status` shows when a limit lifts if the harness said.
+- **A resumed run that browses gets a new browser,** on a blank page, and its resume message says so. Nothing it had opened or typed is still there.
+- **A browser session that cannot be started is not a failure either.** The CLI never runs: the launcher says "could not be started" with the reason, marks nothing failed, and starts nothing more on that runner in the command. `logs/<run id>.<attempt>.hooks` has what the session printed.
+- **A killed watchdog leaves its browser running,** about 330 MiB of it. The next launcher command stops it, and `status` says what was found.
 - **A CLI that never ran is not a failure.** When a process exits with an error before printing anything, the launcher says "could not be started", records no attempt and starts nothing more on that runner in the command. It happens when the lead's sandbox lets a CLI start and then refuses what it needs: run `launch.py` from a terminal (`references/runners.md`).
 
 Native mode has its own running notes in `references/runners.md`.
@@ -143,9 +150,9 @@ Native mode has its own running notes in `references/runners.md`.
 
 | State | What happened | Next | In the analysis |
 |---|---|---|---|
-| `done` | Every concept is scored and the final sections are written | none | Every table |
+| `done` | Every concept, or every task of a usability study, is scored and the final sections are written | none | Every table |
 | `partial` | The process ended with some sections written | `resume` | "Incomplete runs" only |
-| `limited` | Stopped at its time or budget limit | Read the file, then `resume --runs <ids> --extend` if it is worth more | "Incomplete runs" only |
+| `limited` | Stopped at its time or budget limit, or at a task's step limit in a usability study. `limited_by` in `runs.json` and the reason in `status` say which | Read the file, then `resume --runs <ids> --extend` if it is worth more | "Incomplete runs" only. A usability study also counts it in completion, steps and stuck points |
 | `blocked` | The harness reported a usage limit, rate limit or capacity refusal | `resume` once it takes requests again | "Incomplete runs" only; analysts wait unless `--allow-incomplete` |
 | `failed` | The process ended with nothing written | `run` | "Incomplete runs" only |
 
@@ -155,6 +162,7 @@ Native mode has its own running notes in `references/runners.md`.
 - **Report "N of M runs complete"** with the results. A persona left with one complete model has no model agreement, so its preference is one model's taste.
 - **Several `limited` runs on one model entry** point at the entry, not the runs: raise its limit with `limits.overrides`, or cut what it views with `model_notes`, before extending run by run.
 - **Analysts are told which runs are incomplete.** They quote what such a run wrote as partial evidence and never count it as a full review.
+- **A released run keeps its state.** In a usability study, `launch.py <study> release --runs <ids>` lets go of the test account of an unfinished run you will not continue. `status` shows it as "released by the lead", and `run` and `resume` leave it alone unless it is named with `--released` (`references/usability.md`, Accounts).
 - **A persona file changed by another run** is a blocking problem in `check_runs.py`. Once dealt with, take its entry out of `logs/modifications.json`.
 
 ## Lead review of finished runs
@@ -173,6 +181,7 @@ Native mode has its own running notes in `references/runners.md`.
 - **One wording for everyone.** One `ask` sends the file's text, word for word, to every run named, so answers to it compare. A reworded question is a new follow-up.
 - **Who can be asked.** A panellist run that is `done`, whose session was not purged or lost, on a runner whose CLI is ready and which can still launch the run's model entry: what stops `plan` and `run` (a model no longer listed, a provider no longer signed in) stops a follow-up, before anything is recorded or started. One run named that cannot be asked stops the whole command, with the reason, unless `--skip-unfit`. Ask before `purge-sessions`.
 - **Cost.** Each run asked has `limits.followup` for each question: 5 minutes and $0.50 by default, apart from its run limits and outside the plan's ceiling. `--runs all` on a 36-run panel is up to $18 a question on a runner with a budget cap, and bounded only by time on one without. `ask` prints the runs and the most they can use, then starts without waiting. When a ceiling was agreed, run it with `--dry-run` first and show the user: it prints the same lines, starts nothing and records nothing.
+- **In a usability study** a follow-up gets no browser. The run's test account is gone, so it answers from its persona file, step log and screenshots.
 - **Ask before the analysts.** An analyst's brief lists each question its personas answered, with the runs, and the writer's brief lists them all. A question asked after a job has finished is not in that job's brief. `run --role analyst` and `run --role writer` are refused while a follow-up is not settled.
 
 What is enforced, on a study that runs through runners:
@@ -259,6 +268,12 @@ A study with one concept answers "how does this land, and for whom", not "which 
 - **Model agreement** is measured on the one concept: the mean absolute difference between a persona's runs on two models, in Overall and over all factors, and the Spearman across the factor scores the two runs gave. The last says whether the models agree on what is strong and weak, whatever level each marks at. A persona whose models sit 2 points or more apart is unsettled.
 - **A level means little alone.** With nothing to compare against, 7.2 is not good or bad: models mark at different levels, and simulated readers are generous. Report which factors are strong and weak, where personas differ, and the quotes. Compare levels only with an earlier round that used the same personas, models and factors, and then only as a direction.
 - **Use replicates.** With no ranking to steady the result, the spread between two runs of the same persona and model is the only measure of noise.
+
+## Usability studies
+
+`"type": "usability"` is the other kind of study: panellists attempt tasks in a running local build through a browser, and the analysis reports completion and stuck points instead of a leaderboard. `references/usability.md` covers it: when to use one, designing tasks and success checks, test accounts, the protocol, running, reading the results, safety and how much to trust them.
+
+What carries over from this document: the model advice, limits and the plan, piloting, run states and follow-up questions. What does not: labels, review order, capture, concept kinds, rankings and answer tallies.
 
 ## Designing concepts for a panel
 

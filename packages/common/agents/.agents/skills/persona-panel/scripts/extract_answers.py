@@ -36,6 +36,8 @@ A run whose latest follow-up question is not settled yet is read as it stood bef
 
 Works on a live study and on an archived one. Run it after extract_scores.py, before analyze.py.
 
+A usability study has none of these fields, and is refused in one line.
+
 Usage: extract_answers.py <study-dir>
 """
 
@@ -57,6 +59,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
     cfg = pl.load_study(ap.parse_args().study_dir)
+    if cfg["type"] == "usability":
+        raise SystemExit("A usability study has no find-the-answer questions and no line or forward fields: there "
+                         "is nothing for extract_answers.py to extract. Its task sections are read by "
+                         "extract_scores.py.")
     sd = cfg["_dir"]
     questions = cfg["find_the_answer"]
     runs = pl.run_records(sd, cfg)

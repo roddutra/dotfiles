@@ -2,15 +2,15 @@
 """Track panel runs: which are done, in progress or pending, and what to launch next.
 
 A run is "done" when its persona file is complete for the study type (panel_lib.run_progress:
-a scored section for every concept and the final "Out of character" section); "started" when
-it has at least one section.
+a scored section for every concept, or for every task of a usability study, and the final "Out
+of character" section); "started" when it has at least one section.
 
 Usage:
   runs.py <study-dir> status
   runs.py <study-dir> next [--limit 20] [--running P01-opus,P02-fable]   # prompts to launch now
   runs.py <study-dir> prompt <run-id>                                    # the run's launch prompt
   runs.py <study-dir> mark <run-id> <agent-id>                           # record the subagent id
-  runs.py <study-dir> resume [<run-id>]                                  # resume messages for unfinished runs
+  runs.py <study-dir> resume [<run-id>]                                  # messages to resume runs
 
 Record each subagent id with "mark" as soon as you launch it. runs.json survives context
 compaction, so an interrupted run (usage limit, crash) can be resumed by messaging the same
@@ -19,6 +19,14 @@ subagent instead of relaunched, which would duplicate sections or lose its readi
 "next", "mark" and "resume" are for native mode, where the lead starts each run with its own
 subagent tool. A study whose model entries name a runner is started, tracked and resumed by
 launch.py, and these three commands refuse it.
+
+A usability study always runs through launch.py. Its resume message (usability_resume) names
+the tasks already written and the tasks left, says that the browser was restarted and whether
+the test account is the same one or a new one, and tells a task that was under way when the run
+was cut off to start again from its start page as a new attempt in the step log, with the
+attempt's number. The number is the launcher's to give (issue_attempts()): it is on the run's
+entry in runs.json before the message is made, and an entry of the step log that carries any
+other counts for nothing.
 
 A follow-up question to a finished run goes through followup.py in either mode. In native mode
 it prints the message for you to send to the subagent that "mark" recorded.
@@ -58,6 +66,8 @@ def resume_message(cfg: dict, s: dict) -> str:
     without its score row is named, with the one thing to add to it: told only not to rewrite
     what it has written, a run never adds the row, and so is never done."""
     unit, units = pl.unit_nouns(cfg)
+    if cfg["type"] == "usability":
+        return usability_resume(cfg, s)
     if s["state"] == "pending":
         return (f"Your run was interrupted before any {unit} was written. Start again from step 1 of your "
                 "original instructions.")
@@ -83,6 +93,86 @@ def resume_message(cfg: dict, s: dict) -> str:
                  + " Re-read your persona file, then append the final sections."]
     else:
         steps = [written, f"Re-read your persona file, {rest}"]
+    return ("Your run was cut off before it finished. Pick up where you left off.\n"
+            + "".join(f"- {step}\n" for step in steps)
+            + "- All the original rules still apply. When done, reply with the summary the instructions ask for.")
+
+
+def account_again(s: dict) -> str:
+    """What a resumed usability run is told of its test account, as a sentence with a space before
+    it, or nothing for a run without one. A run that was partial or blocked kept its account. One
+    that reached a final state, or that the lead released, had it torn down and is given another
+    by the launcher, which then sets s["new_account"]: the name on the screen and the details to
+    sign in with may have changed, and nothing the run did in the first account is in this one."""
+    account = s.get("account") or {}
+    if not account:
+        return ""
+    file = f"`scratch/{s['run']}/account.json`"
+    if not s.get("new_account"):
+        return (" You are signed in to the same test account again." if account.get("signed_in")
+                else " You are signed out again: sign in as before when a task needs it."
+                if account.get("signin") == "panellist" else "")
+    new = (" Your test account is a new one: the one you had was closed when your run stopped, and nothing you "
+           f"did in it is in this one. Read {file} again.")
+    return new + (" You are signed in to the new account already." if account.get("signed_in")
+                  else " You are signed out: sign in with the details that file gives now, when a task needs it. "
+                       "The earlier details no longer work." if account.get("signin") == "panellist" else "")
+
+
+def issue_attempts(cfg: dict, s: dict) -> dict[str, int]:
+    """The attempt each task of a usability run is to be logged under when the run is continued:
+    what launch.py puts on the run's entry as "task_attempts" before it makes the resume message
+    (panel_lib.issued_attempts()). s is the run's run_view(). A task that has no section yet and
+    has entries that count in the attempt it was last given (panel_lib.counted()) was under way
+    when the run was cut off: it gets the next number. Every other task keeps its own, so a task
+    that was given a number and logged nothing under it, because that process never got so far,
+    is given the same number again, and asking twice changes nothing."""
+    issued = pl.issued_attempts(s)
+    logged = pl.counted(pl.read_steps(cfg["_dir"], s["run"])[0], issued)
+    under_way = {e["task"] for e in logged if e["attempt"] == issued.get(e["task"], 1)}
+    return {**issued, **{t["id"]: issued.get(t["id"], 1) + 1 for t in cfg["tasks"]
+                         if t["id"] not in s["written"] and t["id"] in under_way}}
+
+
+def usability_resume(cfg: dict, s: dict) -> str:
+    """resume_message() for a run of a usability study. Its browser session is a new one, so
+    whatever task was under way starts again from its start page. The steps it had logged for
+    that task stay in the step log, and the new ones are told apart by the attempt number given
+    here: the one the launcher has issued for the task (issue_attempts(), on the run's entry),
+    which is above 1 only for a task that was under way. What it is told of its test account is
+    account_again()."""
+    tasks = {t["id"]: t for t in cfg["tasks"]}
+    written, unscored = s["written"], s["unscored"]
+    left = [t for t in tasks if t not in written]
+    steps = []
+    if written:
+        steps.append(f"Tasks already written: {', '.join(written)}. Do not attempt "
+                     + pl.agree(len(written), "it again, and do not rewrite or repeat its section.",
+                                "them again, and do not rewrite or repeat their sections."))
+    if unscored:
+        n = len(unscored)
+        steps.append(f"Written, but with no score row: {', '.join(unscored)}. Without that row "
+                     f"{pl.agree(n, 'the section does', 'those sections do')} not count. Re-read your persona file "
+                     f"and add the score table at the end of {pl.agree(n, 'that section', 'each of those sections')}, "
+                     f"as the template sets it out. Change nothing else in {pl.agree(n, 'it', 'them')}.")
+    if left:
+        steps.append(f"Tasks left, in this order: {', '.join(left)}.")
+        signed = account_again(s)
+        steps.append("Your browser was restarted: it is on a blank page, and nothing you had opened or typed is still "
+                     f"there.{signed} The rules for the browser are unchanged.")
+        issued = pl.issued_attempts(s)
+        for tid in (t for t in left if issued.get(t, 1) > 1):
+            again = issued[tid]
+            steps.append(f"Task {tid} was under way when you were cut off. Start it again from its start page, "
+                         f"`{pl.task_url(cfg, tasks[tid])}`, and number its steps from 1 again. Leave the entries "
+                         f"already in your step log as they are. Give every new entry for this task "
+                         f"`\"attempt\": {again}`, and name its screenshots `{tid}-a{again}-<step>.png`.")
+        steps.append("Re-read your persona file, then attempt the tasks left: append each task's section as you "
+                     "finish the task, then append the final sections.")
+    elif not s["has_final"]:
+        steps.append("Every task has its section. Re-read your persona file, then append the final sections.")
+    else:
+        steps.append("Nothing else is left: your final sections are written, so do not repeat them.")
     return ("Your run was cut off before it finished. Pick up where you left off.\n"
             + "".join(f"- {step}\n" for step in steps)
             + "- All the original rules still apply. When done, reply with the summary the instructions ask for.")

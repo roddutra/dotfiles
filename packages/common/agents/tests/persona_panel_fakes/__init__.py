@@ -6,8 +6,9 @@
 fake_claude.py, fake_codex.py and fake_pi.py are the executables; each docstring lists the commands it
 answers and how to steer it through the environment. By default one invocation prints one
 recorded run. With $FAKE_PANEL set they play whole panellist runs, and analyst and writer jobs,
-from a plan, writing their files, waiting at gates and logging events: see panellist.py. fake_agent_browser.py only logs
-that it was called. The .jsonl files are output recorded from
+from a plan, writing their files, waiting at gates and logging events: see panellist.py. fake_agent_browser.py logs
+each call with the session it was pointed at, and keeps a session's daemon and its action policy as far as
+browser_session.py goes by them. The .jsonl files are output recorded from
 the real CLIs on 12 and 13 October 2026 (claude 2.1.296, codex-cli 0.162.1, pi 1.1.0), trimmed,
 with paths replaced by /study/panel. The fakes print them, and the parsing tests read them
 directly, so both follow the real formats. Pi's are entries of its session file, which is where

@@ -1,7 +1,11 @@
 # Persona panel: other harnesses, limits and wider research
 
-**Status:** Draft. Reviewed by Codex on 12 October 2026 over three rounds and
-approved. Not yet approved by Rod; see [Open questions](#open-questions-for-rod).
+**Status:** Paused on 13 October 2026. All six parts are built, reviewed by
+Codex and committed on the branch `persona-panel-expansion`. Nothing is merged
+to `main`. Three acceptance criteria are not verified. Codex reviewed this PRD
+on 12 October 2026 over three rounds and approved it, and Rod settled the open
+questions on 13 October 2026. See
+[Implementation status](#implementation-status).
 
 PRD for extending the `persona-panel` skill
 (`packages/common/agents/.agents/skills/persona-panel/`) so that it covers most
@@ -18,6 +22,347 @@ of what a separate synthetic research platform would offer:
    real browser.
 
 Drafted 12 October 2026.
+
+## Implementation status
+
+As at 13 October 2026. Work is paused.
+
+All six parts are built on the branch `persona-panel-expansion`, which is not
+merged to `main`. Each milestone was committed once Codex approved it. 97
+contract tests pass. Real end-to-end runs
+passed for milestones 1, 2, 3 and 5 on Claude Code and Codex, and for
+milestone 4 on Pi through its `openai-codex` provider only. Three acceptance
+criteria are not verified, and everything ran on Linux. The evidence sat in
+temporary directories that will not survive, so this section carries the
+conclusions.
+
+Terms used here:
+
+- **Milestone** is the PRD's [order of work](#order-of-work). Milestone 1
+  covers parts 1 and 2, and milestones 2 to 5 cover parts 3 to 6.
+- **Real run** means a study run end to end with real harness CLIs and real
+  models. The models were Claude Code on `haiku` and `sonnet`, Codex on its
+  default model at low effort, and Pi on `openai-codex/gpt-6-luna` at low
+  effort. The largest panel was 6 runs (3 personas on 2 model entries).
+- **Tests** are the contract tests in
+  `packages/common/agents/tests/test_persona_panel.py`, which run against fake
+  CLIs and call no model. Run them with
+  `python3 -m unittest discover -s packages/common/agents/tests -p 'test_persona_panel.py'`.
+
+### What is built, part by part
+
+Part 1, runners and the launcher:
+
+| Item | Detail |
+| --- | --- |
+| Built | `scripts/launch.py` (`plan`, `pilot`, `run`, `resume`, `stop`, `status`, `usage`, `purge-sessions`), a watchdog for each attempt (`scripts/run_watchdog.py`), the `claude` and `codex` runners, analyst and writer jobs, incomplete runs kept out of the headline tables. Native mode is kept |
+| Commit | `0f2abe1` |
+| Tests | `RunnerTest` (commands, parsing, checks and purge against fake CLIs) and the lifecycle tests of `LauncherTest`. 55 tests passed when the milestone was reviewed |
+| Real run | Passed on Claude Code (`sonnet`) and Codex. A study of two personas and two concepts: pilot, run, the launcher killed mid-panel and started again, a time limit on both harnesses then `resume --extend`, `stop`, an analyst and the writer, and `purge-sessions`. A planted marker term reached no persona file |
+| Codex review | Rounds 1 to 4 (four rounds). Final verdict: APPROVE |
+
+Part 2, limits, the plan and usage:
+
+| Item | Detail |
+| --- | --- |
+| Built | The time limit for every run, the budget cap where the harness has one (Claude Code only), limits that add up over a run's attempts, `plan` with its estimate and ceiling, `analysis/usage.md` |
+| Commit | `0f2abe1` |
+| Tests | `test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap`, `test_limits_add_up_across_a_runs_attempts`, `test_usage_record_counts_a_resumed_session_once_and_the_next_plan_estimates_from_it`, `test_run_over_its_time_limit_is_stopped_and_keeps_what_it_wrote` |
+| Real run | Passed on Claude Code and Codex, in the milestone 1 study. The usage record equals what each CLI printed. Claude Code's budget cap was seen to stop a run during discovery, not in the study |
+| Codex review | Reviewed with part 1: rounds 1 to 4. Final verdict: APPROVE |
+
+Part 3, small additions:
+
+| Item | Detail |
+| --- | --- |
+| Built | The text-only pass, `scripts/followup.py`, `scripts/extract_answers.py`, replicate spread and variants in `analyze.py`, `scripts/roster.py`, the study brief and its guard, the synthetic panel notice |
+| Commit | `a068777` |
+| Tests | One or more for each addition, for example `test_text_only_study_gives_panellists_the_words_alone_and_scores_no_design_factor` and `test_follow_up_reaches_the_original_session_and_appends_one_section_without_changing_a_score`. 70 tests passed when the milestone was reviewed |
+| Real run | Passed on Claude Code (`haiku`) and Codex. A text-only study built from the roster grid, with a variant persona: 6 runs, two follow-up questions, tallies, an analyst and the writer, the brief guard, and an archive. No real study set `replicates` above 1 |
+| Codex review | Rounds 5 to 8 (four rounds). Final verdict: APPROVE |
+
+Part 4, artefact kinds:
+
+| Item | Detail |
+| --- | --- |
+| Built | `url` and `files` concepts, mixed kinds in one study, single-concept studies, the format caution, a capture that publishes each page or item whole or not at all |
+| Commit | `2389a29` |
+| Tests | `test_url_and_files_concepts_reach_panellists_under_neutral_names_and_a_url_only_when_the_study_browses`, `test_single_concept_study_passes_checks_and_analysis_with_nothing_ranked_or_compared`, the capture tests. 80 tests passed when the milestone was reviewed |
+| Real run | Passed on Claude Code (`haiku`) and Codex. One study of a screenshots concept, a PDF concept and a live page on a local host, a single-concept study with an analyst and the writer, a text-only variant, an archive with concepts, the refusal without Poppler, and one browsing run that opened the live address |
+| Codex review | Rounds 9 to 11 (three rounds). Final verdict: APPROVE |
+
+Part 5, the Pi runner:
+
+| Item | Detail |
+| --- | --- |
+| Built | `scripts/runners/pi.py`, its guard extension `scripts/runners/pi_guard.ts`, and `model_status()` on every runner |
+| Commit | `b88c7de` |
+| Tests | The `pi` rows of `RunnerTest`, `test_full_materials_study_with_a_model_that_reads_no_images_is_refused_at_the_plan_step`, `test_model_its_harness_does_not_list_or_cannot_sign_in_for_is_refused_before_any_run_starts`. The guard is TypeScript that Pi runs, so it has no test here. 81 tests passed when the milestone was reviewed |
+| Real run | Passed on Pi 1.1.0 through its `openai-codex` provider (a ChatGPT subscription login) only: plan, a pilot that read images by path, a time limit then `resume --extend`, the refusals of an unlisted model, a text-only model and a dead login, and `purge-sessions`. Nothing ran on an OpenAI-compatible endpoint |
+| Codex review | Rounds 12 and 13 (two rounds). Final verdict: APPROVE |
+
+Part 6, usability studies and launcher-owned browser sessions:
+
+| Item | Detail |
+| --- | --- |
+| Built | `"type": "usability"`, `scripts/accounts.py` (provision, teardown, reset, success checks), `scripts/browser_session.py` (one session for each attempt of every run that browses, in review studies too), the step limit's backstop, `launch.py check` and `release`, the usability analysis, the secret scan, the archive rules for evidence, `references/usability.md` |
+| Commit | `M5HASH` |
+| Tests | `BrowserSessionTest`, the browser session and usability tests of `LauncherTest`. 97 tests pass |
+| Real run | Passed on Claude Code (`haiku`) and Codex. Browser sessions: a browsing review study on Claude Code, Codex and Pi. Usability, against a local test app: a study of two personas on both harnesses with two tasks, accounts, success checks, an analyst, the writer and an archive, a study whose panellist signs in, a run stopped and resumed twice, and a task that ran out of steps. These runs came before the fixes of review rounds 16 to 19, which change no instruction a panellist is given and are covered by the tests alone |
+| Codex review | Rounds 14 onwards. The browser sessions were approved with one note in round 15, and round 16 confirmed the note resolved. Round 16 required changes to the usability part (nine findings, all since fixed). Round 17 found seven of the nine resolved, and round 18 the other two. Round 18 also classed as blocking two archive problems that the fix pass had found and disclosed (an unreadable folder, and an empty folder named with a secret); both were fixed. Rounds 14 to 19 (six rounds). Final verdict: APPROVE |
+
+### Acceptance criteria
+
+Every criterion from [Acceptance criteria](#acceptance-criteria), with one of
+three marks. A criterion marked "verified on real harnesses" may have a test
+as well, named in its evidence.
+
+Runners and launcher:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A Claude Code and Codex panel runs to completion from one `launch.py run`, every persona file passing `check_runs.py` | verified on real harnesses | Milestone 2 study: one `run` finished the four runs left after the pilot, 6 of 6 run files with no blocking problem. Milestone 1 study: 4 of 4 |
+| The same panel is started from a Codex session, a Claude Code session and a plain terminal | not verified | The real runs were started from a Claude Code session's shell. From inside a Codex session `status` and `plan` worked and `run` did not. No run from a plain terminal is on record |
+| Model agreement covers pairs across vendors | verified on real harnesses | Milestone 3 study: `haiku-codex`, Spearman 0.50 over three concepts |
+| A run past its time limit stops, keeps what it wrote and is `limited` | verified on real harnesses | `test_run_over_its_time_limit_is_stopped_and_keeps_what_it_wrote`. Milestone 1 on Claude Code and Codex, milestone 4 on Pi |
+| A usage limit leaves runs `blocked`, other runners unaffected, and `resume` finishes them | verified by tests only | `test_usage_limit_blocks_one_runner_and_resume_finishes_its_run`. No usage or rate limit has been seen in a real run. The nearest real case was the milestone 1 pilot, Codex only: a capacity refusal left its run `blocked`, the Claude Code run finished, and `resume` completed it. See [Built but not tested](#built-but-not-tested) |
+| Killing the launcher mid-panel loses no work and starts no duplicate | verified on real harnesses | `test_killed_launcher_loses_no_work_and_starts_no_duplicate`. Milestone 1 study: the next `run` cleared the stale lock, adopted the live Codex run and finished 4 of 4 |
+| A panellist does not see the lead project's instruction files | verified on real harnesses | Milestone 1: a marker term in the project's `AGENTS.md` and `CLAUDE.md` is in no persona file or analysis file, on Claude Code and Codex. Pi: in its discovery fixture only. Codex's user-level `AGENTS.md` is not covered |
+| `plan` starts no process and makes no model call | verified by tests only | `test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap`. Since milestone 4 the claim is narrower: `plan` starts no run and changes no study file, and a sign-in check may let a harness refresh its own login |
+| `run` never restarts a `partial` or `limited` run | verified by tests only | `test_run_and_resume_start_only_the_states_they_own` |
+| Analyst and writer jobs run on the `synthesis` models, the writer after the analysts | verified on real harnesses | `test_analysts_then_the_writer_run_on_their_own_models_within_a_share_of_the_pool`. Milestones 1, 2, 3 and 5, always on Claude Code `sonnet` |
+| An existing archived study still passes `extract_scores.py` and `analyze.py` | verified by tests only | `test_archived_study_from_before_run_completeness_still_analyses`, `test_runs_json_from_before_model_entries_still_works` |
+
+Limits and usage:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| `plan` shows an estimate, a ceiling and its label, and the limits in force | verified by tests only | `test_plan_starts_nothing_and_labels_its_ceiling_by_whether_every_run_has_a_cap` |
+| After a pilot, `plan` uses the measured usage | verified by tests only | `test_usage_record_counts_a_resumed_session_once_and_the_next_plan_estimates_from_it` |
+| `analysis/usage.md` matches what each harness reported | verified on real harnesses | Milestone 1 study: the Claude Code and Codex figures equal the totals in each CLI's output, rechecked on 13 October 2026. Pi's figures were not rechecked against its session file |
+| A run stopped by a limit is absent from every headline table and listed as incomplete | verified by tests only | `test_run_stopped_by_a_limit_is_listed_apart_from_the_headline_tables` |
+
+Small additions:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A text-only study completes and its analysis has no visual factors | verified on real harnesses | Milestone 2 study: 6 runs on Claude Code and Codex, and no visual or mobile factor in `quant.md` or `scores.csv` |
+| A follow-up reaches the original session and appends one section without changing any score | verified on real harnesses | `test_follow_up_reaches_the_original_session_and_appends_one_section_without_changing_a_score`. Milestone 2 study: one Claude Code run and one Codex run answered in their recorded sessions, with no score changed |
+| Tallies match a hand count of three runs | verified on real harnesses | Milestone 2 study: three persona files recounted on 13 October 2026 (6 Found; 5 Found and 1 Partly; 6 Found), the same as `answers.csv` |
+
+Artefact kinds:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A PDF and a set of screenshots are reviewed under neutral labels | verified on real harnesses | Milestone 3 study: both reached the panel as `item-<NN>` folders under concept letters, and 4 runs on Claude Code and Codex finished |
+| A page on a local host is captured and reviewed | verified on real harnesses | Milestone 3 study: a page served on `127.0.0.1` was the third concept |
+
+Pi runner:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A panel includes a model on an OpenAI-compatible endpoint | not verified | No such endpoint is configured in Pi on this machine. Pi ran through its `openai-codex` provider only |
+| A full-materials study with a text-only model is refused at the plan step | verified by tests only | `test_full_materials_study_with_a_model_that_reads_no_images_is_refused_at_the_plan_step` |
+
+Usability:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| Panellists on two harnesses attempt a task on a local build, each with its own account, and produce step logs with screenshots | verified on real harnesses | Milestone 5 study: 4 runs on Claude Code and Codex, each with a provisioned account that was torn down |
+| A task that uses its step limit keeps its last step, and the run goes on to the next task | verified on real harnesses | `test_task_that_uses_its_step_limit_keeps_its_last_step_and_a_run_that_passes_the_limit_is_stopped`. Milestone 5, Claude Code: a task with a limit of 3 ended "ran out of steps" with its third result and screenshot saved, then the run did the next task. The launcher's backstop has stopped a run only in the test |
+| An archived usability study contains the step logs and screenshots its synthesis cites | verified on real harnesses | `test_usability_archive_keeps_the_evidence_without_a_secret_or_a_screenshot_that_could_show_one`. Milestone 5 archive: all 59 step and screenshot citations in the synthesis resolve in the archived evidence, checked on 13 October 2026 |
+| A claimed success that the check denies is flagged | verified by tests only | `test_claim_that_the_success_check_denies_is_flagged_and_a_check_that_fails_to_run_is_no_verdict`. No real run made such a claim |
+| No secret value in any persona file, step log or synthesis, and no archived screenshot from a step that could show one | verified by tests only | `test_secret_value_in_a_persona_file_or_step_log_fails_its_run_and_is_never_printed` and the archive test above. In milestone 5 a planted secret was refused by `check_runs.py` and `archive.py`, and the archive of the sign-in study left out every screenshot |
+| A remote target without `allow_remote` is refused | verified by tests only | `test_invalid_model_entries_and_options_are_refused`, the case "a usability target that is not a local host" |
+
+Documents:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| `SKILL.md` names no harness tool, and a harness other than Claude Code completes a study by following it | not verified | `SKILL.md` says "your harness's shell tool" and names no tool. No harness other than Claude Code has led a study |
+
+### Built but not tested
+
+- **Pi against an OpenAI-compatible endpoint.** None is configured in Rod's
+  Pi. It needs a provider in `~/.pi/agent/models.json` or an OpenRouter login,
+  which is Rod's to set up. Tool calling, usage figures, image input and
+  error text on such an endpoint are all unknown.
+- **macOS.** Everything ran on Linux. The watchdog's path for a Python
+  without `os.waitid` runs in the tests (`LauncherWithoutWaitidTest`), on
+  Linux.
+- **Usage-limit and rate-limit detection, on all three harnesses.** The
+  patterns are inferred from documentation and message shapes, and no limit
+  was ever seen. The one refusal seen in a real run was a Codex capacity
+  error ("Selected model is at capacity"), which ends in the same `blocked`
+  state.
+- **A harness other than Claude Code as the lead.** No other harness has
+  followed the `SKILL.md` walkthrough. From inside a Codex sandbox the
+  launcher cannot start a Codex run (`references/runners.md`, "When the lead's
+  own sandbox blocks the launcher").
+- **The usability protocol on larger panels and larger models.** The largest
+  usability study was 4 runs, on `haiku` and on Codex at low effort. The
+  default time limit and the "decide from the screen" result both rest on
+  that.
+- **Features with tests and no real run on record:** the step limit's
+  backstop, a sequential usability study with `accounts.reset`, a remote
+  usability target (`allow_remote`), and `replicates` above 1.
+- **Analyst and writer jobs on Codex or Pi.** Every real one ran on Claude
+  Code.
+- **A usability study with a Pi panellist.** Pi browsed in a review study
+  only.
+- **The discovery questions still open.** The lists "Still open after
+  milestone 1", "milestone 4" and "milestone 5" under
+  [Discovery](#discovery) stand as written.
+
+### Not built
+
+- Runners for OMP and OpenCode.
+- A study option that replaces a harness's system prompt
+  ([decision](#system-prompt-override-experiment-and-decision)).
+- A limit on where a panellist's browser can go.
+
+### Known limitations
+
+Rod set the trust boundary: a panellist can write only under `panel/`.
+`logs/`, `accounts/`, `runs.json` and the records are lead-only and trusted.
+A finding that needs someone to tamper with a lead-only file is out of scope
+and is recorded here, not fixed.
+
+Harnesses and isolation:
+
+- Codex cannot exclude the user-level `AGENTS.md`, so it reaches every Codex
+  panellist.
+- Codex and Pi have no budget cap. The time limit is what bounds their runs.
+- Codex reports no cost and no duration, and Pi no duration.
+- Claude Code always gives the model the account email, the working
+  directory path, the OS version and the date.
+- A Codex run that may browse has network access for its whole shell: the
+  setting is all or nothing.
+- Codex writes a trust entry to the user's `config.toml` for a run inside a
+  git repository.
+- The Pi guard is tied to Pi 1.1.0: it repeats that version's path handling
+  step by step. It does not see a link swapped in between its check and the
+  tool's use, or a hard link.
+
+Browsing and usability:
+
+- The rules for a remote target are instructions to the panellist only.
+  Nothing stops a browser from submitting a form.
+- Nothing limits where the browser goes. The local-host rule reads the host
+  name alone, so a local name that proxies a hosted service passes.
+- The browser's debugging port stays open, and the element list shows more
+  than the screen does.
+- The secret scan covers known fingerprints only. It misses a value written
+  another way (split, in another case, encoded or masked) and a secret
+  shorter than 4 characters. Screenshots and saved-state cookies cannot be
+  scanned.
+- The fingerprint hash is fast, so a weak test password can be guessed from
+  the lead-only file until teardown makes it worthless.
+- A harness's own transcript holds any credential a panellist read or typed.
+- `launch.py check --force` on a kept verdict, while the run has a new
+  account, judges the old task against the new account. The output warns.
+- Browser processes can survive when a session's daemon and the browser's
+  main process were both killed outright.
+- `status` takes no lock, so it settles nothing. The next `run`, `resume`,
+  `stop` or follow-up does.
+
+Recovery:
+
+- When a watchdog was itself killed, the launcher checks who holds the CLI's
+  process id and then signals its group. The id could change hands between
+  the two.
+- A study directory that cannot be written is archived without the lock.
+- The reader that keeps an unsettled follow-up's edits away from the scripts
+  has no permanent test for its race: it was checked with a throwaway stress
+  run.
+
+Noticed during the last fix pass and deliberately not fixed:
+
+- A review-study archive still copies through symbolic links in kept folders.
+- `analyze.py` splits `step_notes` on "; ", which one note type also uses
+  between its items.
+- A failed run that is started afresh logs attempt 1 again over its earlier
+  entries, and its evidence folder is not cleared.
+- Follow-up `.before` copies in `logs/` are read by name.
+- Persona files are parsed through plain reads. Only the secret scan refuses
+  a persona file that is a symbolic link.
+- A step log that is refused as a link stops nothing in the backstop
+  (`check_runs.py` blocks the run), and a panellist can evade the backstop by
+  truncating its own log.
+- Harness error messages that the launcher prints are not passed through the
+  secret-safe rendering.
+- While a process left by a lead command holds up recovery, `launch.py stop`
+  exits before it stops runs that are still alive under their watchdogs.
+- Where no list of processes can be had (no `ps` and no `/proc`), a command's
+  process group is taken to be empty.
+- A stray evidence file whose name is not shown loses its run id in the
+  message.
+- On Python 3.12 and earlier, a kept folder that can be listed but not
+  searched may end an archive in a traceback that carries its path. It is
+  refused cleanly on Python 3.14, where this was run.
+- A FIFO or socket under a kept folder is not refused by the archive's plan:
+  the scan may block on it, or the copy may fail.
+- The archive plans, then copies. A folder made unreadable between the two
+  still fails in the copy.
+- A kept folder that holds only ignored names (`__pycache__`, `.DS_Store`) is
+  archived as an empty folder.
+
+Codex raised no finding that was left unfixed, and none outside the trust
+boundary.
+
+### Rod's decisions
+
+All made on 13 October 2026.
+
+- **The Pi runner stays as built,** with no further Pi work. Runners for OMP
+  and OpenCode are not started.
+- **The `claude` and `codex` runners keep their harness's default system
+  prompt.** The experiment showed no measurable difference
+  ([System prompt override](#system-prompt-override-experiment-and-decision)).
+- **Open questions 5 and 6 are built as drafted.**
+
+How each of the [open questions](#open-questions-for-rod) was settled:
+
+| Question | Settled as |
+| --- | --- |
+| 1. Default concurrency | 6 for Claude Code, 4 for Codex, 3 for Pi |
+| 2. Native mode | Kept |
+| 3. Pi as the third runner | Pi, as built. No OMP or OpenCode runner |
+| 4. Reusable rosters | Project-local. No shared location |
+| 5. Remote targets for usability studies | Only with `allow_remote: true`, with read-only tasks and no accounts |
+| 6. Credentials in harness transcripts | Accepted: bounded by throwaway accounts, teardown and `purge-sessions` |
+
+### Where to pick up
+
+1. Run the tests and confirm that all pass.
+2. Lead one small study from a harness other than Claude Code by following
+   `SKILL.md`, and start one from a plain terminal. That settles two
+   criteria.
+3. Run the tests and one small study on macOS.
+4. When a usage or rate limit next happens, keep the CLI's output and exit
+   code, compare them with the patterns in `scripts/runners/` (each is marked
+   verified or inferred), and add the real output to
+   `test_runner_parses_recorded_outcomes`.
+5. Run a usability study of real size on larger models. Check the default
+   time limit against the measured time for each step, and whether panellists
+   open their screenshots.
+6. Fix the items under "deliberately not fixed", above.
+7. If Pi work resumes: configure a provider for an OpenAI-compatible endpoint
+   in Pi, pilot a model on it, and recheck the guard against the installed Pi
+   version.
+8. Merge the branch, then update the status line at the top.
+
+### Leftovers on this machine
+
+- Two scratch `trust_level` entries in `~/.codex/config.toml`, for the
+  projects `.../scratchpad/disc-codex/iso/parent/proj` and
+  `.../scratchpad/e2e-m1/project`. Rod may want to remove them.
+- Eight `/tmp/agent-browser-chrome-*` directories, dated 12 October 2026.
+- The scratch studies, under
+  `/tmp/claude-1000/-home-roddutra-dotfiles/fcdf3c9a-0eec-4f8d-ba8b-9b436b3ec29c/scratchpad/`.
+- Harness sessions of the scratch studies. `purge-sessions` was run in
+  milestones 1 and 4. Whether the other studies' sessions were purged is not
+  verified.
 
 ## Problem
 
@@ -921,6 +1266,12 @@ and session ids from the command line.
 `"type": "usability"` tests whether a persona can complete tasks in a running
 product, thinking aloud.
 
+What was built differs from this part in places: who owns the browser
+session, what a panellist's `account.json` holds, how a remote target is
+held to its rules, and what a success check's exit code means. Each is in
+[Deviations decided during milestone 5](#deviations-decided-during-milestone-5),
+which wins where the two disagree.
+
 ### Study definition
 
 ```json
@@ -1044,6 +1395,375 @@ confidence, clarity of next step, trust, and overall.
 - steps taken, and where runs stopped
 - stuck points ranked by how many runs hit them, each with its step evidence
 - a separate synthesis brief, `assets/usability-synthesis-brief.md`
+
+### Deviations decided during milestone 5
+
+Browser sessions, which every browsing study now uses:
+
+- **The launcher side owns the browser, and a panellist only sends it
+  commands.** [Protocol](#protocol) says a panellist opens the start page
+  "in its own `agent-browser` session", and review studies had each run
+  start one. Nothing a run starts survives a Codex shell call, an unpoliced
+  session lets a run read cookies and page source, and cleanup was left to
+  the panellist.
+- **Each attempt has a session of its own, started and stopped by its
+  watchdog.** `run_watchdog.py` takes optional "before" and "after" commands
+  and knows nothing of browsers. "after" runs however the attempt ends, so
+  cleanup does not depend on a launcher being alive. When "before" fails the
+  CLI is never executed: the run "could not be started", with the reason,
+  and nothing is marked failed.
+- **A new script, `scripts/browser_session.py`,** starts and stops a
+  session. It makes a socket directory for the session alone, starts the
+  session in the run's working directory at the study's desktop viewport,
+  puts the action policy in place and checks that it is in force. It
+  records the daemon and the browser with their start identities, and stops
+  only processes it can still identify as its own.
+- **Stopping a session never runs `agent-browser`.** Every close path of
+  the CLI (0.38.1) can end in a signal to whatever process a pid file
+  names: `close --all` when the socket does not answer, and `close` for one
+  session when it restarts a session whose settings differ. The stop asks
+  each session to close through its socket, then signals only a process
+  that still holds its id under the start identity it was noted with.
+- **A second session in the same socket directory is found by its socket,**
+  not by a pid file. The system names the process that listens on a socket
+  (peer credentials), and that process is then held to its start identity
+  like a recorded one. A session whose process the system does not name is
+  asked to close and otherwise left, with its socket directory, and reported.
+  The browser of a second session whose daemon was killed outright is not
+  found.
+- **The session's record is untrusted input.** A record that is a symbolic
+  link, is not a regular file of the user, or is not what the start wrote
+  is refused: nothing is stopped or removed, and the launcher and `status`
+  say so. No path to delete is taken from it. The record and the policy are
+  named by the attempt's log base, which the launcher passes to both
+  commands. The socket directory is removed only when it holds a random
+  token that the record also holds, is the user's alone (mode 0700) and
+  sits directly in the temporary directory. A profile directory is removed
+  only when a browser process the stop identified named it. What fails its
+  proof stays and is reported, on the record under `kept`.
+- **The start records each thing before or as it comes into being,** so a
+  start that is killed at any point leaves nothing the stop cannot find.
+- **The watchdog records the command that starts the session** in the pid
+  file, with its start identity, from before it can act until it has ended.
+  A launcher that settles an attempt whose watchdog was killed ends that
+  command's process group first, by the rule it uses for the CLI's, and
+  only then stops the session. The CLI was never executed, so the run
+  "could not be started" and nothing is marked failed.
+- **The run reaches its session through three environment variables,** which
+  the launcher hands each runner as `run["browser_env"]`. No session name
+  is on a command line. Every other `AGENT_BROWSER_*` variable of the
+  lead's environment is kept out of a run, except the two that say how a
+  browser starts on the machine.
+- **The action policy's allow list is in `browser_session.py`,** the one
+  place it is kept: what a visitor does with a page, and nothing that reads
+  what a person could not see.
+- **Codex can browse.** Its runner turns network access on for a run that
+  may browse and makes the temporary directories read-only. The plan
+  states that such a run's shell can reach the network directly. This
+  replaces the milestone 1 decision that Codex has no browser.
+- **The Claude runner allows each `agent-browser` command by its own rule,**
+  in place of one rule for the CLI. An option after the command still gets
+  through, so the action policy is the control and the rules a second layer.
+- **A resumed run gets a new session, on a blank page,** and its resume
+  message says so. A follow-up question gets one too.
+- **A watchdog that was killed leaves its session running.** The launcher
+  that settles the attempt stops it, and `status` shows what it found. The
+  next launcher also stops any session on record that no live attempt owns.
+- **Starting a session holds the launcher** until the session is up, about
+  half a second for each run, because a run's process is recorded only once
+  its session exists.
+- **The instructions tell a browsing panellist** that its session is open
+  already and is closed for it, to run one command per shell call, to
+  snapshot before acting, to save each screenshot by a relative path in its
+  scratch folder, and which commands the session takes. This is for studies
+  that run through runners. A native-mode study has no launcher, so its
+  instructions and run prompts are as before: each panellist starts a
+  session named by its run id, saves screenshots by absolute path and closes
+  the session when done.
+- **Runners list what browsing leaves open** in `browse_gaps`: no limit on
+  where the browser goes, an element list that shows more than the screen,
+  and the browser's debugging port. The plan also gives the memory the
+  sessions hold with the concurrency in force.
+
+The usability study type, its protocol and its accounts:
+
+- **A study is one type or the other.** A usability study refuses the keys
+  only a review has (`concepts`, `labels`, `find_the_answer`, `artefact` and
+  the like), `"materials": "text"`, `"browse": false`, every `capture` key
+  but `desktop`, and native mode. A review refuses `target`, `tasks`,
+  `accounts` and `sequential`. A key that is quietly ignored reads as a
+  setting in force.
+- **`target.base_url` is scheme, host and port alone,** and a task's `start`
+  is a path on it. Task ids are unique ignoring case, because they name files.
+- **`base_url` is read by a grammar of its own, not a URL parser.**
+  `http://example.com\.localhost` parsed as a `.localhost` name and a
+  browser goes to `example.com`. Accepted: `http` or `https`, a host, an
+  optional port (1 to 65535) and at most one trailing `/`, in ASCII. The host
+  is a plain name (letters, digits, hyphens, single dots, no dot at either
+  end), four decimal numbers or a bracketed IPv6 address. A user name, a
+  path, a backslash, `@`, `%` and a host whose last label is a number in
+  another notation (`2130706433`, `0x7f.1`, `127.1`) are refused outright.
+- **Local means the three exact forms and the two endings.** `127.0.0.2`,
+  `0.0.0.0`, `[::ffff:127.0.0.1]`, `[0:0:0:0:0:0:0:1]` and a `.localhost` or
+  `.test` name with a punycode label are valid hosts that are not local, so
+  they need `allow_remote`.
+- **Panellists get the address rebuilt from the validated parts,**
+  lower-cased, never the text as written.
+- **A task's `start` is one leading `/`, no `//`, no backslash, space or
+  control character,** in ASCII with anything else percent-encoded.
+- **A remote target is held to its rules by instruction only.** `read_only`
+  is the lead's declaration that a task can be met by looking. Nothing stops
+  a browser from submitting a form, and the plan says so.
+- **Whether a command's file exists is checked at the scaffold, the plan and
+  every start,** not when study.json is loaded, so an archived study still
+  loads. The shape of every command is checked on load.
+- **`accounts.signin`** is the setting that hands a panellist secrets:
+  `"session"` (the default) or `"panellist"`.
+- **The panellist's `account.json` holds identifiers, not credentials.**
+  [Accounts and safety](#accounts-and-safety) says credentials are written
+  there. It now has `signed_in`, `identifiers` and a `note` that says how
+  the run starts, and `secrets` only with `"signin": "panellist"`. The whole
+  account is in `<study>/accounts/<run id>.json`, lead only, mode 0600.
+- **A saved state reaches a browser session as a private copy** in `logs/`,
+  which the session deletes once loaded or when it cannot start. The
+  original stays for a resume, and is deleted after teardown when a provision
+  command made it.
+- **`accounts.map` needs an account for every run,** and one saved state
+  under `panel/` is refused.
+- **A step is one action on the page.** Opening a task's start page,
+  snapshots, screenshots, scrolling and waiting are not steps. The start
+  page's screenshot is step 0.
+- **Choosing from a drop-down list is one step, made with `select`,** with
+  the choice read from the element list. [Protocol](#protocol) says the
+  element list is for acting, not for finding things out. This is its one
+  exception, and it does not break "decide from the screen": a person would
+  open the list and see the same choices. In the end-to-end study a
+  panellist that clicked a list open counted two steps for one choice, and
+  the open list hid other controls in its screenshot. The instructions, the
+  run prompt and the analyst's brief all state the rule.
+- **What a panellist sees after scrolling is a further view of the step,**
+  saved as `<task>-<step>b.png`, then `c`, with no entry of its own in the
+  step log. A further view is archived with its step, and left out with a
+  step marked `sensitive`.
+- **A test account's display name is the test's, not a finding.** The
+  instructions and each `account.json` say the account is lent, and the
+  briefs tell the analysts and the writer never to report the name as a
+  finding about the product.
+- **`product` is required,** and `product_phrase` does not stand in for it:
+  the briefs name the product by it.
+- **A restarted task is a new attempt in the step log.** Every entry has
+  `attempt`, 1 at first. The resume message gives a task that was under way
+  its next number and names its screenshots `<task>-a<attempt>-<step>.png`,
+  so the superseded steps and their screenshots stay.
+- **The attempt number is the launcher's to issue.** It is on the run's
+  entry (`task_attempts`) before the resume message is made. An entry that
+  is not a step (no whole step number, a phase that is neither), or that
+  carries a number the launcher did not issue, is left out before attempts
+  are chosen, in the analysis and in the backstop. `check_runs.py` notes it.
+- **The resume message says which account the run has.** A run that kept
+  its account is "signed in to the same test account again". One that was
+  provisioned again is told its account "is a new one", that nothing it did
+  in the first is in it, and to read `account.json` again.
+- **A task section opens its outcome with one of three fixed phrases:**
+  completed, gave up, ran out of steps.
+- **Teardown follows every provisioning once.** A failed run that is retried
+  is torn down and provisioned again. A teardown that fails leaves the
+  account in force, is reported in capitals, and is tried again by the next
+  launcher command that settles runs.
+- **No run carries on in an account that is owed a teardown.** A failed run
+  whose teardown fails is not retried and stays failed. A later `run` (or
+  `resume --extend` of a limited run) tears the account down first and only
+  then provisions and starts. While the teardown still fails the run is not
+  started and the command exits with 1.
+- **A teardown is ordered so that a kill leaves it finishable.** The
+  account's record gets `cleanup` (the files to remove and rewrite) before
+  the command runs. The files are seen to after it, and one last write marks
+  the account torn down and takes `cleanup` off. Until then the account is
+  in force, so the whole teardown is done again: by the next launcher
+  command, whatever state the run is in, and by `init_study.py --force`.
+- **A provisioning that did not finish is cleared up first.** The record
+  notes that a provision command started. When the next start finds no
+  account for it, it runs `teardown` for the run id, then provisions.
+- **A lead command's output is never printed or recorded.** Messages,
+  `runs.json` and `status` carry the exit code and a fixed sentence. What
+  the command wrote goes to `accounts/<run id>.<command>.output`, mode 0600,
+  never archived, and the message names it. A provisioning payload that
+  cannot be used goes there too and is never quoted.
+- **One lead command at a time, on record with its process identity.**
+  `accounts/command.running` names the command, the run and the
+  provisioning before the process exists, then its pid and start identity.
+  The process becomes the command only once that is written. The next
+  launcher command, and `init_study.py --force`, first ends a command still
+  running under that identity (SIGTERM, the grace, SIGKILL), waits for it,
+  and treats it as unfinished. A group is signalled only while that process
+  is there to prove whose it is. When the command has gone and its process
+  group still holds a process that has not ended, such as a worker that
+  ignored SIGTERM, the launcher kills nothing, keeps the record, starts no
+  lead command and exits with 1, naming the pids and how to check them. Once
+  the group is empty the next command clears the record and carries on.
+- **When provisioning or `reset` fails the run "could not be started",**
+  nothing is marked failed, and no further run starts in that command.
+- **`init_study.py --force` tears down every account still in force,** and
+  stops before replacing anything when one fails.
+- **`reset` runs before an attempt whenever another run used the product
+  since:** before every launch, retry and restart but the study's first, and
+  before a resume unless the same run ran last. `reset` without
+  `"sequential": true` is refused.
+- **A run's time limit defaults to 30 seconds for each step its tasks permit,
+  plus 5 minutes,** when `limits.run.minutes` is not set.
+- **A follow-up to a usability run gets no browser session.** Its account is
+  gone, so it answers from its persona file, step log and screenshots, in a
+  frame of its own.
+- **Scripts that have nothing to do refuse in one line:** `capture.py` and
+  `extract_answers.py`. `scores.csv` names its unit column `task`, and
+  `rankings.csv` is the header alone. A usability study has no `key.md`.
+- **The fourth default factor's key is `clarity`,** because `next_step`
+  means something else in a review.
+
+Secret scanning and the archive of a usability study:
+
+- **A scan knows the secrets by fingerprint.** Teardown takes them off every
+  record, and follow-ups and the synthesis are written after it.
+  `accounts/fingerprints.json`, lead only and never archived, holds a salted
+  hash of each secret. `accounts.py` adds to it whenever it writes an account
+  record, and every scan adds what is still written out.
+- **A scan fingerprints every run of characters as long as a known secret,**
+  so it finds a value inside a longer word, and in a JSON string as it
+  decodes. It does not find a value written another way (split across lines,
+  in another case, encoded or masked), a secret shorter than 4 characters, or
+  one of 4 to 7 characters with a letter or digit against it.
+- **The hash is a fast one,** so a weak password can be guessed from the
+  file. Teardown is what makes the password worthless.
+- **An account torn down before the record heard of it cannot be scanned
+  for.** `check_runs.py` and `archive.py` name its run and carry on.
+- **A file that could not be scanned is never "nothing found".**
+  `check_runs.py` blocks on a persona file, step log or analysis file that
+  cannot be read or is a symbolic link, and `archive.py` refuses. Each is
+  named with the reason.
+- **No message repeats a panellist's own text unchecked.** One function,
+  `panel_lib.shown()`, quotes a task id or label the study does not have, a
+  file or screenshot name and a page address. A value that holds a known
+  secret, is longer than 40 characters (120 for a page) or has characters
+  outside letters, digits, spaces and `. _ - / : # ~` is described ("a
+  value that is not a task id, 14 characters"). It covers the launcher's
+  lines, `analysis/checks.md`, `runs.csv`, `tasks.csv` and `steps.csv`.
+- **Evidence is never read through a symbolic link.** The evidence root, a
+  run's folder and each file are opened without following one, by the
+  backstop, the scan, `check_runs.py`, `extract_scores.py` and `archive.py`.
+  A refused folder is named: `check_runs.py` blocks and the archive is
+  refused. A usability archive also refuses a symbolic link among the kept
+  files.
+- **In `check_runs.py` only a secret value, or a file that could not be
+  scanned, blocks:** in a run's persona file
+  or step log, or in a markdown file of `analysis/`. Notes cover stray files
+  in an evidence folder, the form of a step log, a named screenshot that is
+  not there, a task written up with no step logged, and another account's
+  identifier in a run's files.
+- **`archive.py` scans every file it would hold,** not step logs alone:
+  persona files, prompts, analysis, `runs.json`, `followups.json` and its own
+  copy of `study.json`.
+- **No archive while a test account is in force.** A run that is not done,
+  limited or failed keeps its account, so it has to finish first.
+- **A screenshot is a PNG file whose name gives its step, or that a result
+  entry names.** Nothing else in an evidence folder is copied, a link least
+  of all, and a line counts what was passed over.
+- **Screenshots stay PNG under their own names,** at half size and 256
+  colours, so a citation is found as it was written. Without ImageMagick
+  they are copied whole, and a line says so.
+- **A third kind of screenshot is left out:** a file that is not a PNG
+  image. The note in place of a screenshot is `<its name>.left-out.txt`.
+- **The archived `study.json` has each `accounts.map` secret replaced with
+  "(removed from the archive)",** so it still loads with
+  `"signin": "panellist"`. Without a map it is copied byte for byte.
+
+The step limit's backstop, success checks, analysis and the jobs:
+
+- **The backstop's reason is on record before the run is asked to stop.**
+  The launcher writes the decision to the attempt in `runs.json` (`stop`:
+  task, step, limit), then asks the attempt's watchdog, which stops the CLI
+  as at a time limit. The watchdog knows nothing of steps: its end record
+  says "stop", and whichever launcher settles the attempt reads the decision.
+  The run is `limited` with `"limited_by": "steps"`.
+- **The backstop reads only what the current attempt added** to the step
+  log. A resumed run is not stopped again for the step that stopped it.
+- **The backstop counts intents, whatever attempt they carry.** An intent
+  numbered above the limit stops the run, and so does one intent more for a
+  task than the limit allows. An entry under a number of the panellist's own
+  is one more step, so renumbering buys none.
+- **A time limit that comes first stands as the reason.**
+- **A success check's exit code is its verdict: 0 completed, 1 not
+  completed.** Any other code, a check that cannot be run and one that
+  times out are "failed to run": no verdict, reported in capitals, and never
+  counted as not completed.
+- **Checks run when a run is done, limited or failed, before teardown,** and
+  not for a failed run about to be retried. A run that is continued has its
+  check records dropped, so they are made again when it next finishes.
+- **A run continued with a new account keeps the check of each task it had
+  written up,** marked `kept`, through every later attempt. It does not
+  attempt that task again, and the new account has none of its data, so a
+  check made then would read "not completed". Only the tasks it attempts
+  afterwards are checked on the new account.
+- **`launch.py check [--runs <ids>]` runs the checks again by hand,** for a
+  lead who has mended a check.
+- **`check` keeps a verdict whose account is gone.** In the end-to-end study
+  a check run again after teardown turned "completed" into "failed to run".
+  A verdict of completed or not completed, made while the account was
+  there, is now kept, and a line says so for each task. `--force` runs the
+  check all the same and says that the earlier verdict was replaced. A task
+  with no verdict, or with "failed to run", is tried either way. An account
+  let go in a study with no `accounts.teardown` is still in the product, so
+  its checks run again.
+- **`launch.py release --runs <ids>` lets go of the account of a run the
+  lead will not continue.** A partial, blocked or pending run otherwise keeps
+  its account, and the archive refuses the study. Its checks are run first,
+  as for a finished run, then its account is torn down and the run is marked
+  `released`. `run` and `resume` leave a released run alone unless it is
+  named with `--released`, which gives it a new account.
+- **A teardown is tried once for each run in a command.** Settling a run and
+  then catching up on final states tried a failed teardown twice.
+- **A `result` entry also has `url`,** the address the action left the
+  browser on, from `agent-browser get url`. Without it no script can tell
+  one screen from another. It costs one more command for each step.
+- **A stuck point is a task and a page address without its query.** A run
+  hits it in one of two ways. It did not complete the task (gave up, ran out
+  of steps, stopped at the step limit), and this is the screen that held
+  it: the one most of its last 4 steps left it on, and the later of two
+  that tie. Or it took 4 or more steps in a row there that left the address
+  unchanged. The report prints the definition and says that the analysts
+  refine it.
+- **The screen that held a run is not the screen it ended on.** The first
+  definition was "where the task ended". In the end-to-end study two runs
+  left the form that blocked them for the help page and gave up there, so
+  the help page ranked first. The evidence of each run now gives the screen
+  it ended on, the screen its last step was taken on, and the steps that
+  left it on the stuck point's screen.
+- **Completion, steps and stuck points count every run; the score tables
+  count complete runs only.** A run stopped at a step limit is incomplete,
+  and leaving it out would make its task look easier than it was. Completion
+  counts the attempts of a task that ended: its section is written, or a
+  limit stopped the run in it.
+- **Checked completion is a share of the attempts a check gave a verdict
+  on.** Checks that failed to run and attempts not checked each have a
+  column of their own.
+- **A mismatch is one of two things:** a claim of completed that the check
+  denies, or a claim of gave up or ran out of steps that the check passes.
+  An Outcome line that cannot be read is listed apart and is no claim.
+- **`extract_scores.py` writes `analysis/tasks.csv` and `steps.csv`,** one
+  row for each run and task and one for each step, so `analyze.py` still
+  reads only `analysis/*.csv`. The sentences a panellist wrote stay in the
+  step log.
+- **The usability briefs are assets of their own:**
+  `usability-qual-brief.md` and `usability-synthesis-brief.md`, each with a
+  `-followups` fragment. The review briefs are unchanged.
+- **`plan` and `run` stop when the `agent-browser` CLI is not on PATH** and
+  a run may browse, in a review study too.
+- **An attempt's stream files and the launcher's lock are opened like every
+  other file of an attempt.** `logs/<run id>.<attempt>.in`, `.out` and `.err`
+  are made anew and handed to the process by descriptor, and read back
+  without following a link or waiting. `.launch.lock` is opened the same
+  way: a link or a FIFO at its name is no lock, and a command that needs the
+  study refuses in a sentence. The lock itself is unchanged: `flock` on the
+  one file every launcher opens.
 
 ## Changes to the skill's documents
 
@@ -1243,6 +1963,8 @@ All runners:
     `agent-browser` commands. No in Codex, as above. Yes in Pi, which has no
     sandbox: the browser session persists between shell calls, and the
     guard extension is what limits the shell to `agent-browser`.
+  - Since milestone 5 a Codex run drives a session that is started outside
+    its sandbox: "Codex and the browser", under Usability below.
 
 Still open after milestone 1:
 
@@ -1276,9 +1998,505 @@ Usability:
 
 - Whether panellists follow the "decide from the screen" rule, checked by
   comparing step logs with screenshots in a pilot.
+  - **Result (verified, small sample):** yes. The end-to-end study compared
+    step logs with screenshots step by step. No step on either harness
+    acted on an element that no screenshot showed, in 25 and 24 steps
+    examined.
+  - One small-model run chose from a closed list using the element list in
+    4 of 25 steps. The list rule now makes that the stated protocol
+    (Deviations decided during milestone 5).
+  - Earlier, in discovery: a Codex run at low effort answered that a name
+    was "not shown in the snapshot" when its screenshot showed it. The list
+    of elements to act on leaves out plain text, and the run had not opened
+    the image. The instructions now say that the screenshot is what is
+    visible, and ask for the `result` entry after looking at it.
+  - Codex's event stream shows no image views, so on that runner whether a
+    run opened a screenshot cannot be checked from the logs. Claude Code's
+    stream shows every read.
 - How often a panellist claims success that the check denies.
+  - **Result (verified, small sample):** 0 of 12 task attempts across the
+    studies run.
+  - One mismatch of the opposite kind: a panellist reported giving up on a
+    task that the check passed.
+- Both answers are small samples from one test app.
 - Whether `agent-browser` can save a signed-in browser state and load it into
   a panellist's session, which the signed-in start depends on.
+  - **Result (verified):** yes. `state save <file>` writes cookies and local
+    storage as JSON, and `--state <file>` at launch loads it into another
+    session. Six sessions on three accounts each showed their own account.
+  - The file holds the session cookie in plain text. The state is applied
+    when it is loaded: the file was deleted straight after and the session
+    stayed signed in. So the launcher loads the state and deletes the file,
+    and a panellist never has a file to read. `browser_session.py start`
+    takes `--state` and `--delete-state`.
+  - `--state` cannot be combined with `--allowed-domains`.
+  - The cookie is still in the browser. Without a policy, `cookies get` and
+    `state save` print it. The action policy below refuses both.
+- Codex and the browser. Not a question at the start.
+  - **Result (verified):** a Codex run can drive a browser that was started
+    outside its sandbox. Each shell call is a process namespace of its own,
+    so a browser started inside dies when the call returns, with `setsid`
+    and `nohup` too.
+  - The sandbox refuses to connect to a Unix socket unless
+    `sandbox_workspace_write.network_access=true`. Network access is all or
+    nothing in the stable settings, so the run's shell can then reach the
+    internet and the target directly.
+  - A command that cannot reach its session takes it for stale and deletes
+    its socket files, which cuts the session off for good. The launcher
+    therefore records the daemon's process id and stops it by signal.
+  - With `exclude_slash_tmp=true` and `exclude_tmpdir_env_var=true` the
+    temporary directories are read-only in the sandbox, so a run cannot
+    start a session of its own in the socket directory.
+  - **Result (inferred):** an experimental proxy feature can narrow the
+    network to one host, but it puts proxy variables into the shell, which
+    restart the session blank. Not usable yet.
+- What keeps a panellist from reading what a person could not see. Not a
+  question at the start.
+  - **Result (verified):** `agent-browser` enforces an action policy inside
+    the session, a JSON allow list named by `AGENT_BROWSER_ACTION_POLICY`.
+    With it, `eval`, `cookies`, `storage`, `state`, page source, reading an
+    element by selector, network requests, the console and every option that
+    relaunches the browser are refused on every harness. The file is read
+    again for every command, so the launcher sets the session up under a
+    policy that allows everything and then swaps the strict one in.
+  - A command that reaches a session with other `AGENT_BROWSER_*` settings
+    than it was started with restarts it, blank and signed out. The launcher
+    and the run must use the same environment. A run that drops the policy
+    loses its session and gains nothing.
+  - Not covered: where the browser goes, where a screenshot is saved,
+    commands that never reach a session (`profiles`, `session list`,
+    `connect`), and the browser's debugging port, through which a
+    determined run could read a cookie.
+  - The element list is the accessibility tree. It holds screen-reader-only
+    text and off-screen elements, and leaves out `aria-hidden` content that
+    is visible. "Use it to act, not to discover" stays an instruction.
+- Session behaviour that shaped the launcher (all verified).
+  - Relative screenshot paths resolve against the session's working
+    directory, not the run's, and a screenshot with no path goes to the
+    user's home directory.
+  - `click` returns before the navigation it starts has finished, so a
+    screenshot chained to it fails or shows the old page.
+  - The default viewport is 1280 x 577.
+  - SIGTERM to a session's daemon is a clean close. SIGKILL leaves its
+    browser running, with a profile directory in the temporary directory.
+  - A session holds about 330 MiB. Commands take 2 to 50 ms and a launch
+    under a second, so the harness sets the pace: about 6 s a step on a
+    small Claude model and 7 to 10 s on Codex at low effort.
+  - A cookie is tied to its host: a state saved on `127.0.0.1` does not
+    sign in `localhost`.
+- What the protocol had to say that the draft did not (all verified).
+  - A Claude Code panellist cannot append to its step log from the shell:
+    redirection is refused even with `echo` allowed, and the run gave up
+    after two refusals. Told to keep the log with its file tools, it did.
+  - A panellist told it was one person stopped at step 1 when the page
+    greeted another. The instructions now say the account is lent.
+  - "Step" needs a definition. One run counted each snapshot as an action
+    and used 3 of its 10 steps looking.
+- What a typed secret leaves behind. Not a question at the start.
+  - **Result (verified):** a password field is masked in the element list
+    and in a screenshot, though its length shows. A "show password" control,
+    or any field that is not a password field, puts the value in both. No
+    screenshot option masks a field.
+  - The policy refuses reading a field's value back. The value is still in
+    the harness's transcript, as part of the command that typed it.
+  - `agent-browser auth login` fills a sign-in form from a vault, so a
+    panellist never holds the password. It worked on the CLI alone and was
+    not tried inside a harness. It is not used: the panellist would not
+    experience typing, and the vault sits beside the user's own profiles.
+- The default time limit.
+  - **Result (inferred):** 30 seconds for each step plus 5 minutes for the
+    run leaves room above the measured 6 to 10 s a step. Larger models and
+    higher effort were not measured.
+
+Still open after milestone 5:
+
+- Whether panellists look at their screenshots, and how often a claim and a
+  check disagree, on a panel of real size.
+- Timing on larger models and higher effort, and how context grows over a
+  task of 25 screenshots.
+- A limit on where the browser goes. `--allowed-domains` cannot be combined
+  with a saved state, and it blocks the fonts, scripts and images a product
+  loads from other hosts.
+- A Codex network rule narrower than all or nothing.
+- The browser's debugging port: no `agent-browser` option was found that
+  starts the browser without one.
+- A sign-in kept in IndexedDB or session storage. `state save` does not
+  carry IndexedDB. Not tested.
+- `--headed` and `--cdp` under the action policy: inferred to be refused,
+  not run. And `install`, `upgrade`, `plugin add`, `dashboard start`, `mcp`
+  and `chat`: inferred never to reach a session, so the policy does not
+  cover them. Not run.
+- Whether the vault is acceptable for a study where signing in is the task.
+
+### System prompt override (experiment and decision)
+
+Tested on 13 October 2026 with claude 2.1.296 (Claude Max login) and codex-cli
+0.162.1 (ChatGPT login, default model `gpt-6.1-sol`). **Outcome:** both CLIs
+can replace their built-in prompt, ten panellist runs showed no difference in
+the research output, and both runners keep the default prompt (Decision,
+below).
+
+**Question.** The Claude Code and Codex runners strip user and project
+instruction files, memory, skills, hooks and MCP servers, but leave each
+harness's default system prompt in place, and that prompt addresses a coding
+agent. Rod asked whether replacing it would let a panellist take on its
+persona more reliably.
+
+Findings come from each harness's session record (the `prompt_snapshot` record
+of a Claude Code transcript, `session_meta.base_instructions` and the recorded
+messages of a Codex rollout file), not from what a model said about its own
+instructions. What was read from help text, or not tested, is marked.
+
+**What Claude Code supports** (probes used the runner's own arguments and
+`--model haiku`):
+
+- **What is replaced.** `--system-prompt <text>` makes the prompt exactly the
+  text passed, as one block. With the runner's isolation flags, the default it
+  replaces is 11 blocks of about 7,100 characters (about 2,200 tokens):
+  guidance for a general agent on code style, confirming hard-to-reverse
+  actions, context management and, in one block of 2,800 characters, finishing
+  the task within the turn.
+- **`--system-prompt-file <path>`** works the same way. It is not listed in
+  `claude --help`, so `--system-prompt <text>` is the documented form.
+- **What still reaches the model:**
+  - a prefix line, sent ahead of the replacement text:
+    `You are a Claude agent, built on Anthropic's Claude Agent SDK.`
+  - the tool definitions (about 10,200 characters for the five file tools)
+  - the working directory path, platform, shell, OS version and whether the
+    directory is a git repository
+  - the model's name, id and knowledge cutoff, and today's date
+  - the account email, in a system reminder in the user turn
+  - a token budget line, a rule about untrusted downloaded files and a line
+    about making independent tool calls in parallel
+
+  Nothing but the prompt body disappeared or moved.
+- **Tools with a replaced prompt.** Read, Write, Edit, Glob, Grep and reading
+  a PNG all worked. With Bash added, an allowed command ran and a command with
+  no allow rule was denied, as with the default prompt.
+- **Resume.** `--system-prompt-snapshot` defaults to `on`: the prompt is
+  rendered on the conversation's first request, recorded in the transcript,
+  and sent again on every later request and every resume.
+  - A resume without the flag kept the replaced prompt.
+  - A resume that passed different text kept the recorded prompt. The cache
+    read on that request was 6,909 tokens, against 3,188 when the prompt
+    changed.
+  - With `--system-prompt-snapshot off`, a resume used the text passed at that
+    launch.
+  - The help text says the record holds "until the conversation is compacted".
+    What a compaction renders was not tested.
+- **An empty string fails.** `--system-prompt ""` gave three thinking-only
+  responses, then `terminal_reason: malformed_tool_use_exhausted` and exit
+  code 1 (one probe).
+- `--exclude-dynamic-system-prompt-sections` is documented as ignored with
+  `--system-prompt`, and was not tested.
+
+**What Codex supports** (probes used the runner's own arguments at low
+effort):
+
+None of these keys is in `codex exec --help`, and no docs ship with the
+package. The names come from the binary's config schema and the behaviour from
+experiment. An unknown `-c` key is ignored with no error. `--strict-config` is
+the CLI's switch for unknown config fields, and whether it also checks `-c`
+overrides was not tested.
+
+| Key, passed with `-c` | Effect |
+| --- | --- |
+| `model_instructions_file=<absolute path>` | The base instructions become exactly the file's content. The default is 21,769 characters, starting "You are Codex, an agent based on GPT-6" |
+| `instructions=<text>` | The same effect, from text |
+| `developer_instructions=<text>` | Adds one developer message ahead of the built-in developer blocks. Replaces nothing |
+| `include_environment_context=false` | Removes the `<environment_context>` user message: working directory, shell, date, timezone and filesystem permissions, 1,515 characters |
+| `include_permissions_instructions=false`, `include_collaboration_mode_instructions=false`, `include_apps_instructions=false` | Set together in one probe, with the key above. The `<permissions instructions>` (591 characters) and `<collaboration_mode>` (920) developer blocks were gone. The probe did not separate the three keys |
+
+- **What still reaches the model** after the base instructions are replaced:
+  - the developer blocks `<permissions instructions>`, `<collaboration_mode>`,
+    `<multi_agent_role>` (2,400 characters) and `<multi_agent_mode>` (271)
+  - the user's global `~/.codex/AGENTS.md` (5,260 characters), the runner's
+    known isolation gap
+  - `<environment_context>`, unless it is switched off
+  - the same tool set: `exec` (which carries `exec_command`, `apply_patch`,
+    `view_image` and others), `wait`, `request_user_input`, the sub-agent
+    tools and `clock.sleep`
+
+  No account email or name reached the model in any variant.
+- **Tools with a replaced prompt.** Reading a file, writing one in the working
+  directory, changing it and opening a PNG by path all worked.
+- **Resume.** A thread keeps its base instructions: a resume with the runner's
+  plain resume arguments still followed the replacement, and its request was
+  10,787 tokens, where a default base would add about 4,300. Instructions
+  passed on a resume replace the thread's. The `include_*` settings are per
+  process: their blocks came back on a resume that omitted them.
+
+**Input tokens for one trivial turn:**
+
+| CLI | Variant | Input tokens |
+| --- | --- | --- |
+| Claude Code, `haiku` | default prompt | 6,434 |
+| Claude Code, `haiku` | replaced with the 79-word prompt below | 4,345 |
+| Claude Code, `haiku` | empty string (first request of the failed run) | 4,230 |
+| Codex, low effort | default | 15,233 |
+| Codex, low effort | base replaced by `instructions`, one extra developer line | 11,046 |
+| Codex, low effort | base replaced by file, no environment context | 10,554 |
+| Codex, low effort | base replaced, permissions, collaboration and environment blocks off, prompt `hello` | 9,871 |
+
+The default body costs about 2,200 tokens on Claude Code and about 4,300
+tokens per request on Codex.
+
+**The A/B.**
+
+- **Fixture:** round 1 of the `e2e-m1` Tallybird study: two landing-page
+  concepts, personas P01 Tracey Vukovic and P02 Dinesh Ramanathan. One copy
+  per arm, outside any git repository, with the persona files reset and the
+  review order B then A in every run.
+- **Arm A:** the runner's arguments as `launch_command()` builds them, with
+  `--max-budget-usd 1.5` on Claude Code.
+- **Arm B:** the same plus `--system-prompt "<the replacement prompt>"` on
+  Claude Code, or `-c model_instructions_file=<absolute path to the prompt>`
+  on Codex.
+- **Runs:** ten, five per arm, one per cell: P01 and P02 on `haiku`, P01 on
+  `sonnet`, and P01 and P02 on Codex's default model at low effort. All ten
+  started together, each under a 900-second timeout.
+
+The replacement prompt, 79 words, used unchanged for both CLIs:
+
+```
+You are taking part in a research study as a participant. You are the person described in your persona file: think, judge and write as that person would, in their own words, for the whole session.
+
+You work by reading the files you are pointed to and by writing your answers to your own file, using the tools provided. Read images by opening them with the same tools.
+
+Your task instructions follow in the next message. Follow them exactly.
+```
+
+**Results.**
+
+- **Completion and checks.** All ten runs were complete: a scored section for
+  both concepts and every final section. `check_runs.py` reported 0 blocking
+  problems and 0 notes for each arm, `extract_scores.py` gave 10 score rows
+  from 5 complete runs per arm, and `extract_answers.py` parsed every answer
+  and line entry in both. No run had a tool error, a refusal, a failed edit or
+  an early stop. Nothing broke in arm B.
+- **Behaviour.** Every run in both arms read the instructions, its own persona
+  file, both images and the page text of each concept, and nothing else, and
+  changed only its own persona file. Each opened the same four images (each
+  concept's desktop sheet and mobile screens), and arm A, P01 codex zoomed
+  into one more. No persona file mentions a path, a tool, the model, the
+  operating system, the date or the account.
+- **Voice.** Both arms read as the persona. Read side by side, the arms could
+  not be told apart by voice. Gut-reaction lines for the same persona and
+  model, arm A then arm B:
+  - P01 haiku, Concept B: "Looks tidy, now prove the numbers and tell me what
+    my blokes have to do." / "Right audience, now show me who's behind the
+    numbers."
+  - P01 sonnet, Concept A: "Finally someone who answers the crew question
+    straight." / "That table is my Sunday night spreadsheet, and it didn't
+    make me feel like I'm being sold to."
+  - P01 codex, Concept B: "You've named my Sunday night, now show me where the
+    numbers come from." / "You've named my Sunday-night headache, now show me
+    who's doing the input."
+  - P02 codex, Concept B: "Leave the ledger alone, then show me where the
+    profit number comes from." / "You've answered my first safety question,
+    not proved the answer."
+  - P02 haiku, Concept B: "Decent answers at the bottom, but the big claims at
+    the top have no backing." / "Tidy, quick to read, but the numbers are
+    doing a lot of work with no source behind them."
+- **Out-of-character slips.** Neither arm offered help, wrote "on the one
+  hand" summaries or used consultant language inside the in-character
+  sections.
+  - Arm A, P01 haiku broke character once inside a template field: "(Note:
+    Dave is a placeholder name I've made up for my bookkeeper, not from the
+    materials.)" Arm B had no equivalent.
+  - Arm A, both Codex runs narrated the study's rules in character: "I checked
+    the full page text; those details aren't explained", "the placeholder
+    amount hasn't influenced my score", "These are placeholder amounts, not my
+    basis for scoring".
+  - Arm B, P01 codex did the same in milder words: "Those are draft prices,
+    but the payment structure is clear", "The draft amount doesn't affect my
+    verdict". Arm B, P02 codex kept that to the researcher notes.
+  - Final chat replies, which are not the persona file, open in assistant
+    voice on Claude Code in both arms ("I've finished both reviews and the
+    final sections"). Codex replies are two or three terse lines in both arms.
+  - That is one or two fewer slips in arm B across five pairs. It points the
+    hoped-for way, and it is within what a rerun of either arm would change.
+- **Template discipline.** Every run in both arms has all twelve fields in
+  order for both concepts, the eleven-column score row and the seven final
+  headings in order, with no invented heading and no concept given a title.
+  - Quoted keep, cut and don't-believe lines are verbatim page text in 30 of
+    30 cases in arm A and 29 of 30 in arm B (the miss is a sentence cut
+    short).
+  - Section length is 371 to 669 words per concept section in arm A and 371 to
+    665 in arm B.
+  - Neither arm used an em or en dash.
+  - One formatting difference: arm B, P01 codex wrote 24 curly quotation marks
+    around its own phrases, and no other run in either arm has any. The
+    default Codex prompt may be what keeps punctuation plain, and one run
+    cannot show that.
+
+**Scores.** Concept A ranked first in all ten runs, and no pair changed its
+ranking. The eleven factors, in template order: First impression, Relevance,
+Problem recognition, How it works, Why care, Trust, Visual design, Structure
+and flow, Mobile, Next step, Overall.
+
+| Persona | Model | Concept | Arm A | Arm B | Sum of absolute differences |
+| --- | --- | --- | --- | --- | --- |
+| P01 | haiku | A | 7 8 9 8 8 7 7 8 6 7 8 | 8 6 8 8 8 6 7 8 6 7 7 | 6 |
+| P01 | haiku | B | 7 7 7 6 7 4 7 7 8 5 6 | 7 9 7 6 6 5 8 7 8 6 6 | 6 |
+| P02 | haiku | A | 8 7 7 7 7 7 8 8 6 6 7 | 7 7 7 6 6 6 7 8 5 5 6 | 8 |
+| P02 | haiku | B | 6 3 5 4 5 3 7 6 7 3 4 | 6 5 6 4 5 3 7 7 7 3 4 | 4 |
+| P01 | sonnet | A | 8 8 8 8 8 6 7 8 5 8 8 | 8 9 9 8 8 7 8 8 6 8 8 | 5 |
+| P01 | sonnet | B | 7 6 7 4 6 4 7 7 7 6 6 | 8 8 7 4 7 5 7 8 8 7 7 | 9 |
+| P01 | codex | A | 8 9 8 8 9 7 8 9 6 8 8 | 9 9 8 8 9 7 8 9 6 7 8 | 2 |
+| P01 | codex | B | 9 9 9 4 8 4 8 7 8 6 6 | 8 8 9 4 8 4 8 7 8 5 6 | 3 |
+| P02 | codex | A | 9 8 9 8 8 7 8 9 6 6 8 | 9 9 8 8 8 7 8 9 6 6 8 | 2 |
+| P02 | codex | B | 8 7 8 4 7 4 8 7 8 3 6 | 8 7 8 4 7 4 8 8 8 3 6 | 1 |
+
+- **Mean absolute difference per cell:** 0.42 over 110 cells (codex 0.18,
+  haiku 0.55, sonnet 0.64).
+- **No direction:** the mean signed difference, arm B minus arm A, is +0.07.
+  The mean score is 6.87 in arm A and 6.95 in arm B, with a spread of 1.51 and
+  1.48.
+- **Run-to-run variation is as large.** The fixture's earlier run of P01
+  sonnet with the default prompt differs from arm A (also the default) by 12
+  points over the same 22 cells, and from arm B by 6. The earlier default P01
+  codex run is identical to arm B on all 22 cells and differs from arm A by 5.
+  Two default runs differ from each other as much as the arms do.
+- Neither arm scored flatter or more generously.
+
+**Tokens and cost.**
+
+| Arm | Run | Wall | Input tokens (cached) | Output tokens | Cost | Tool calls |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | P01 haiku | 43 s | 128,162 (103,148) | 8,459 | $0.010 | 12 |
+| B | P01 haiku | 44 s | 136,238 (110,831) | 8,128 | $0.010 | 12 |
+| A | P02 haiku | 61 s | 193,876 (164,959) | 11,612 | $0.013 | 13 |
+| B | P02 haiku | 41 s | 112,574 (88,046) | 7,652 | $0.010 | 11 |
+| A | P01 sonnet | 40 s | 92,110 (69,325) | 5,035 | $0.148 | 10 |
+| B | P01 sonnet | 40 s | 85,929 (60,398) | 5,085 | $0.159 | 11 |
+| A | P01 codex | 82 s | 218,539 (186,240) | 2,752 | not reported | 8 |
+| B | P01 codex | 74 s | 152,615 (132,096) | 2,449 | not reported | 7 |
+| A | P02 codex | 105 s | 217,527 (190,464) | 2,777 | not reported | 8 |
+| B | P02 codex | 92 s | 150,699 (114,304) | 2,377 | not reported | 7 |
+
+- Codex arm B used about 30% fewer input tokens: 303,314 against 436,066 for
+  the two runs. That is the only measurable gain.
+- Claude Code shows no consistent change.
+- Tool calls on Codex are `exec` calls counted from the rollout. On Claude
+  Code they are Read, Glob, Edit and, in one run, Grep.
+- Dollar figures are list prices under a subscription login. Codex reports no
+  cost.
+
+**What ten runs can and cannot show.**
+
+- **They can show** that replacement does not break the plain panellist path
+  on these three models, and that there is no large effect on voice, template
+  or scores. A large effect would have been visible in five pairs, and none
+  was.
+- **They cannot show** a small effect. With two personas, one study and one
+  run per cell, the slightly lower count of slips in arm B and the curly
+  quotes in one Codex run are both within noise.
+- **Limits of the setup:** both arms' working directory path contained
+  `exp-sysprompt`, which the models could see. The arms ran at the same time.
+  Only landing pages were reviewed, with no browsing, no follow-up question
+  and no Pi runner.
+- **The experiment's reading:** no real difference in research output.
+  Confidence is high that nothing breaks, and moderate that there is no effect
+  worth having.
+
+**Decision (Rod, 13 October 2026).** The `claude` and `codex` runners keep
+their harness's default system prompt for now, and no study option replaces
+it. Rod's reason: the experiment showed no tangible benefit or difference in
+the research output when the default system prompts were overridden. The
+question is set aside, not closed.
+
+What the experiment adds to that reason:
+
+- The persona file and the panel instructions already do the work under the
+  default prompt.
+- With the runner's isolation flags the Claude Code default is small (about
+  2,200 tokens), and nothing in it showed up in any persona file.
+- The Codex key is undocumented, and a renamed key would silently restore the
+  default without the runner's `check()` noticing.
+- A second prompt path adds resume rules that differ between the two CLIs.
+
+The experiment did not cover Pi, and the `pi` runner is unchanged. It passes
+`--system-prompt ""` and `--append-system-prompt ""`, a choice made for that
+runner's isolation before this decision: the two flags keep a global
+`SYSTEM.md` or `APPEND_SYSTEM.md` out, and Pi's own system prompt stays (Pi,
+above).
+
+Worth revisiting when, for example:
+
+- a larger A/B is run on real studies, with more personas and at least two
+  runs per cell and arm
+- the Codex saving of about 4,300 input tokens per request, about 30% of a
+  run's input, starts to matter
+- a harness documents its key, or changes its default prompt
+- out-of-character output in a real study is traced to the default prompt
+
+**If it is revisited.**
+
+- A study option that is off by default.
+- One prompt asset that the skill owns and every runner uses, so that runners
+  still add nothing of their own. The file sits outside `panel/`, for example
+  in the skill's `assets/`.
+- Panellist runs only (a run whose `role` is `panellist`). Analyst and writer
+  runs were not tested.
+- The plan output says that the harness prompt was replaced, because scores
+  from the two settings were not shown to be interchangeable beyond this small
+  test.
+
+Claude Code, at launch and on resume alike, after the existing options:
+
+```
+--system-prompt "<text of the prompt asset>"
+```
+
+- Pass the same text on every resume. The recorded prompt wins while the
+  snapshot is on, so repeating it changes nothing today and covers a compacted
+  conversation.
+- Never pass an empty string, and never pass `--system-prompt-snapshot off`.
+- A session started before the option was switched on keeps its original
+  prompt on resume, whatever is passed.
+
+Codex, at launch and on resume alike, among the `-c` options before `-C`:
+
+```
+-c model_instructions_file=<absolute path to the prompt asset>
+```
+
+- Pass it on every resume, before the word `resume`. A resume without it keeps
+  the thread's instructions and a resume with different text replaces them, so
+  identical text on every call is the only stable rule.
+- Guard against a renamed key, which would silently restore the default. A
+  check that does not depend on `--strict-config`: after the first launch,
+  read `session_meta.base_instructions` from the rollout once per study and
+  compare it with the asset.
+
+**Not settled.**
+
+- Any effect smaller than run-to-run noise. Settling it needs more personas
+  and at least two runs per cell and arm.
+- Claude Code after a compaction with a replaced prompt.
+- Why the empty-string prompt made haiku produce no visible output three times
+  (one probe).
+- Whether the curly quotes in one Codex arm B run come from losing the default
+  prompt.
+- Codex's `include_permissions_instructions=false`,
+  `include_collaboration_mode_instructions=false` and
+  `include_environment_context=false` on a real panellist run. They remove
+  their blocks at launch, and the blocks return on a resume that omits them.
+- The `<multi_agent_role>` and `<multi_agent_mode>` blocks and the global
+  `AGENTS.md` still reach a Codex panellist with either prompt.
+- Whether another Codex model or an API-key login refuses custom base
+  instructions. The default model under the ChatGPT login accepted them.
+- Browsing runs, follow-up questions on a resumed panellist, the Pi runner,
+  and the analyst and writer roles.
+- The account email stays in a Claude Code panellist's context with either
+  prompt.
+
+**Side finding, left unchanged.** On Codex,
+`-c include_environment_context=false` removes the block that carries the
+working directory, shell, date and timezone, an isolation gap the plan reports
+today. The key is undocumented and was not tried on a full panellist run, so
+the runner does not pass it.
 
 ## Edge cases
 

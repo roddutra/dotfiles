@@ -11,7 +11,8 @@ the line it is added under the title, as launch.py and archive.py add it (panel_
 For native mode. In a study that runs through runners, launch.py saves each analyst's and the
 writer's reply itself, by the same rules (panel_lib.reply_document).
 
-Usage: extract_agent_reply.py <transcript.jsonl|reply.txt> --out <file.md> [--start "# Round 2"] [--contains "text"]
+Usage: extract_agent_reply.py <transcript.jsonl|reply.txt> --out <file.md> [--start "# Round 2"]
+                              [--contains "text"]
 """
 
 from __future__ import annotations

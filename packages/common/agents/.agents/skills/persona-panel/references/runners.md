@@ -6,21 +6,22 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 
 | Key | Meaning |
 |---|---|
+| `type` | Default `"review"`. `"usability"` is a task-based study of a running product, with keys of its own (Usability and browsing, below) |
 | `runner` | The default runner for every model entry and synthesis job that names none |
 | `models` | Model entries. A bare string is that model on the study's `runner`, and is its own key. An object is `{"key", "runner", "model", "effort"}` |
 | `replicates` | Default 1. Above 1, each run is repeated as `<pid>-<key>-r<n>`. Analysis counts replicates as separate runs and adds "Replicate spread" (`references/method.md`, Replicates and variants) |
-| `limits.run` | `{"minutes", "budget_usd"}` for each panellist run, over all its attempts. Default 15 minutes and $2 |
+| `limits.run` | `{"minutes", "budget_usd"}` for each panellist run, over all its attempts. Default 15 minutes and $2. In a usability study the default minutes come from the tasks: 30 seconds for each step they permit, plus 5 minutes |
 | `limits.synthesis` | `minutes` for each analyst and writer job, `budget_usd` as one pool split equally among them. Default 30 minutes and $5 |
 | `limits.followup` | `{"minutes", "budget_usd"}` for each run asked a follow-up question, for each question, apart from its run limits and outside the plan's ceiling. Default 5 minutes and $0.50 |
 | `limits.overrides` | Run limits for one model entry, keyed by model key |
 | `runners.<name>.concurrency` | Runs to keep going at once on that runner |
 | `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory; the study brief is refused) |
-| `browse` | Whether panellists may open pages with `agent-browser`, on runners that can. Default true for a study of sites. With a `url` concept it is off unless set to true, and a study of `files` concepts alone never browses (Concepts, below) |
+| `browse` | Whether panellists may open pages with `agent-browser`, on runners that can. Default true for a study of sites. With a `url` concept it is off unless set to true, and a study of `files` concepts alone never browses (Concepts, below). A usability study always browses, and refuses `false` |
 | `materials` | Default `"full"`. `"text"` is a text-only pass: page text only, no design factors, no browser (`references/method.md`, Text-only pass) |
-
 | `concepts` | Each is `{"id", "path"}` for a folder with `index.html`, or has a `kind` (Concepts, below) |
 | `artefact`, `artefact_plural` | What is reviewed, in a few words: "draft homepage design", "draft homepage designs". The instructions of a study with one concept use the singular, and `init_study.py` refuses one that sets the plural without it |
 | `capture.max_pdf_pages`, `capture.pdf_pixels` | Default 20 and 1600: the pages of a PDF that are captured, and the long side of each page image in pixels |
+| `capture.desktop` | `[width, height]`, default 1440 x 900: the desktop size pages are captured at, and the window of every browser session a run is given |
 
 Model entry rules:
 
@@ -28,7 +29,24 @@ Model entry rules:
 - Without `model`, the run uses the harness's own default, which depends on the account. Name the model when the study must be reproducible. The `pi` runner refuses an entry without one.
 - `effort` must be one of the runner's levels. `plan` and `run` refuse any other value, because the CLIs themselves only warn or fail at the first model call.
 - A study where no entry has a runner is in native mode (below). Mixing the two is refused.
-- `type` is reserved for study types that are not built yet. Leave it out.
+- `type` is a key of the study, not of a model entry.
+
+## Usability and browsing
+
+A usability study (`"type": "usability"`) has these keys in place of `concepts`. `references/usability.md` explains each, and `assets/study.usability.example.json` is a complete study.
+
+| Key | Meaning |
+|---|---|
+| `product` | Required: the product's name, as the instructions and the briefs give it. `product_phrase` does not stand in for it |
+| `target` | `{"base_url", "allow_remote"}`. `base_url` is scheme, host and optional port alone, read strictly (`references/usability.md`, The target), on a local development host: exactly `localhost`, `127.0.0.1` or `[::1]`, or a name ending in `.localhost` or `.test`. `allow_remote: true` permits another host, and then every task is `read_only` and the study has no `accounts` |
+| `tasks` | `[{"id", "goal", "start", "steps", "success_check", "read_only"}, ...]`, attempted in the order written. `id` is letters and digits, `start` a path on the target (default `/`), `steps` the step limit (default 25), `success_check` a lead-only command whose exit code is the verdict |
+| `accounts` | `{"provision" or "map", "teardown", "reset", "signin"}`: a test account for each run. `signin` is `"session"` (the default: the browser starts signed in from a saved state) or `"panellist"` (the panellist is given the secrets to type) |
+| `sequential` | Default false. True runs one panellist at a time across all runners, with `accounts.reset` between runs |
+
+- **A study is one type or the other.** A usability study refuses the keys only a review has (`concepts`, `labels`, `find_the_answer`, `artefact` and the like), `"materials": "text"`, `"browse": false`, every `capture` key but `desktop`, and native mode. A review refuses `target`, `tasks`, `accounts` and `sequential`.
+- **Every run of a usability study browses,** so every model entry needs a runner with a browser. `plan` names one that has none as a problem, and no run starts on it.
+- **Any run that may browse** (a usability run, or a review run with `browse` on) gets a browser session the launcher starts and stops ([Browser sessions](#browser-sessions)), and needs the `agent-browser` CLI on PATH: `plan` names its absence as a problem, and `run`, `pilot` and `resume` refuse.
+- **A usability study's commands** (`success_check` and the `accounts` commands) are run without a shell, from the study directory, with the run id as the last argument. Whether a command's file exists is checked by `init_study.py`, by `plan` and at every start, not when `study.json` is loaded.
 
 ## Concepts
 
@@ -60,7 +78,7 @@ From each runner's `capabilities()`. `launch.py plan` prints the gaps that apply
 | Harness | Claude Code's headless CLI | The Codex headless CLI | The Pi coding agent's headless CLI |
 | Provider that receives the materials | Anthropic | OpenAI | The provider each model id names, as configured in Pi |
 | Opens images by path | yes | yes | per model, checked at the plan step |
-| Browser (`agent-browser`) | yes | no | yes |
+| Browser (`agent-browser`), through a session the launcher starts | yes | yes | yes |
 | Budget cap | yes, checked after each turn | no | no |
 | Effort levels | low, medium, high, xhigh, max | low, medium, high, xhigh, max | off, minimal, low, medium, high, xhigh, max |
 | Resume | yes | yes | yes |
@@ -81,23 +99,24 @@ Besides `capabilities()`, a runner answers for one model entry at a time (`model
 - **Session id.** The runner chooses it before the process starts, so a run killed before it prints a line can still be resumed.
 - **Environment.** A run is the same from a terminal and from inside a Claude Code session: the variables such a session sets for its own children are kept out of the run's environment. The variables that decide which login is used and who is billed pass through, and the plan names any that are set. A desktop-hosted Claude Code session sets one of them, so a plan run from inside one reports it.
 - **Sessions.** The CLI has no command that deletes one session, so `purge-sessions` removes the session's transcript itself. It can leave an empty project folder behind.
-- **Browsing allows `agent-browser` and nothing else.** A line that chains another command to it (`mkdir -p ... && agent-browser ...`) is denied whole, and a panellist that is denied tends to give up on the browser and review from the files. So `init_study.py` makes each run's `panel/scratch/<run id>/`, and the instructions tell panellists to run each command on its own. A run that never browsed says so in its researcher notes: nothing else reports it.
+- **Browsing allows the panellist's `agent-browser` commands and nothing else,** one allow rule for each (`agent-browser open`, `snapshot`, `click` and so on). `agent-browser eval`, `cookies` and `--session other ...` match no rule and are denied before they run, and so is a command with a variable set in front. A line that chains another command to one (`mkdir -p ... && agent-browser ...`) is denied whole, and a panellist that is denied tends to give up on the browser and review from the files. So `init_study.py` makes each run's `panel/scratch/<run id>/`, and the instructions tell panellists to run each command on its own. A run that never browsed says so in its researcher notes: nothing else reports it.
 
 Not switched off for its runs:
 
 - The signed-in account's email address is in the model's context.
 - So are the full path of the working directory, the OS version and the date. Folder names above `panel/` can leak internal terms.
 - The model is told whether the working directory is inside a git repository.
-- With browsing on, `agent-browser` can open any `file://` path the user can read and any address on the network, and save screenshots outside the working directory.
+- With browsing on, what every runner leaves open ([Browser sessions](#browser-sessions)).
 - With browsing on, read-only shell commands inside the working directory (such as `ls`) run without an allow rule.
+- With browsing on, a rule matches how a command starts, so an option after the command reaches the session (`agent-browser snapshot -i --session other` ran). The session's policy is what refuses the options that matter.
 
-The plan lists the last two only for a study whose panellists can browse on this runner.
+The plan lists the browsing gaps only for a study whose panellists can browse on this runner.
 
 ### `codex`
 
 - **No budget cap.** The time limit is what bounds a run, and a follow-up question. The plan leaves these runs out of the ceiling and labels it an estimate.
 - **No cost or duration.** `analysis/usage.md` shows tokens and "not reported" for the rest, and the plan judges these runs by time.
-- **No browser.** Each shell call in the sandbox gets its own process namespace, so the `agent-browser` daemon dies between calls and the next command starts a blank browser. With `"browse": true`, `init_study.py` tells each Codex run in its prompt to review from the files alone. In a mixed panel, set `"browse": false` when every panellist must work from the same materials.
+- **Browsing turns the sandbox's network on.** A browser started inside the sandbox dies with each shell call, so the session runs outside it and the run reaches it through a socket, which the sandbox allows only with network access on. That is all or nothing: the run's shell can then reach the internet and the pages under review directly. The temporary directories become read-only for such a run, so it cannot start a browser of its own there.
 - **Models.** Without `model`, the run uses the first model of the account's list. An unknown model fails at the first model call. Only the low and medium effort levels were run in discovery.
 - **Session id.** Known once the process prints its first line, before any model call. A run killed earlier has no session, and `resume` starts it afresh only when it wrote nothing.
 - **Usage after a kill.** Read from the session file, best effort. It can miss the request that was in flight.
@@ -106,11 +125,15 @@ The plan lists the last two only for a study whose panellists can browse on this
 Not switched off for its runs:
 
 - The user's global instruction file (`~/.codex/AGENTS.md`) is always loaded. Excluding it means redirecting the CLI's home directory, and with it the login, which the skill never handles. Check that file for internal terms and add them to `leak_terms`.
-- The whole disk is readable from the sandbox, the home directory included. Only writes are confined, to the working directory and `/tmp`. "Read nothing outside `panel/`" is an instruction only.
+- The whole disk is readable from the sandbox, the home directory included. Only writes are confined, to the working directory and `/tmp` (the working directory alone for a run that may browse). "Read nothing outside `panel/`" is an instruction only.
 - A run inside a git repository adds a trust entry for that repository to the user's Codex `config.toml`. Keep the study outside a git repository to avoid it.
 - The working directory path, the shell, the date and the timezone are in the model's context.
 - Sub-agent tools and their instructions stay available.
-- Commands run in a login shell that sources the user's shell profile.
+- Commands run in a login shell that sources the user's shell profile. A profile that sets an `AGENT_BROWSER_*` variable would give it back to a browsing run's commands, and the session would restart blank (inferred, not run).
+- With browsing on, what every runner leaves open ([Browser sessions](#browser-sessions)), and the network: the run's shell can reach the internet, the pages under review without the browser and its policy, and any Unix socket the user can.
+- With browsing on, `agent-browser` commands that never reach a session are not refused. One lists the names of the user's own browser profiles.
+
+The plan lists the browsing gaps only for a study whose panellists can browse on this runner.
 
 ### `pi`
 
@@ -123,7 +146,7 @@ Pi reaches many providers, an OpenAI-compatible endpoint among them. Only a Chat
 - **The endpoint and its key are configured in Pi, never in `study.json`.** The skill passes the model id and nothing else.
 - **Adding an OpenAI-compatible endpoint:** add a provider to `~/.pi/agent/models.json` with its `baseUrl`, `"api": "openai-completions"`, an `apiKey` and its `models`. Give a model that reads images `"input": ["text", "image"]`: Pi lists a custom model as text only without it, and the plan then refuses it for a full-materials study. Pi's own `docs/models.md` and `docs/custom-provider.md` have the format. A built-in provider needs only `/login <provider>` inside Pi.
 - **A provider that a Pi extension adds cannot be used:** runs load no extensions.
-- **The guard.** Pi has no sandbox and asks for no approval, so the runner loads a guard extension (`scripts/runners/pi_guard.ts`) into every run. It keeps the file tools inside the working directory, symbolic links followed, and refuses the shell. Pi rewrites a path before it opens it (Unicode spaces, a leading `@`, `~`, a `file://` URL), so the guard takes the same steps, hands Pi the path it checked, and refuses one Pi would rewrite again, as well as any control character in a path. With browsing on it allows one `agent-browser` command at a time: no second command, pipe, redirection, substitution or variable. A refusal goes back to the model as a tool error.
+- **The guard.** Pi has no sandbox and asks for no approval, so the runner loads a guard extension (`scripts/runners/pi_guard.ts`) into every run. It keeps the file tools inside the working directory, symbolic links followed, and refuses the shell. Pi rewrites a path before it opens it (Unicode spaces, a leading `@`, `~`, a `file://` URL), so the guard takes the same steps, hands Pi the path it checked, and refuses one Pi would rewrite again, as well as any control character in a path. With browsing on it allows one `agent-browser` command at a time: no second command, pipe, redirection, substitution or variable, so a command cannot set the variables that name its session. A refusal goes back to the model as a tool error.
 - **No guard, no run.** The launch names a flag only the guard defines, so Pi refuses to start when the guard is missing or fails to load, and the runner's check fails first.
 - **No budget cap.** The time limit bounds a run, and the plan labels its ceiling an estimate.
 - **Usage** is tokens and a list-price cost, read from Pi's session file, so the finished requests of a stopped run are counted. A custom model with no prices in `models.json` reports a cost of 0, which looks the same as free. There is no duration.
@@ -142,11 +165,12 @@ Not switched off for its runs:
 - The guard does not see a link put in place between its check and the tool's use, or a hard link to a file outside. It checks a path as pi 1.1.0 rewrites one before opening it, so check the guard again against a later Pi.
 - A model wrongly listed as reading images gets a line of placeholder text in place of each image, with no error.
 - Each session's transcript, every image read included, stays in Pi's sessions folder until it is purged.
-- With browsing on, `agent-browser` can open any `file://` path the user can read and any address on the network, and save screenshots outside the working directory.
-- With browsing on, the guard's reading of the command text is all that stands between the model and the shell, and it does not see what `agent-browser` then opens, runs in a page or saves.
+- With browsing on, what every runner leaves open ([Browser sessions](#browser-sessions)).
+- With browsing on, the guard's reading of the command text is all that stands between the model and the shell, and it does not see what `agent-browser` then opens or saves.
+- With browsing on, `agent-browser` commands that never reach a session are not refused. One lists the names of the user's own browser profiles, and another can attach to a browser by its debugging port.
 - With browsing on, shell commands inherit the launcher's whole environment, and Pi tells them where the session transcript is.
 
-The plan lists the last three only for a study whose panellists can browse on this runner.
+The plan lists the browsing gaps only for a study whose panellists can browse on this runner.
 
 ### All runners
 
@@ -154,6 +178,38 @@ The plan lists the last three only for a study whose panellists can browse on th
 - A capacity refusal was seen in a real Codex run ("Selected model is at capacity"): the run became `blocked`, and `resume` finished it later.
 - A usage limit could not be triggered on any harness, so how one is recognised is inferred from the binaries and old sessions. If runs end `failed` or `partial` with a limit message as their reason, the limit was not recognised: wait for it to lift, continue with `resume` (partial) or `run` (failed), and report the message so the runner can be fixed.
 - Dollar figures under a subscription login are list-price equivalents. They say how much allowance is used, not what is paid.
+
+## Browser sessions
+
+With browsing on, the launcher owns each browser and a panellist only sends it commands. The arrangement is the same on every runner (`scripts/browser_session.py`). Native mode has no launcher and no such session: see Native mode.
+
+- **One session for each attempt.** The attempt's watchdog starts an `agent-browser` session before the CLI and stops it after, however the attempt ends: by itself, at its time limit, on `stop`. A resumed run gets a new session on a blank page, and its resume message says so.
+- **The run reaches it through its environment:** three variables for the socket directory, the session name and the action policy. A panellist runs `agent-browser <command>` and names no session.
+- **The session's working directory is `panel/`,** because the session, not the run, resolves a relative screenshot path. Its viewport is `capture.desktop`.
+- **An action policy inside the session** allows what a visitor does: open an address, go back, forward and reload, list the elements, click, type, select, tick, press keys, hover, scroll, wait, answer a dialog, take a screenshot, read the address and the title. It refuses the rest on every runner: scripts in the page, the page source, cookies, storage, saved browser state, an element's text or value by selector, network requests, the console, new tabs, closing the session, and restarting the browser with other options. The list is in `scripts/browser_session.py`.
+- **A run that changes those variables loses its session:** `agent-browser` restarts a session that is reached with other settings, blank and signed out.
+- **Other `AGENT_BROWSER_*` variables in your environment are kept out of a run,** except the two that say how a browser starts on this machine (`AGENT_BROWSER_EXECUTABLE_PATH`, `AGENT_BROWSER_ARGS`). An `agent-browser` config file still applies.
+- **A session that cannot be started stops its run before the CLI runs:** "could not be started", with the reason, and nothing is marked failed. `logs/<run id>.<attempt>.hooks` has the output.
+- **Each session holds about 330 MiB.** The plan multiplies that by the runs that can be in flight at once.
+- **In a usability study a session can start signed in.** When the run's test account names a saved browser state, the session loads a private copy of it (`logs/<run id>.<attempt>.state`) and deletes the copy, so no panellist has a file to read (`references/usability.md`, Accounts). A follow-up question to a usability run gets no session.
+- **A watchdog that was killed stops nothing.** The next `run`, `resume` or `stop` stops the session it left, and `status` says what was found. `status` shows "browser session up" for a running run.
+- **A watchdog killed while the session was still starting** leaves the starting command on record in `logs/<run id>.<attempt>.pid`. The next launcher ends that command first, then stops what it had started. The run "could not be started", and nothing is marked failed.
+
+How a session is stopped, by its watchdog or by a launcher:
+
+- **Stopping never runs `agent-browser`.** Its `close --all` kills whatever process a pid file names when the socket does not answer, and `close` for one session can do the same when it restarts a session (0.38.1). A pid in a file may belong to another process by now.
+- **Each session is asked to close through its socket,** the recorded one and any second session a panellist opened in the same socket directory. The system names the process that listens on a socket.
+- **A signal goes only to a process that still holds its id under the start identity it was noted with:** the recorded daemon and browser, each listening daemon and the browser it started.
+- **The record is not trusted.** A record that is a symbolic link, a FIFO or anything else that is not a regular file of yours, or not what the start wrote, is refused before it is read or waited for: nothing is stopped or removed, and every launcher says so until you have looked and deleted it.
+- **Nothing is deleted on the record's word.** The record and the policy are named by the attempt. The socket directory goes only when it holds the session's token, is yours alone and sits directly in the temporary directory. A browser's profile directory goes only when a browser the stop identified named it.
+- **What could not be ended or proven stays, and is reported:** on the record under `left` and `kept`, by the launcher that settles the attempt, and by `status`.
+- **Not covered:** the browser of a second session whose daemon was killed outright. Nothing leads to it. Find it with `ps` by its `--user-data-dir=<temporary directory>/agent-browser-chrome-...`.
+
+Left open on every runner, and printed by the plan:
+
+- Nothing limits where the browser goes or where it saves a screenshot: any address on the network, any `file://` path the user can read, any path the user can write.
+- The element list a panellist acts from is what a screen reader gets. It holds text a visitor cannot see and elements that are off screen. Only the instructions say to judge from the screenshot.
+- The browser has a debugging port on this machine. The policy refuses reading cookies and page source, but a run that reached that port could read them.
 
 ## What is enforced and what stays an instruction
 
@@ -165,6 +221,8 @@ The launcher enforces, on every runner:
 - one launcher per study
 - what a follow-up question may change: the persona file is copied before the question, and anything but one appended `## Follow-up <n>` section is rejected and the file put back. Until the launcher has settled it, every script reads the copy for scores and progress
 - the synthetic panel notice in an analyst's or the writer's saved output: added under the title when the job left it out
+- with browsing on, the browser session of each attempt, and what it refuses ([Browser sessions](#browser-sessions))
+- in a usability study, each task's step limit, as the backstop to the panellist's own count, and each run's test account: provisioned before its first attempt and torn down when the run is done, limited or failed
 
 Each run's own watchdog process enforces its time limit, so a killed launcher does not unbound its runs. The watchdog also ends whatever the CLI started and left running, and records when and how the run ended. The next `run`, `resume` or `stop` settles the run from that record, or adopts it while it is still alive. A follow-up question is settled the same way, in recorded steps that a later launcher finishes without deciding again (`scripts/panel_lib.py`, "Settling").
 
@@ -182,8 +240,8 @@ The harness enforces what it has a switch for:
 | Memory, hooks, plugins, skills, MCP servers | excluded | user config (MCP servers, hooks), the skills list and plugins excluded | skills, extensions and MCP servers excluded |
 | Git status and recent commit messages | excluded | none seen in context | none seen in context |
 | Reading files | working directory only | whole disk | working directory only, by the guard |
-| Writing files | working directory only | working directory and `/tmp` | working directory only, by the guard |
-| Shell commands | none, or `agent-browser` only when the study browses | any, in a sandbox with no network | none, or one `agent-browser` command at a time when the study browses, by the guard |
+| Writing files | working directory only | working directory and `/tmp`, or the working directory alone when the study browses | working directory only, by the guard |
+| Shell commands | none, or the panellist's `agent-browser` commands when the study browses | any, in a sandbox with no network, or with all of it when the study browses | none, or one `agent-browser` command at a time when the study browses, by the guard |
 | Something not allowed | denied at once, nothing waits for approval | fails at once, nothing waits for approval | refused at once, nothing waits for approval |
 
 These stay instructions in the run prompt, so keep `leak_terms` and `check_runs.py`:
@@ -192,8 +250,19 @@ These stay instructions in the run prompt, so keep `leak_terms` and `check_runs.
 - Do not read another persona file. Every persona file is inside `panel/`.
 - Write only your own persona file. The launcher cannot prevent it, and detects it: it hashes every persona file when a process starts or ends, and `check_runs.py` reports a file that changed while its own run was not running.
 - Ignore background in your context: the account email, the working directory path, Codex's global instruction file, and Pi's coding-assistant prompt.
+- In a usability study: decide from the screenshot, stay on the product, and never reveal a secret on screen (`references/usability.md`, Safety).
 
 Analyst and writer jobs work in the study directory and never browse. They can read `key.md`, `study.json` and anything else there.
+
+## System prompt
+
+The `claude` and `codex` runners strip instruction files, memory, skills, hooks and MCP servers, and keep their harness's own default system prompt, the one written for a coding agent. That is deliberate: replacing it was tested on 13 October 2026 and decided the same day.
+
+Both CLIs can replace the prompt, with every tool still working. An A/B of ten panellist runs (five per arm, the same two personas on haiku, sonnet and Codex) showed no difference in persona voice, template discipline, scores or ranking larger than the difference between two runs of the same arm. Scores differed between the arms by a mean of 0.42 a cell, with no direction (+0.07 signed), the same concept ranked first in all ten runs, and nothing broke. The one measurable gain was about 30% fewer input tokens on Codex.
+
+- **Decision (Rod, 13 October 2026):** both runners keep the default prompt, because overriding it brought no tangible benefit or difference in the research output. The question is set aside, not closed.
+- **The `pi` runner** was not part of the experiment and is unchanged. Pi's own system prompt stays ([`pi`](#pi), above).
+- **Before changing this,** read the full record: `docs/specs/persona-panel-expansion.md`, "System prompt override (experiment and decision)", under Discovery. It has what each CLI replaces and still sends, the results, when to revisit, and the arguments and traps for each runner. The option that would replace the prompt, and its trap, are named in each runner's docstring.
 
 ## Adding a runner
 
@@ -202,7 +271,7 @@ Add one module, `scripts/runners/<name>.py`. The registry lists the package's mo
 | Function | Contract |
 |---|---|
 | `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps` |
-| `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
+| `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. `run["browse"]` says whether the run may browse, and `run["browser_env"]` is then what its environment needs to reach its session. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
 | `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: no harness tried so far inherits the tools on resume, and most inherit nothing |
 | `parse_result(stdout, stderr, exit_code, session_id=None)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done. The `session_id` argument is the one the command was built with, for a harness whose output does not name its session |
 | `check()` | `{"ok", "message"}`: installed, signed in, and the options the runner passes still parse, with no model call. Asking can make a harness refresh its own login, which the runner must never read or relay |
@@ -222,7 +291,8 @@ Rules for a runner:
 - Report usage with a `scope`: `session` when the figures are running totals for the session, `process` when they cover one process. The launcher totals a run with `merge_usage()` and `total_usage()` and never double counts a resumed session.
 - Never read, store or relay a provider login.
 - List in `isolation_gaps` whatever could not be switched off for any run, in plain words. The plan prints it.
-- List in `browse_gaps` what stays open only for a run that may browse, and leave it empty on a runner with no browser. The plan prints it only when the study's panellists can browse on the runner.
+- For a run that may browse, apply `run["browser_env"]` with `child_env()`, let one `agent-browser <command>` through from the run's shell, and add only what the harness needs to reach a socket outside its sandbox. Never put a session name on a command line.
+- List in `browse_gaps` what stays open only for a run that may browse, starting from `BROWSER_GAPS`, and leave it empty on a runner with no browser. The plan prints it only when the study's panellists can browse on the runner.
 - List in `billing_env` the variables that can change who is billed.
 
 Helpers to reuse from `runners/__init__.py`:
@@ -256,6 +326,7 @@ What it lacks:
 - No isolation beyond the run prompt. Subagents inherit the lead's project instructions, and internal terms leaked into reviews in the Sept 2026 study.
 - No modification record. `launch.py pilot`, `run` and `resume` refuse a native study.
 - No check on follow-up questions: nothing is sent for the lead, limited or put back.
+- No browser session started for a run, no action policy and no cleanup. With browsing on, the instructions have each panellist start its own session, `agent-browser --session <run id> ...`, save screenshots to `panel/scratch/<run id>/` by absolute path, and close the session when done. Check for sessions left open with `agent-browser session list`.
 
 Set it up by leaving `runner` out of `study.json` and giving `models` the model names the lead's subagent tool accepts. `launch.py plan` still lists the runs.
 

@@ -86,8 +86,14 @@ What each option is for (all verified unless marked):
 
 Decisions this runner implements:
 
-- The environment is passed through unchanged. Pi reads none of the variables a host agent
-  sets (verified from inside a Claude Code session).
+- The environment is passed through unchanged but for run["browser_env"], the variables by
+  which a run that may browse reaches the agent-browser session the caller started for it
+  (child_env()). Pi hands its whole environment to the shell tool, so `agent-browser
+  <command>` finds that session with no name on the command line. The guard refuses a
+  command that sets a variable in front, so a run cannot point a command at another session
+  that way. An option can still name one (`--session other`): that is a second, empty
+  browser under the same policy, which the caller stops with the first. Pi reads none of the
+  variables a host agent sets (verified from inside a Claude Code session).
 - PI_CODING_AGENT_DIR is never pointed elsewhere: the login lives there, and the skill does
   not read, store or relay a provider login. The endpoint and its key are configured in Pi.
 - No budget cap: Pi has none. The caller's time limit bounds a run.
@@ -145,7 +151,7 @@ import tempfile
 import time
 import uuid
 
-from . import exited, launch_effort, model_facts, result, run_cli, usage
+from . import BROWSER_GAPS, child_env, exited, launch_effort, model_facts, result, run_cli, usage
 
 CLI = "pi"
 EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -221,11 +227,13 @@ def capabilities() -> dict:
             "is purged.",
         ],
         "browse_gaps": [
-            "With browsing on, the agent-browser CLI can open any file:// path the user can read and any "
-            "address on the network, and save screenshots outside the working directory.",
+            *BROWSER_GAPS,
             "With browsing on, the guard's check that a shell command is one agent-browser command is all "
             "that stands between the model and the shell. It reads the command as text, and does not see "
-            "what agent-browser then opens, runs in a page or saves.",
+            "what agent-browser then opens or saves.",
+            "With browsing on, agent-browser commands that never reach a session are not refused: one of "
+            "them lists the names of the user's own browser profiles, and another can attach to a browser "
+            "by its debugging port.",
             "With browsing on, shell commands inherit the launcher's whole environment, and Pi tells them "
             "where the session transcript is.",
         ],
@@ -396,7 +404,7 @@ def _command(run: dict, workdir, session: list[str], stdin: str, session_id: str
             "--provider", provider, "--model", f"{provider}/{name}", *(["--thinking", effort] if effort else []),
             *ISOLATION, "-e", GUARD, GUARD_FLAG, "browse" if browse else "files",
             "--tools", FILE_TOOLS + (",bash" if browse else "")]
-    return {"argv": argv, "stdin": stdin, "env": None, "session_id": session_id}
+    return {"argv": argv, "stdin": stdin, "env": child_env(run), "session_id": session_id}
 
 
 def launch_command(run: dict, prompt: str, workdir, limits: dict | None) -> dict:

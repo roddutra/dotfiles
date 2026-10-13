@@ -44,6 +44,42 @@ lead's files: nothing a panellist reads says what a concept is made of. Whether 
 is images or PDFs is read from its source files, and from forms.json when they are gone, as in an
 archived round (panel_lib.py, "Forms").
 
+A usability study ("type": "usability") is not a comparison of concepts, and none of the above
+is written for it. Its report reads analysis/tasks.csv and steps.csv as well (extract_scores.py)
+and has, in this order:
+  Completion by task, by persona and by model: of the attempts of a task that ended (its section
+    is written, or a limit stopped the run in it), how many the panellist claimed as completed
+    and how many the task's success check found completed, side by side. Checked is a share of
+    the attempts the check gave a verdict on: a check that failed to run is no verdict, and has a
+    column of its own. A task with no check says "no check"
+  Claimed against checked: every mismatch, run by run, of both kinds: a claimed success that the
+    check denies, and an attempt not claimed as completed that the check passes. Then the checks
+    that failed to run and the Outcome lines that could not be read, which count as neither
+  Steps taken: the complete steps of each task's latest attempt (mean, fewest, most), how many
+    attempts used the whole step limit and how many tasks were started again
+  Where runs stopped: for each task, how many attempts ended as completed, gave up or ran out of
+    steps (the panellist's claims), at the step limit or the time limit (stopped by the
+    launcher), unfinished or not reached, then one row for each run. An attempt with no entry
+    in a step log is counted apart, never as an attempt of no steps
+  Stuck points, ranked by how many runs hit them, each with the runs, step numbers and
+    screenshot names that show it. The definition needs no model and is printed with the table
+    (STUCK_DEFINITION): a task and a page address. A run that gave up, ran out of steps or was
+    stopped at the step limit hit the screen that held it, the one most of its last LAST steps
+    left it on (the later of two that tie), which is often not the screen it ended on: its
+    evidence gives both, and the screen its last step was taken on. A run also hit a screen on
+    which it took DWELL or more steps in a row that left the address as it was. The qualitative
+    analysts refine it
+  Step logs to check: what could not be read in a step log
+  Scores by task, by persona and by model: each factor's mean over the complete runs
+  Incomplete runs, with the Overall score each gave a task before it stopped
+The score tables use complete runs only, as in a review. Completion, steps and stuck points
+count every run: a run stopped at a step limit is incomplete, and leaving it out would make a
+task look easier than it was. quant.json has "runs", "completion" ("by_task", "by_persona",
+"by_model", "mismatches", "check_errors", "unparsed_claims"), "steps", "stopped" ("by_task",
+"runs"), "stuck_points" ("definition", "dwell_steps", "last_steps", "points"), "step_logs",
+"tasks" (the scores by task), "persona_scores" and "model_scores". A study exported before
+tasks.csv existed gets the scores and a line that says what is missing.
+
 Every one of those tables uses complete runs only, and the output states "N of M runs complete",
 where M is the runs expected after the filters. Incomplete runs that wrote something, or that
 stopped as partial, limited, blocked or failed, get their own table, "Incomplete runs", with
@@ -244,6 +280,331 @@ def tally_lines(rows: list[dict], labels: list[str]) -> dict:
     return {"forward": forward, "recurring": recurring, "unparsed": unparsed}
 
 
+DWELL = 4  # complete steps in a row that leave the address as it was, before a screen counts as a stuck point
+LAST = 4   # the complete steps at the end of a task that say which screen held a run that did not complete it
+STOPS = ("completed", "gave up", "ran out of steps", "unparsed", "step limit", "time limit", "budget limit",
+         "unfinished", "not reached")  # the "stopped" of tasks.csv: the first seven are attempts that ended
+ENDED = STOPS[:7]
+STUCK = ("gave up", "ran out of steps", "step limit")  # the ends that make the screen that held a run a stuck point
+STUCK_DEFINITION = (
+    "A stuck point is a task and a screen, the screen being the page address without its query. A run hit it in "
+    "one of two ways. It gave up on the task, ran out of steps or was stopped at the step limit, and this is the "
+    f"screen that held it: the one most of its last {LAST} steps left it on, and the later of two that tie. That is "
+    "often not the screen it ended on, because a run leaves the screen that blocked it to look for help and stops "
+    f"there, so the evidence gives both. Or it took {DWELL} or more steps in a row there that left the address as "
+    "it was. A script found these from the addresses in the step logs alone: it cannot tell a long form from a "
+    "person going round in circles, and it misses a wrong turn that changed the address. The qualitative analysts "
+    "refine them from the step logs and screenshots.")
+
+
+def share(k: int, n: int) -> str:
+    """"k of n" with the percentage, or a dash when there is nothing to take a share of."""
+    return f"{k} of {n} ({k / n:.0%})" if n else "-"
+
+
+def completion(rows: list[dict]) -> dict:
+    """What a set of tasks.csv rows says of completion: how many attempts ended, how many of
+    them the panellist claimed as completed, how many a success check gave a verdict on and how
+    many of those it found completed, the checks that failed to run, the ended attempts with no
+    check on record, the mismatches, and the rows with no result."""
+    ended = [r for r in rows if r["stopped"] in ENDED]
+    return {"ended": len(ended), "claimed": sum(r["claimed"] == "completed" for r in ended),
+            "verdicts": sum(r["checked"] in ("yes", "no") for r in ended),
+            "checked": sum(r["checked"] == "yes" for r in ended),
+            "check_errors": sum(r["checked"] == "error" for r in ended),
+            "not_checked": sum(r["checked"] in ("not run", "none") for r in ended),
+            "mismatches": sum(bool(r["mismatch"]) for r in ended), "no_result": len(rows) - len(ended)}
+
+
+def stuck_points(cfg: dict, task_rows: list[dict], step_rows: list[dict]) -> list[dict]:
+    """The stuck points of STUCK_DEFINITION, most runs first: each {"task", "page", "runs",
+    "stopped", "stayed", "evidence"}, "runs" being the ids of the runs that hit it and "evidence"
+    one {"run", "kind", "end", "steps", "screenshots"} for each way each run did. kind is
+    "stayed" (the steps of the stretch, in order) or "stopped": the run did not complete the
+    task, and this is the screen that held it. That one has "end" (how the task ended), the
+    steps among its last LAST that left it on the screen, and four fields more: "of" (how many
+    last steps there were to go by), "last_step", "ended_on" (the screen its last step left it
+    on) and "before" (the screen that step was taken on). With no complete step the screen is
+    the one the task started on. A page the log does not give is named "", once per task."""
+    found = {}  # (task, page) -> evidence
+
+    def hit(r, page, **evidence):
+        found.setdefault((r["task"], page), []).append({"run": r["run"], **evidence})
+
+    by_attempt = defaultdict(list)
+    for r in step_rows:
+        by_attempt[r["run"], r["task"]].append(r)
+    for rows in by_attempt.values():
+        rows.sort(key=lambda r: int(r["step"]))
+    for r in task_rows:
+        if r["stopped"] not in STUCK:
+            continue
+        last = [x for x in by_attempt.get((r["run"], r["task"]), []) if x["done"] == "1"][-LAST:]
+        # The screen most of them left the run on, and of two that tie the one a later step did.
+        held = max({x["to"] for x in last}, default=r["last_page"], key=lambda page: (
+            sum(x["to"] == page for x in last), max(i for i, x in enumerate(last) if x["to"] == page)))
+        there = [x for x in last if x["to"] == held]
+        hit(r, held, kind="stopped", end=r["stopped"], steps=[int(x["step"]) for x in there],
+            screenshots=[x["screenshot"] for x in there if x["screenshot"]], of=len(last),
+            last_step=int(last[-1]["step"]) if last else None, ended_on=last[-1]["to"] if last else r["last_page"],
+            before=last[-1]["on"] if last else None)
+    for rows in by_attempt.values():
+        stretch = []
+        for r in [*rows, None]:
+            if r and r["done"] == "1" and r["to"] and r["to"] == r["on"]:
+                stretch.append(r)
+                continue
+            if len(stretch) >= DWELL:
+                hit(stretch[0], stretch[0]["on"], kind="stayed", end=None, steps=[int(x["step"]) for x in stretch],
+                    screenshots=[x["screenshot"] for x in stretch if x["screenshot"]])
+            stretch = []
+    order = {t: i for i, t in enumerate(pl.study_units(cfg))}
+    points = [{"task": task, "page": page, "runs": sorted({e["run"] for e in evidence}),
+               "stopped": len({e["run"] for e in evidence if e["kind"] == "stopped"}),
+               "stayed": len({e["run"] for e in evidence if e["kind"] == "stayed"}), "evidence": evidence}
+              for (task, page), evidence in found.items()]
+    return sorted(points, key=lambda d: (-len(d["runs"]), -d["stopped"], order.get(d["task"], len(order)), d["page"]))
+
+
+def stopped_there(e: dict, page: str) -> str:
+    """One run's evidence of the first way to hit the stuck point on page (stuck_points(), kind
+    "stopped"), as the end of its line in the report: how and where the task ended, then the
+    steps that left the run on the stuck point's screen."""
+    def screen(other):
+        return "here" if other == page else f"`{other}`" if other else "a screen whose address is not logged"
+
+    if not e["of"]:
+        return f"{e['end']} before any step"
+    steps, shots = e["steps"], ", ".join(f"`{name}`" for name in e["screenshots"]) or "no screenshot named"
+    where = ("" if e["ended_on"] == page else "on ") + screen(e["ended_on"]) + (
+        f", reached from {screen(e['before'])}" if e["ended_on"] != e["before"] else "")  # its last step moved it
+    left = ("Its only step" if e["of"] == 1 else f"{len(steps)} of its last {e['of']} steps") + " left it here"
+    return (f"{e['end']} after step {e['last_step']} {where}. {left}: {pl.agree(len(steps), 'step')} "
+            f"{', '.join(map(str, steps))} ({shots})")
+
+
+def usability(cfg: dict, rows: list[dict], runs: list[dict], names: dict, task_rows: list[dict] | None,
+              step_rows: list[dict] | None) -> tuple[list[str], dict]:
+    """The report of a usability study: (the lines of quant.md after its title, what goes into
+    quant.json). rows are the score rows of scores.csv, one per run and task, runs the run
+    records of runs.csv, complete or not, as load() gives them, and task_rows and step_rows the
+    rows of tasks.csv and steps.csv, None for a study exported before they were written."""
+    tasks, factors = pl.study_units(cfg), cfg["factors"]
+    limits = {t["id"]: t["steps"] for t in cfg["tasks"]}
+    checked_tasks = [t["id"] for t in cfg["tasks"] if "success_check" in t]
+    models = [m for m in pl.model_keys(cfg) if any(r["model"] == m for r in runs)]
+    pids = [p["id"] for p in cfg["personas"] if any(r["persona_id"] == p["id"] for r in runs)]
+    short = [f.get("short", f["label"]) for f in factors]
+    done = [r for r in rows if r["complete"]]
+    unfinished = [r for r in runs if not r["complete"]]
+    partial = defaultdict(dict)  # incomplete run -> {task: Overall}
+    for r in rows:
+        if not r["complete"]:
+            partial[run_key(r)][r["task"]] = r["overall"]
+    res = {"runs": {"complete": len(runs) - len(unfinished), "expected": len(runs),
+                    "incomplete": [{"run": r["run"], "state": r["state"], "written": r["written"],
+                                    "scored": r["scored"], "has_final": r["has_final"],
+                                    "overall": partial.get(run_key(r), {})} for r in unfinished]},
+           "tasks": {}}
+    md = ["## Key numbers", "", f"- {res['runs']['complete']} of {plural(len(runs), 'run')} complete."
+          + (' The score tables use complete runs only. Completion, steps and stuck points count every run, so '
+             "that a run stopped part-way is not lost from them." if unfinished else ""),
+          f"- {plural(len(tasks), 'task')}: {', '.join(tasks)}. "
+          + (f"{plural(len(checked_tasks), 'task')} {pl.agree(len(checked_tasks), 'has', 'have')} a success check "
+             f"({', '.join(checked_tasks)}): completion is reported as each panellist claimed it beside what the "
+             "check found." if checked_tasks else
+             "No task has a success check, so completion is each panellist's own claim and nothing confirms it.")]
+
+    def who(r):
+        return [r["run"], names.get(r["persona_id"], ""), r["model"]]
+
+    figures = points = None
+    if task_rows is not None:
+        of_task = {t: [r for r in task_rows if r["task"] == t] for t in tasks}
+        by_task = {t: completion(of_task[t]) for t in tasks}
+        groups = {"by_persona": {p: [r for r in task_rows if r["persona_id"] == p] for p in pids},
+                  "by_model": {m: [r for r in task_rows if r["model"] == m] for m in models}}
+        figures = {"by_task": by_task, **{name: {k: {t: completion([r for r in own if r["task"] == t]) for t in tasks}
+                                                 for k, own in group.items()} for name, group in groups.items()}}
+        mismatches = [r for r in task_rows if r["mismatch"]]
+        errors = [r for r in task_rows if r["checked"] == "error"]
+        unparsed = [r for r in task_rows if r["claimed"] == "unparsed"]
+
+        def listing(found):
+            return [{"run": r["run"], "persona": r["persona_id"], "model": r["model"], "task": r["task"],
+                     "claimed": r["claimed"], "checked": r["checked"], "mismatch": r["mismatch"],
+                     "steps": int(r["steps"]), "last_step": int(r["last_step"]) if r["last_step"] else None,
+                     "last_screenshot": r["last_screenshot"] or None} for r in found]
+
+        figures.update(mismatches=listing(mismatches), check_errors=listing(errors), unparsed_claims=listing(unparsed))
+        res["completion"] = figures
+        # The attempts that ended and have entries in a step log: one with none took no step the log knows of.
+        counted = {t: [int(r["steps"]) for r in of_task[t] if r["stopped"] in ENDED and int(r["attempts"])]
+                   for t in tasks}
+        res["steps"] = {t: {"limit": limits[t], "attempts": len(xs), "mean": known(xs),
+                            "min": min(xs) if xs else None, "max": max(xs) if xs else None,
+                            "at_limit": sum(x >= limits[t] for x in xs),
+                            "started_again": sum(int(r["attempts"]) > 1 for r in of_task[t]),
+                            "not_logged": sum(r["stopped"] in ENDED and not int(r["attempts"]) for r in of_task[t])}
+                        for t, xs in counted.items()}
+        res["stopped"] = {"by_task": {t: {s: sum(r["stopped"] == s for r in of_task[t]) for s in STOPS} for t in tasks},
+                          "runs": [{"run": r["run"], "task": r["task"], "stopped": r["stopped"],
+                                    "steps": int(r["steps"]), "attempts": int(r["attempts"])} for r in task_rows]}
+        points = stuck_points(cfg, task_rows, step_rows or [])
+        res["stuck_points"] = {"definition": STUCK_DEFINITION, "dwell_steps": DWELL, "last_steps": LAST,
+                               "points": points}
+        problems = [{"run": r["run"], "problem": note} for r in runs for note in (
+            (r.get("step_notes") or "").split("; ") if r.get("step_notes") else [])]
+        problems += [{"run": r["run"], "problem": "no step log, though the run wrote a task section"}
+                     for r in runs if r["written"] and r.get("step_entries") == "0"]
+        res["step_logs"] = {"problems": problems}
+        total = completion(task_rows)
+        md += ["- No attempt of a task has ended yet." if not total["ended"] else
+               f"- {plural(total['ended'], 'task attempt')} ended: {total['claimed']} claimed as completed."
+               + (f" The success checks gave {plural(total['verdicts'], 'verdict')}: {total['checked']} completed, "
+                  f"{total['verdicts'] - total['checked']} not." if checked_tasks else "")
+               + (f" {plural(total['check_errors'], 'check')} failed to run and "
+                  f"{pl.agree(total['check_errors'], 'is', 'are')} counted as no verdict." if total["check_errors"]
+                  else ""),
+               f"- Mismatches between claim and check: {len(mismatches)}"
+               + (f" ({sum(r['mismatch'] == 'check_denies' for r in mismatches)} claimed completed and denied by "
+                  f"the check, {sum(r['mismatch'] == 'check_passes' for r in mismatches)} not claimed and passed "
+                  "by it)." if mismatches else "."),
+               "- Stuck points found: " + (f"{len(points)}, the most common hit by "
+                                           f"{plural(len(points[0]['runs']), 'run')}." if points else "none.")]
+    else:
+        md.append("- Completion, steps and stuck points are not here: this study has no analysis/tasks.csv. Run "
+                  "extract_scores.py again.")
+    md += ["", "Every figure here comes from simulated panellists. An agent reads a page more thoroughly than a "
+           "person and does not get bored, so read each result as a hypothesis to test with real people.", ""]
+
+    if figures:
+        md += ["## Completion by task", "",
+               "Counts every attempt of a task that ended: its section is written, or a limit stopped the run in "
+               'it. "Claimed" is the panellist\'s own Outcome line. "Checked" is the task\'s success check, over the '
+               "attempts it gave a verdict on: a check that failed to run is no verdict, and is counted in its own "
+               "column and nowhere else.", "",
+               table(["Task", "Step limit", "Ended", "Claimed completed", "Checked completed", "Check failed to run",
+                      "Not checked", "Mismatches", "No result"],
+                     [[t, limits[t], d["ended"], share(d["claimed"], d["ended"]),
+                       share(d["checked"], d["verdicts"]) if t in checked_tasks else "no check", d["check_errors"],
+                       d["not_checked"], d["mismatches"], d["no_result"]] for t, d in by_task.items()]), ""]
+        for name, title, label in (("by_persona", "persona", lambda p: f"{p} {names.get(p, '')}"),
+                                   ("by_model", "model", str)):
+            md += [f"## Completion by {title}", "",
+                   "Claimed completed, then checked completed, each as in the table above.", "",
+                   table([title.capitalize(), *[f"{t} {what}" for t in tasks for what in ("claimed", "checked")]],
+                         [[label(k), *[cell for t in tasks for cell in (
+                             share(d[t]["claimed"], d[t]["ended"]),
+                             share(d[t]["checked"], d[t]["verdicts"]) if t in checked_tasks else "no check")]]
+                          for k, d in figures[name].items()]), ""]
+        md += ["## Claimed against checked", ""]
+        if not checked_tasks:
+            md += ["No task has a success check, so no claim could be checked.", ""]
+        elif not mismatches:
+            md += ["No mismatch: every claim a check gave a verdict on agrees with it.", ""]
+        else:
+            means = {"check_denies": "claimed completed, and the check says it was not",
+                     "check_passes": "not claimed as completed, and the check says it was"}
+            md += ["Every attempt where the panellist's claim and the success check disagree. A claimed success "
+                   "that the check denies points at feedback that told the panellist it had worked.", "",
+                   table(["Run", "Persona", "Model", "Task", "Claimed", "Checked", "Mismatch", "Steps",
+                          "Last screenshot"],
+                         [[*who(r), r["task"], r["claimed"], "completed" if r["checked"] == "yes" else "not completed",
+                           means[r["mismatch"]], r["steps"], r["last_screenshot"] or "-"] for r in mismatches]), ""]
+        if errors:
+            md += ["Checks that failed to run, which are no verdict and count as neither completed nor not: "
+                   + ", ".join(f"{r['run']} {r['task']}" for r in errors) + ". The reason for each is in runs.json, "
+                   'under "checks". Fix the check and run launch.py check.', ""]
+        if unparsed:
+            md += ["Outcome lines that could not be read as completed, gave up or ran out of steps, and count as "
+                   "no claim: " + ", ".join(f"{r['run']} {r['task']}" for r in unparsed) + ".", ""]
+
+        md += ["## Steps taken", "",
+               "Complete steps (an intent and its result) in the latest attempt of each task, over the attempts "
+               "that ended and have entries in a step log. An attempt that ended with none is counted under "
+               '"Not logged", and in no other column.', "",
+               table(["Task", "Step limit", "Attempts", "Mean steps", "Fewest", "Most", "At the limit",
+                      "Started again", "Not logged"],
+                     [[t, d["limit"], d["attempts"], fmt(d["mean"], 1), fmt(d["min"], 0), fmt(d["max"], 0),
+                       d["at_limit"], d["started_again"], d["not_logged"]] for t, d in res["steps"].items()]), ""]
+        shown = [s for s in STOPS if s in ENDED[:3] or any(d[s] for d in res["stopped"]["by_task"].values())]
+        md += ["## Where runs stopped", "",
+               "How each run's attempt of each task ended. Completed, gave up and ran out of steps are the "
+               "panellist's own claims. Step limit and time limit are runs the launcher stopped with the task under "
+               "way. Unfinished is a run that stopped some other way with the task under way, and not reached a "
+               "task it never began.", "",
+               table(["Task", *[s.capitalize() for s in shown]],
+                     [[t, *[d[s] for s in shown]] for t, d in res["stopped"]["by_task"].items()]), ""]
+
+        def ended_as(r):
+            if r["stopped"] == "not reached":
+                return r["stopped"]
+            if not int(r["attempts"]):
+                return r["stopped"] + ", no step logged"
+            return (f"{r['stopped']}, {plural(int(r['steps']), 'step')}"
+                    + (f" ({r['attempts']} attempts)" if int(r["attempts"]) > 1 else ""))
+
+        per_run = defaultdict(dict)
+        for r in task_rows:
+            per_run[r["run"]][r["task"]] = r
+        md += [table(["Run", "Persona", "Model", "State", *tasks],
+                     [[*who(next(iter(own.values()))), next(iter(own.values()))["state"],
+                       *[ended_as(own[t]) if t in own else "-" for t in tasks]] for own in per_run.values()]), ""]
+
+        md += ["## Stuck points", "", STUCK_DEFINITION, ""]
+        if points:
+            md += [table(["#", "Task", "Screen", "Runs", "Held there when the task ended",
+                          f"Stayed {DWELL} steps or more"],
+                         [[i, d["task"], f"`{d['page']}`" if d["page"] else "(address not logged)", len(d["runs"]),
+                           d["stopped"], d["stayed"]] for i, d in enumerate(points, start=1)]), "",
+                   "The evidence for each, to open in panel/evidence/<run id>/:", ""]
+            for i, d in enumerate(points, start=1):
+                md.append(f"{i}. Task {d['task']}, " + (f"`{d['page']}`" if d["page"] else "address not logged") + ":")
+                for e in d["evidence"]:
+                    shots = e["screenshots"]
+                    named = (f"`{shots[0]}`" if len(shots) == 1 else f"`{shots[0]}` to `{shots[-1]}`") if shots else (
+                        "no screenshot named")
+                    md.append(f"   - {e['run']}: " + (
+                        stopped_there(e, d["page"]) if e["kind"] == "stopped" else
+                        f"steps {e['steps'][0]} to {e['steps'][-1]} left the address as it was, {named}"))
+            md.append("")
+        else:
+            md += ["None found.", ""]
+        if problems:
+            md += ["## Step logs to check", "",
+                   "What a script could not read in a step log. The figures above leave these entries out.", "",
+                   *[f"- {d['run']}: {d['problem']}." for d in problems], ""]
+
+    if done:
+        def scores(own):
+            return {"n": len(own), **{f["key"]: mean([r[f["key"]] for r in own]) for f in factors}}
+
+        res["tasks"] = {t: scores([r for r in done if r["task"] == t]) for t in tasks}
+        res["persona_scores"] = {p: scores([r for r in done if r["persona_id"] == p]) for p in pids}
+        res["model_scores"] = {m: scores([r for r in done if r["model"] == m]) for m in models}
+        for title, first, count, group, label in (
+                ("Scores by task", "Task", "Runs", res["tasks"], str),
+                ("Scores by persona", "Persona", "Task attempts", res["persona_scores"],
+                 lambda p: f"{p} {names.get(p, '')}"),
+                ("Scores by model", "Model", "Task attempts", res["model_scores"], str)):
+            md += [f"## {title}", "", "Mean of each factor over the complete runs, 1 to 10. These are the panellists' "
+                   "own scores.", "",
+                   table([first, count, *short], [[label(k), d["n"], *[fmt(d[f["key"]], 1) for f in factors]]
+                                                  for k, d in group.items() if d["n"]]), ""]
+    else:
+        md += ["No run is complete, so there are no scores to report.", ""]
+    if unfinished:
+        md += ["## Incomplete runs", "", "These runs are in no score table. The task columns show the Overall score "
+               "each run gave before it stopped: partial evidence, not results.", "",
+               table(["Run", "Persona", "State", "Tasks written", "Scored", "Final sections", *tasks],
+                     [[r["run"], names.get(r["persona_id"], ""), r["state"], f"{len(r['written'])} of {len(tasks)}",
+                       f"{len(r['scored'])} of {len(tasks)}", "yes" if r["has_final"] else "no",
+                       *[f"{partial[run_key(r)][t]:g}" if t in partial.get(run_key(r), {}) else "-" for t in tasks]]
+                      for r in unfinished]), ""]
+    return md, res
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
@@ -260,7 +621,7 @@ def main():
     cfg = pl.load_study(args.study_dir)
     sd = cfg["_dir"]
     keys = pl.factor_keys(cfg)
-    labels = list(pl.label_map(cfg))
+    labels = pl.study_units(cfg)
     fl = {f["key"]: f["label"] for f in cfg["factors"]}
     unknown = [p for p in no_personas if p not in {q["id"] for q in cfg["personas"]}]
     if unknown:
@@ -305,6 +666,13 @@ def main():
         (sd / "analysis" / f"{base}.json").write_text(json.dumps(without_nan(res), indent=2, default=str))
         print("\n".join(printed))
         print(f"Wrote analysis/{base}.md and analysis/{base}.json")
+
+    if cfg["type"] == "usability":  # tasks are not ranked or compared: a report of its own
+        lines, figures = usability(cfg, all_rows, runs, names, read_csv(sd, "tasks.csv", filters),
+                                   read_csv(sd, "steps.csv", filters))
+        md += lines
+        res.update(figures)
+        return write(md)
 
     # Incomplete runs: counted, listed in their own table, and kept out of everything else
     partial = defaultdict(dict)  # incomplete run -> {concept: Overall}

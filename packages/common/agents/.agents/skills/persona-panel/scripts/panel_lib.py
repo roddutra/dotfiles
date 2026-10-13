@@ -23,18 +23,37 @@ Standard library only. Every script takes a study directory laid out as:
                               "files" concept has no copy (concept kinds, below)
         materials/concept-<L>/<page>/
         personas/<pid>-<slug>--<key>.md, or ...--<key>-r<n>.md for replicate n > 1
-        scratch/<run id>/
+        scratch/<run id>/     and, in a usability study with accounts, its account.json: what
+                              the run's panellist is told of its test account (below)
+        evidence/<run id>/    usability only: the run's step log, steps.jsonl, and the
+                              screenshot of each step (below). Nothing else belongs here, and
+                              nothing is read from it through a symbolic link (evidence_fd())
+    <study>/accounts/         usability only, lead only: <run id>.json, the test account
+                              provisioned for each run, with its secrets (accounts.py). Mode
+                              0600, never under panel/. And fingerprints.json, what a scan
+                              knows those secrets by once they are gone ("Secrets", below)
     <study>/analysis/         scores.csv, rankings.csv, runs.csv, answers.csv, lines.csv (what each run
-                              answered and quoted), quant.md, quant.json, checks.md,
+                              answered and quoted), in a usability study tasks.csv and steps.csv
+                              (extract_scores.py), quant.md, quant.json, checks.md,
                               lead-notes.md (the lead's), qual-<n>.md (one per analyst), SYNTHESIS.md
                               (the writer's) and, from launch.py, <job id>-reply.md and usage.md
                               (what each harness reported: per run, per model key, per role and
                               in total)
     <study>/logs/             launch.py only: <run id>.<attempt>.in, .out and .err, the input and
                               output of each CLI process it started; .pid, where the attempt's
-                              watchdog records itself and the CLI before the CLI runs; .end, the
-                              end record the watchdog writes when the attempt has ended (both
-                              formats in run_watchdog.py); modifications.json (the
+                              watchdog records itself and the CLI before the CLI runs, and,
+                              for as long as it runs, the command that starts the attempt's
+                              browser session; .end, the end record the watchdog writes when the
+                              attempt has ended (both formats in run_watchdog.py); for an
+                              attempt of a run that may browse, .browser, the record of the
+                              browser session its watchdog starts before the CLI and stops
+                              after it, .policy, that session's action policy while it is up
+                              (both in browser_session.py, and both named by the attempt alone:
+                              whoever stops a session works them out from the attempt, and
+                              takes no path to delete from the record), and
+                              .hooks, what starting and stopping it printed; .state, a private
+                              copy of the run's saved browser state, which the session deletes
+                              once it has loaded it; modifications.json (the
                               modification record, below); earlier-sessions.json (the sessions
                               of the runs init_study.py --force replaced, below); and, for an
                               attempt that put a follow-up question, .before, the persona file
@@ -93,6 +112,118 @@ A study with one concept ranks and compares nothing: single_concept() says so, a
 templates, checks and analysis follow it. Its instructions speak of one "artefact" (the singular
 of "artefact_plural"), which study.json must give when it sets the plural.
 
+Usability studies. "type": "usability" tests whether a persona can complete tasks in a running
+product. It has no concepts, nothing is captured, and every run browses, so it has no key.md,
+forms.json, sites/ or panel/materials. The unit a run works through is a task, and its persona file has a scored "### Task <id>" section for each
+(study_units(), in the order study.json lists them). check_usability() validates these keys:
+
+    target      {"base_url", "allow_remote"}: where the product runs, scheme, host and port
+                alone, read by a grammar of its own (target_parts()): http or https, then a
+                plain name, an IPv4 address or a bracketed IPv6 address, then an optional
+                port, in ASCII, and nothing else. A host a browser would read as another one
+                is refused: a backslash, a user name, a number in another notation. The
+                address every panellist is given is built again from those parts, lower-cased,
+                and is what cfg["target"]["base_url"] then holds. It must be a local
+                development host (local_host()): exactly localhost, 127.0.0.1 or [::1], or a
+                name ending in .localhost or .test with no punycode label. Any other, another
+                way to write this machine included (127.0.0.2, 0.0.0.0, [::ffff:127.0.0.1]),
+                needs "allow_remote": true, and then every task says "read_only": true and
+                the study has no "accounts": cfg["_remote"] is true, and the instructions tell
+                panellists to submit nothing, sign in nowhere and change nothing
+    tasks       [{"id", "goal", "start", "steps", "success_check", "read_only"}, ...]. "id" is
+                letters and digits, unique ignoring case: it is the section heading, a part of
+                each screenshot's name and the "task" of a step-log entry. "goal" is in the
+                user's words. "start" is a path on the target (default "/"): one "/" to begin
+                with, no "//", no backslash, space or control character, and plain ASCII with
+                anything else percent-encoded (START), so that it can name no other host.
+                "steps" is the step limit a panellist keeps to (default DEFAULT_STEPS), with
+                the launcher as its backstop (launch.py). "success_check" is a lead-only command that says
+                whether the task was really completed, by its exit code: 0 yes, 1 no, and
+                any other "the check failed to run", which is no verdict (accounts.py). The
+                launcher runs it when a run reaches a final state
+    accounts    {"provision" | "map", "teardown", "reset", "signin"}, optional (accounts.py).
+                "provision" is a command that prints one account for a run, "map" the same
+                accounts written out, keyed by run id. An account is {"identifiers": {...},
+                "secrets": {...}, "state": "<file>"}: values that may be seen, values that must
+                never be, and a saved browser state to start signed in from (account_problem()).
+                "teardown" runs when a run reaches a final state, "reset" between the runs of a
+                sequential study. "signin" is "session" (the default: the browser session
+                starts from the state, and the panellist is given the identifiers alone) or
+                "panellist" (signing in is the task under test: the panellist is given the
+                secrets to type, and its screenshots are then not safe to keep)
+    sequential  true runs one panellist at a time across all runners
+
+A command is split with shell rules and run without a shell, from the study directory, with the
+run id as its last argument. Its first word is a file, resolved against the study directory, or
+a program on PATH (command_argv()). Whether the file is there is checked when it is needed
+(usability_problems(): the scaffold, the plan and every start), so that an archived study loads.
+
+A usability run's time limit, when study.json sets no limits.run.minutes, comes from its tasks:
+STEP_SECONDS for each step they permit, plus RUN_MINUTES (usability_minutes()).
+
+The step log, panel/evidence/<run id>/steps.jsonl, has one JSON object per line, two for each
+step, written by the panellist (read_steps()):
+
+    {"task", "attempt", "step", "phase": "intent", "sees", "expects", "action"}
+    {"task", "attempt", "step", "phase": "result", "happened", "url", "screenshot"}
+
+"step" counts a task's actions on the page from 1. A step is complete when it has both entries.
+"url" is the address the action left the browser on, which is how the analysis tells one screen
+from another. A result entry has "sensitive": true when its step entered a secret. "attempt" is
+1 until a run is cut off part-way through a task: the resume message (runs.py) then gives the
+task's next attempt its number, so the steps of an earlier attempt are known as superseded
+(step_attempts(), task_steps()). An entry without one reads as attempt 1. The number is the
+launcher's to issue: it is on the run's entry in runs.json ("task_attempts", issued_attempts())
+before the message is made. An entry that carries a number the launcher did not issue, or that
+is not in the form of an entry (no whole step number, a phase that is neither), is left out
+before anything is read from the log (counted()): it supersedes no step, and gives a run no
+more steps (steps_begun(), the launcher's backstop). step_notes() says what is wrong with a
+log's form. A screenshot is saved beside the log as <task>-<step>.png, or
+<task>-a<attempt>-<step>.png from the second attempt on. What a panellist saw of the same page
+after scrolling is a further view of the step, named with a letter after the step number
+(<task>-<step>b.png, then c): it has no entry in the log, and is evidence like the step's own.
+run_evidence() lists what an evidence folder holds. An archived round has it as
+evidence/<run id>/ (evidence_dir()), with a note, <screenshot name>.left-out.txt, in place of
+each screenshot archive.py left out.
+
+A panellist can write anywhere under panel/, so an evidence folder is read as something another
+process may have put there. The evidence root, the run's folder and each file are opened
+without following a symbolic link and without waiting, as an open of a FIFO would
+(evidence_fd(), open_regular()): a link is never read through, to a file outside the study
+least of all, and what is refused is named with the reason (run_evidence() "refused" and
+"log_problem"). The step log, the backstop, the scan, check_runs.py, extract_scores.py and
+archive.py all read through the same functions.
+
+Secrets. A secret of a test account (a password, a token, a one-time code) may be in no persona
+file, step log, analysis file or archive. check_runs.py and archive.py scan for every value any
+run of the study was ever given, and teardown takes the values off every record, so they are
+known by fingerprint: accounts/fingerprints.json, lead only, mode 0600, never archived:
+
+    salt      hex, made once for the study
+    runs      the run ids whose account it has heard of, with or without secrets
+    secrets   one {"run", "name", "length", "hash"} for each secret: the name it had in the
+              account, how many characters its value has, and the salted BLAKE2b hash of the
+              value, null for a value shorter than SECRET_MIN characters, which is not looked for
+
+accounts.py adds to it whenever it writes an account's record (remember_secrets()), and a scan
+first adds what is still written out, in accounts.map and in the records in force
+(known_secrets()). A scan fingerprints every run of characters of a text that is as long as a
+known secret (secrets_in()), so it finds a value wherever it stands, inside a longer word too,
+and names the file, the line and whose secret it was, never the value. A file that could not
+be scanned is not "nothing found": scan_file() raises, and check_runs.py and archive.py name
+the file with the reason and stop for it. Nor does a message repeat a panellist's own text
+unchecked: shown() is the one way a task id the study does not have, a label, a file's or a
+screenshot's name or a page is quoted in a usability study, and it describes a value that holds
+a known secret, is long or has other characters than a name has. shown_path() is the same for
+the path of a file or a folder, any part of which may be a panellist's: it is repeated only as
+far down as it is clean, and the rest is described. What a scan cannot find: a
+value written in another form (broken across two lines, in another case, encoded or partly
+masked), a value shorter than SECRET_MIN characters, one of fewer than SECRET_WORD characters
+with a letter or a digit against it, anything in a screenshot, and the secrets of an account
+that was torn down before the record had heard of it, which the scripts name. The hash is a
+fast one, so whoever can read the file can guess a weak password from it: it is kept from
+panellists like the records, and teardown is what makes the password worthless.
+
 A run is one persona on one model entry and one replicate. Its id is <pid>-<key>, or
 <pid>-<key>-r<n> for replicate n > 1, where <key> is the model entry's key (letters and digits).
 
@@ -116,6 +247,10 @@ runs.json is a list. init_study.py writes one entry per panellist run:
     role       "panellist"
     file       persona file, relative to the study directory
     prompt     run prompt, relative to the study directory
+
+launch.py hands an entry to a runner with two keys more, which are never written here: "browse",
+whether this attempt may use agent-browser, and with it "browser_env", the variables by which
+its process reaches the browser session the launcher starts for it (runners/__init__.py).
 
 Whatever starts runs adds its own fields to an entry. runs.py mark adds "agent", the subagent
 id, in native mode. launch.py adds these, and an entry it has never touched has none of them:
@@ -147,6 +282,21 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   "leftover" ({"group", "pids"}) is there only for such an attempt whose CLI
                   had gone while a process group of its id still had processes: they may be
                   the run's, the launcher could not prove it and left them alone.
+                  "stop" is there only for an attempt of a usability run that the launcher
+                  asked its watchdog to stop at a task's step limit: {"limit": "steps", "task",
+                  "attempt", "step", "of", "at", "grace"}, the intent entry that went past the
+                  limit, when the launcher decided and the grace it asked with. It is on
+                  record before the request, and is what makes the run "limited".
+                  "step_entries" is there only for an attempt of a usability run: how many
+                  entries its step log held when it started. The backstop counts what the
+                  attempt added after them.
+                  "browser_left" ({"found", "left", "kept"}) is there only for an attempt
+                  whose watchdog did not stop its browser session, so that a launcher did,
+                  or whose session was stopped with something left: whether a session was
+                  still running, the pids that could not be ended, and what was left in
+                  place, each as "<path>: <why>" (browser_session.py). With "by":
+                  "watchdog" when the watchdog stopped it, and with "refused", the reason,
+                  when the session's record could not be trusted and nothing was touched.
                   "was" is there only while the attempt runs: the run's state, pid, session,
                   reason and reset_at before it, so that an attempt whose process never ran
                   as the CLI can be taken back.
@@ -172,6 +322,32 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
     reset_at      epoch seconds when the limit that blocked the run lifts, when the harness
                   said, else null
     extended      times "resume --extend" gave the run one more allowance of its limits
+    limited_by    there only for a run a limit stopped: "time", "budget" or "steps", the last
+                  for a usability run that went past a task's step limit. Gone again when the
+                  run is continued
+    checks        usability only, for a run that reached a final state in a study whose tasks
+                  have a "success_check": {task id: {"checked", "exit_code", "at", "error"}},
+                  what each task's check said (accounts.py). "checked" is true, false, or null
+                  when the check failed to run, with why in "error". Gone again when the run is
+                  continued, and made anew when it next finishes. A run resumed with a new
+                  account keeps the record of each task it had written up, with "kept": true
+                  (launch.py): its account is gone, so its check is not run again
+    account       usability only, for a run that has had a test account (accounts.summary()):
+                  "provisioned" (epoch seconds), "times" (how often it was provisioned),
+                  "source" (provision or map), "signin", "signed_in" (its browser session
+                  starts from a saved state), "secrets_given" (its panellist was given a secret
+                  to type, in this or an earlier provisioning: its screenshots may show one),
+                  "torn_down" (epoch seconds, null while the account is in force) and
+                  "teardown_error" (how a teardown failed, else null: the exit code and the
+                  lead-only file its output is in, never a word the command wrote)
+    task_attempts usability only, for a run that was continued with a task under way: {task
+                  id: n}, the attempt the launcher told the run to log that task under
+                  (runs.py issue_attempts()). A task it does not name is on attempt 1. An entry
+                  of the step log with any other number counts for nothing (counted())
+    released      usability only: epoch seconds when the lead let go of the run's test account
+                  with "launch.py release" while the run was unfinished. "run" and "resume"
+                  leave such a run alone unless it is named with --released, which takes the
+                  mark off and gives it a new account
     purged        {session id: epoch seconds}: the sessions "purge-sessions" deleted from the
                   harness. A purged session cannot be resumed. Its usage stays in "sessions"
     lost          {session id: epoch seconds}: the sessions a resume found gone from the
@@ -313,18 +489,25 @@ are qualitative evidence only, and no script tallies them.
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import hashlib
+import ipaddress
 import json
 import math
 import os
 import random
 import re
+import shlex
 import statistics
 import shutil
+import stat
 import string
 import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from run_watchdog import Unsafe  # a file that is not read: a symbolic link, or no regular file
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 ASSETS = SKILL_DIR / "assets"
@@ -354,6 +537,23 @@ DEFAULT_FACTORS = [
      "question": "Your overall verdict. It doesn't have to be the average of the other scores."},
 ]
 
+# The factors a usability study scores for each task, unless study.json gives its own.
+USABILITY_FACTORS = [
+    {"key": "success", "label": "Task success", "short": "Success",
+     "question": "Did I get done what I set out to do? 10 is completely, 1 is not at all."},
+    {"key": "ease", "label": "Ease", "short": "Ease",
+     "question": "How little effort did it take, from the first screen to the last?"},
+    {"key": "confidence", "label": "Confidence", "short": "Confidence",
+     "question": "How sure am I that what I did was right, and that it went through?"},
+    {"key": "clarity", "label": "Clarity of next step", "short": "Next step",
+     "question": "At each screen, did I know what to do next without guessing?"},
+    {"key": "trust", "label": "Trust", "short": "Trust",
+     "question": "After doing this, would I trust the product with my real details and decisions?"},
+    {"key": "overall", "label": "Overall", "short": "Overall",
+     "question": "My overall verdict on doing this task here. It doesn't have to be the average of the other "
+                 "scores."},
+]
+
 DEFAULT_FIT_FACTORS = ["relevance", "why_care", "next_step"]
 # The factors that cannot be judged without seeing the page. A factor in study.json says so with
 # "needs_design": true, and one that reuses a key below needs it unless it says false.
@@ -366,6 +566,37 @@ STUDY_TYPES = {
     "review": {"unit": "concept", "units": "concepts", "heading": "Concept"},
     "usability": {"unit": "task", "units": "tasks", "heading": "Task"},
 }
+# What only one type of study has in study.json. A key of the other type is refused, not ignored.
+REVIEW_KEYS = ("concepts", "labels", "label_style", "shuffle_labels", "find_the_answer", "artefact",
+               "artefact_plural", "arrival", "copy_ignore", "extra_yes_bullets")
+USABILITY_KEYS = ("target", "tasks", "accounts", "sequential")
+TASK_ID = re.compile(r"[A-Za-z0-9]+")  # a task id: what the parsers read after "Task", and part of a file name
+TASK_FIELDS = ("id", "goal", "start", "steps", "success_check", "read_only")
+ACCOUNT_FIELDS = ("provision", "map", "teardown", "reset", "signin")
+ACCOUNT_COMMANDS = ("provision", "teardown", "reset")
+ACCOUNT_PARTS = ("identifiers", "secrets", "state")  # of one account: what "provision" prints, or a "map" entry
+SIGNIN = ("session", "panellist")  # who signs in: the browser session, from a saved state, or the panellist
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")  # with LOCAL_ENDINGS, the local development hosts: local_host()
+LOCAL_ENDINGS = (".localhost", ".test")
+LOCAL_RULE = "localhost, 127.0.0.1, [::1], or a name ending in .localhost or .test"
+# What a target.base_url may be, and nothing else: target_parts() reads the host. ASCII only, so
+# that no letter here is one a browser would fold into another.
+TARGET = re.compile(r"(?P<scheme>[A-Za-z]+)://(?P<host>\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::(?P<port>[0-9]+))?/?")
+HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+HOST_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")  # a last label that makes a browser read the host as an IPv4 address
+IPV4 = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}")
+# A task's "start": a path on the target, with a query or a fragment when the task needs one.
+START = re.compile(r"/(?:[A-Za-z0-9._~!$&'()*+,;=:@/?#-]|%[0-9A-Fa-f]{2})*")
+DEFAULT_STEPS = 25    # the step limit of a task that names none
+STEP_SECONDS = 30     # the time rule of a usability run: this for each step its tasks permit,
+RUN_MINUTES = 5       # plus this for reading the instructions and writing the persona file
+# How a task section states what became of the task: its "Outcome" field opens with one of these.
+OUTCOME_LABEL = "Outcome"
+USABILITY_OUTCOMES = ("completed", "gave up", "ran out of steps")
+EVIDENCE = "panel/evidence"  # the step logs and screenshots of a usability study, one folder per run
+STEP_LOG = "steps.jsonl"     # a run's step log, in its evidence folder
+STEP_PHASES = ("intent", "result")  # the two entries of a step
+READ_MOST = 64 << 20         # bytes a file read whole for a scan or as evidence may hold: a larger one is not read
 MATERIALS = ("full", "text")
 KINDS = ("site", "url", "files")
 IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -434,7 +665,10 @@ def load_study(study_dir: Path) -> dict:
                          "one that holds study.json.")
     except ValueError as err:
         raise SystemExit(f"{study_dir / 'study.json'} is not valid JSON: {err}")
-    cfg.setdefault("factors", DEFAULT_FACTORS)
+    if not isinstance(cfg, dict):
+        raise SystemExit(f"{study_dir / 'study.json'} must hold one JSON object")
+    given = frozenset(cfg)  # the keys study.json itself has, before any default
+    cfg.setdefault("factors", USABILITY_FACTORS if cfg.get("type") == "usability" else DEFAULT_FACTORS)
     cfg.setdefault("fit_factors", [f for f in DEFAULT_FIT_FACTORS if f in {x["key"] for x in cfg["factors"]}])
     cfg.setdefault("models", ["opus", "fable"])
     cfg.setdefault("seed", 1)
@@ -457,7 +691,7 @@ def load_study(study_dir: Path) -> dict:
     for k in ("limits", "runners", "synthesis"):
         cfg.setdefault(k, {})
     cfg.setdefault("concepts", [])
-    cfg["_dir"] = study_dir
+    cfg["_dir"], cfg["_given"] = study_dir, given
     check_study(cfg)
     apply_materials(cfg, asked_to_browse)
     apply_kinds(cfg, asked_to_browse)
@@ -488,6 +722,7 @@ def check_study(cfg: dict):
     """Validate the shape of the optional keys. Whether a runner exists is the launcher's check."""
     if cfg["type"] not in STUDY_TYPES:
         _fail(f'unknown "type" {cfg["type"]!r} (use {" or ".join(STUDY_TYPES)})')
+    check_type_keys(cfg)
     if cfg["materials"] not in MATERIALS:
         _fail(f'unknown "materials" {cfg["materials"]!r} (use {" or ".join(MATERIALS)})')
     if not _positive(cfg["replicates"], whole=True):
@@ -505,6 +740,8 @@ def check_study(cfg: dict):
     check_personas(cfg)
     check_capture(cfg)
     keys = model_keys(cfg)
+    if cfg["type"] == "usability":
+        check_usability(cfg)
 
     limits = cfg["limits"]
     if not isinstance(limits, dict) or set(limits) - {*DEFAULT_LIMITS, "overrides"}:
@@ -625,6 +862,620 @@ def check_capture(cfg: dict):
     media = cap.get("media", "")
     if not isinstance(media, str) or not all(re.fullmatch(r"[a-z][a-z-]*", word) for word in media.split()):
         _fail('capture.media must be words such as "light" or "light reduced-motion"')
+
+
+# ---------------------------------------------------------------- usability studies
+
+def check_type_keys(cfg: dict):
+    """Refuse a key that belongs to the other type of study, and a setting a usability study
+    cannot have: a key that is quietly ignored reads as a setting in force."""
+    given = cfg.get("_given", frozenset(cfg))
+    if cfg["type"] != "usability":
+        stray = [k for k in USABILITY_KEYS if k in given]
+        if stray:
+            _fail(f'{listed_keys(stray)} {agree(len(stray), "belongs", "belong")} to a usability study, and this is a '
+                  'review study. Set "type": "usability" (it then has "tasks" and no "concepts"), or take '
+                  f'{agree(len(stray), "it", "them")} out')
+        return
+    stray = [k for k in REVIEW_KEYS if k in given and not (k == "concepts" and cfg[k] == [])]
+    if stray:
+        _fail(f'{listed_keys(stray)} {agree(len(stray), "belongs", "belong")} to a review study, and this is a '
+              "usability study: it has tasks and no concepts, nothing is captured, and tasks are attempted in the "
+              f'order written. Take {agree(len(stray), "it", "them")} out')
+    if cfg["materials"] != "full":
+        _fail('a usability study has no "materials": "text": its panellists use the running product in a browser. '
+              "Take it out")
+    if cfg["browse"] is not True:
+        _fail('a usability study always browses: take "browse": false out')
+    extra = sorted(set(cfg.get("capture") or {}) - {"desktop"}) if isinstance(cfg.get("capture"), dict) else []
+    if extra:
+        _fail(f"capture.{extra[0]}: a usability study captures nothing. Only capture.desktop applies: [width, "
+              "height] of each panellist's browser window")
+
+
+def listed_keys(keys: list[str]) -> str:
+    named = [f'"{k}"' for k in keys]
+    return ", ".join(named[:-1]) + (" and " if named[:-1] else "") + named[-1]
+
+
+def target_parts(url) -> tuple[str, str, int | None]:
+    """The scheme, host and port of a target.base_url, read by a grammar of its own and never by
+    a URL parser, which can take another host from an address than a browser does: a browser
+    reads a backslash as a slash, so a host written before one is where it goes, whatever
+    follows. The whole text must be
+
+        http:// or https://, a host, then optionally ":" and a port, then optionally one "/"
+
+    in ASCII, and a host is one of three things, lower-cased:
+
+        a name      labels of letters, digits and hyphens, joined by dots: no empty label, so no
+                    dot at either end, no label that begins or ends with a hyphen, at most 63
+                    characters a label and 253 in all
+        IPv4        four numbers from 0 to 255 in decimal, with no leading zero: "127.0.0.1"
+        IPv6        an address in square brackets: "[::1]"
+
+    Nothing else is a target: no user name or password, no path, query or fragment, no backslash,
+    space, control character, "@" or "%". A name whose last label is a number ("2130706433",
+    "0x7f.1", "127.1", "127.0.0.01") is refused outright: a browser reads it as an IPv4 address
+    in another notation, so it names a host other than the one it shows. The port is 1 to 65535,
+    with no leading zero. Raises ValueError with what is wrong, as the end of a sentence."""
+    m = TARGET.fullmatch(url) if isinstance(url, str) and url.isascii() else None
+    if not m or m["scheme"].lower() not in ("http", "https"):
+        raise ValueError("is not http:// or https://, a host and an optional port, in plain ASCII letters, digits, "
+                         "hyphens and dots, with nothing after them")
+    host, port = m["host"].lower(), m["port"]
+    if port and (port[0] == "0" or int(port) > 65535):
+        raise ValueError("has a port that is not a number from 1 to 65535, written without a leading zero")
+    if host[0] == "[":
+        try:
+            ipaddress.IPv6Address(host[1:-1])
+        except ValueError:
+            raise ValueError("has square brackets around something that is no IPv6 address") from None
+    elif not IPV4.fullmatch(host) or any(int(n) > 255 for n in host.split(".")):
+        labels = host.split(".")
+        if HOST_NUMBER.fullmatch(labels[-1]):
+            raise ValueError("has a host that ends in a number and is not four decimal numbers from 0 to 255: a "
+                             "browser reads it as an IP address written another way, so it is ambiguous. Write the "
+                             'address as "127.0.0.1" is written, or use a name')
+        if len(host) > 253 or not all(HOST_LABEL.fullmatch(label) for label in labels):
+            raise ValueError("has a host that is not a plain name: labels of letters, digits and hyphens joined by "
+                             "single dots, with no dot at either end and no hyphen at either end of a label")
+    return m["scheme"].lower(), host, int(port) if port else None
+
+
+def local_host(host: str) -> bool:
+    """Whether a host, as target_parts() gives it, is a local development host (LOCAL_RULE): the
+    hosts a usability study may drive a browser through, sign in on and submit forms to without
+    "allow_remote". Exactly three, and the names that end in ".localhost" or ".test". Every other
+    way to write this machine is not local, and needs "allow_remote" like any other host:
+    "127.0.0.2", "0.0.0.0", "[::ffff:127.0.0.1]", "[0:0:0:0:0:0:0:1]". Nor is a name with a
+    punycode label ("xn--"), which a browser shows as other letters than the ones written."""
+    return host in LOCAL_HOSTS or (host.endswith(LOCAL_ENDINGS)
+                                   and not any(label.startswith("xn--") for label in host.split(".")))
+
+
+def command_words(text) -> list[str] | None:
+    """A configured command split with shell rules, None when it is no command: not a string,
+    empty, or with a quote left open."""
+    try:
+        return (shlex.split(text) or None) if isinstance(text, str) else None
+    except ValueError:
+        return None
+
+
+def command_argv(cfg: dict, text: str) -> list[str]:
+    """What to execute for a configured command, without a shell: its words, the first made the
+    path of the file it names under the study directory, or of the program of that name on PATH.
+    Raises ValueError, with the reason as the end of a sentence, when there is neither."""
+    words = command_words(text)
+    if not words:
+        raise ValueError("is not a command")
+    named = Path(words[0]).expanduser()
+    file = named if named.is_absolute() else cfg["_dir"] / named
+    if file.is_file():
+        if not os.access(file, os.X_OK):
+            raise ValueError(f"names {file}, which is not executable (chmod +x)")
+        return [str(file), *words[1:]]
+    found = shutil.which(words[0]) if os.sep not in words[0] else None
+    if not found:
+        raise ValueError(f"names {json.dumps(words[0])}: there is no file {file}"
+                         + ("" if os.sep in words[0] else " and no program of that name on PATH"))
+    return [found, *words[1:]]
+
+
+def account_problem(account, signin: str = "session") -> str | None:
+    """Why a value is not one test account, as the end of a sentence, else None. An account is
+    what accounts.provision prints for a run and what accounts.map holds for one: {"identifiers":
+    {name: value}, "secrets": {name: value}, "state": "<file>"}, the last two optional."""
+    def values(part):
+        held = account.get(part, {})
+        return isinstance(held, dict) and all(isinstance(k, str) and k and isinstance(v, (str, int, float))
+                                              and not isinstance(v, bool) for k, v in held.items())
+
+    shape = ('{"identifiers": {"username": "..."}, "secrets": {"password": "..."}, "state": "<saved browser state '
+             'file>"}')
+    if not isinstance(account, dict) or set(account) - set(ACCOUNT_PARTS):
+        return f"must be one JSON object with any of {', '.join(ACCOUNT_PARTS)}: {shape}"
+    if not account.get("identifiers") or not values("identifiers"):
+        return ('needs "identifiers": the made-up values a panellist may see, such as {"username": "test-1", '
+                '"display_name": "Priya Raman"}, each a string or a number')
+    if not values("secrets"):
+        return 'has "secrets" that are not an object of strings or numbers: the values no one may see, such as a password'
+    if "state" in account and not (isinstance(account["state"], str) and account["state"].strip()):
+        return 'has a "state" that is not the path of a saved browser state file'
+    if signin == "panellist" and not account.get("secrets"):
+        return ('has no "secrets", and accounts.signin is "panellist": the panellist is to sign in itself, and has '
+                "nothing to sign in with")
+    return None
+
+
+def check_usability(cfg: dict):
+    """Validate "target", "tasks", "accounts" and "sequential" (module docstring, "Usability
+    studies"), fill each task's defaults, and set cfg["_remote"]: whether the target is not a
+    local development host. Whether a command's file exists is usability_problems()'s to say."""
+    if any(e["runner"] is None for e in model_entries(cfg)):
+        _fail('a usability study runs through runners: the launcher starts each run\'s browser session and its '
+              'test account, which native mode cannot. Set a study-level "runner", or give every model entry one')
+    if not (isinstance(cfg.get("product"), str) and cfg["product"].strip()):
+        _fail('a usability study needs "product": the name of what is tested, such as "Acme Home Loans". The '
+              'analysts\' and the writer\'s briefs call the product by it. "product_phrase" changes only how the '
+              "instructions introduce it, and does not stand in for it")
+
+    target = cfg.get("target")
+    if not isinstance(target, dict) or set(target) - {"base_url", "allow_remote"}:
+        _fail('a usability study needs "target": {"base_url": "http://app.localhost:8080"}, with "allow_remote": '
+              "true only for a remote site that panellists must not change")
+    if not isinstance(target.setdefault("allow_remote", False), bool):
+        _fail("target.allow_remote must be true or false")
+    url = target.get("base_url")
+    try:
+        scheme, host, port = target_parts(url)
+    except ValueError as err:
+        _fail(f'target.base_url {json.dumps(url)} {err}. It must be where the product runs, as in '
+              '"http://app.localhost:8080". A page to begin on is a task\'s "start"')
+    # As the parts say, and never as written: this is the address every panellist is given.
+    target["base_url"] = f"{scheme}://{host}" + (f":{port}" if port else "")
+    remote = cfg["_remote"] = not local_host(host)
+    if remote and not target["allow_remote"]:
+        _fail(f"target.base_url {json.dumps(url)} is not a local development host ({LOCAL_RULE}"
+              + (': a name with a punycode label, "xn--", is never taken as one' if host.endswith(LOCAL_ENDINGS)
+                 else "") + "). A usability "
+              "study signs in, fills in forms and submits them, so it runs against a local build. To study a "
+              'remote site without changing anything on it, add "allow_remote": true to "target": every task '
+              'must then say "read_only": true, and the study can have no "accounts"')
+
+    tasks = cfg.get("tasks")
+    if not isinstance(tasks, list) or not tasks or not all(isinstance(t, dict) for t in tasks):
+        _fail('a usability study needs "tasks": a list of {"id", "goal", "start", "steps"} objects, in the order '
+              "to attempt them")
+    seen = set()
+    for t in tasks:
+        tid = t.get("id")
+        if not (isinstance(tid, str) and TASK_ID.fullmatch(tid)):
+            _fail(f'the task id {json.dumps(tid)} must be letters and digits only, such as "T1", because it is '
+                  'what a panellist writes after "Task" and part of each screenshot\'s file name')
+        if tid.lower() in seen:
+            _fail(f'two tasks have the id "{tid}". Ids must be unique, ignoring case, because they name sections '
+                  "and files")
+        seen.add(tid.lower())
+        where = f"task {tid}:"
+        if set(t) - set(TASK_FIELDS):
+            _fail(f"{where} unknown fields: {', '.join(sorted(set(t) - set(TASK_FIELDS)))} (use "
+                  f"{', '.join(TASK_FIELDS)})")
+        if not (isinstance(t.get("goal"), str) and t["goal"].strip()):
+            _fail(f'{where} it needs "goal": what the person wants to get done, in their own words, naming no '
+                  "button or menu")
+        start = t.setdefault("start", "/")
+        if not (isinstance(start, str) and START.fullmatch(start) and "//" not in start):
+            _fail(f'{where} "start" {json.dumps(start)} must be a path on the target, beginning with one "/", such '
+                  'as "/" or "/account/settings?tab=email". It can have no "//", no backslash, no space or control '
+                  "character and no address of its own, and anything outside plain ASCII is written percent-encoded. "
+                  "A task never starts at another address")
+        if not _positive(t.setdefault("steps", DEFAULT_STEPS), whole=True):
+            _fail(f'{where} "steps" must be a whole number, 1 or more: the most actions a panellist takes on it '
+                  f"(default {DEFAULT_STEPS})")
+        if "success_check" in t and not command_words(t["success_check"]):
+            _fail(f'{where} "success_check" must be a command, such as "scripts/check-{tid.lower()}.sh": it is run '
+                  "without a shell, with the run id as its last argument")
+        if not isinstance(t.setdefault("read_only", False), bool):
+            _fail(f'{where} "read_only" must be true or false')
+        if remote and not t["read_only"]:
+            _fail(f'{where} it must say "read_only": true, because the target is a remote site ("allow_remote"): '
+                  "its panellists may look and move around, and must submit nothing, sign in nowhere and change "
+                  "nothing. Check that the goal can be met that way")
+
+    if not isinstance(cfg.setdefault("sequential", False), bool):
+        _fail('"sequential" must be true or false: whether one panellist runs at a time, across all runners')
+    acc = cfg.setdefault("accounts", None)
+    if acc is None:
+        return
+    if remote:
+        _fail('"accounts" cannot be used with a remote target ("allow_remote"): no test credentials are ever '
+              'entered on a remote site. Take "accounts" out, or point "target" at a local build')
+    if not isinstance(acc, dict) or set(acc) - set(ACCOUNT_FIELDS) or ("provision" in acc) == ("map" in acc):
+        _fail('"accounts" must be an object with "provision" (a command that prints one account for a run) or "map" '
+              f'(the accounts, keyed by run id), not both, and any of {", ".join(ACCOUNT_FIELDS[2:])}')
+    if acc.setdefault("signin", SIGNIN[0]) not in SIGNIN:
+        _fail(f'accounts.signin must be "{SIGNIN[0]}" (the default: each browser session starts from the saved state '
+              f'its account names, and the panellist is given no secret) or "{SIGNIN[1]}" (signing in is the task '
+              "under test: the panellist is given the secrets to type)")
+    for name in ACCOUNT_COMMANDS:
+        if name in acc and not command_words(acc[name]):
+            _fail(f'accounts.{name} must be a command, such as "scripts/{name}-account.sh": it is run without a '
+                  "shell, with the run id as its last argument")
+    if "reset" in acc and not cfg["sequential"]:
+        _fail('accounts.reset runs between the runs of a sequential study, and this one is not: set "sequential": '
+              "true, or take it out")
+    if "map" in acc:
+        runs = [run_id(p["id"], key, rep) for p in cfg.get("personas") or [] for key in model_keys(cfg)
+                for rep in range(1, cfg["replicates"] + 1)]
+        held = acc["map"]
+        if not isinstance(held, dict):
+            _fail("accounts.map must be an object, {run id: account}")
+        lacking, unknown = [r for r in runs if r not in held], [r for r in held if r not in runs]
+        if lacking or unknown:
+            _fail("accounts.map must have one account for each run, keyed by run id"
+                  + (f". It has none for {', '.join(lacking)}" if lacking else "")
+                  + (f". It names {', '.join(unknown)}, which {agree(len(unknown), 'is no run', 'are no runs')} of "
+                     f"this study (runs: {', '.join(runs)})" if unknown else ""))
+        for run, account in held.items():
+            problem = account_problem(account, acc["signin"])
+            if problem:
+                _fail(f"accounts.map: the account of {run} {problem}")
+
+
+def usability_problems(cfg: dict) -> list[str]:
+    """What would stop a usability study's runs as the files stand, each a sentence: a
+    "success_check" or an accounts command whose file is not there (command_argv()), and a saved
+    browser state of accounts.map that is missing or where a panellist could read it. Empty for
+    a review study. The scaffold, the plan and every command that starts a run ask this."""
+    if cfg["type"] != "usability":
+        return []
+    acc, out = cfg["accounts"] or {}, []
+    commands = {f'task {t["id"]}: "success_check"': t["success_check"] for t in cfg["tasks"] if "success_check" in t}
+    commands.update({f"accounts.{name}": acc[name] for name in ACCOUNT_COMMANDS if name in acc})
+    for where, text in commands.items():
+        try:
+            command_argv(cfg, text)
+        except ValueError as err:
+            out.append(f"{where} {err}.")
+    for run, account in (acc.get("map") or {}).items():
+        problem = state_problem(cfg, account.get("state"))
+        if problem:
+            out.append(f"accounts.map: the saved browser state of {run} {problem}.")
+    return out
+
+
+def state_file(cfg: dict, state: str) -> Path:
+    """A saved browser state named by an account, as a path: relative to the study directory."""
+    named = Path(state).expanduser()
+    return (named if named.is_absolute() else cfg["_dir"] / named).resolve()
+
+
+def state_problem(cfg: dict, state: str | None, named: bool = True) -> str | None:
+    """Why the saved browser state an account names cannot be used, as the end of a sentence,
+    else None: it holds the account's session cookie in plain text, so it must be a file that
+    no panellist can read. named false leaves the file's name out: it is then part of what a
+    provision command printed, none of which is repeated (accounts.py)."""
+    if not state:
+        return None
+    file, panel = state_file(cfg, state), (cfg["_dir"] / "panel").resolve()
+    where = f"is {file}, " if named else "is "
+    if file == panel or panel in file.parents:
+        return f"{where}under panel/, where every panellist can read it: it holds the account's cookie"
+    return None if file.is_file() else f"{where}and there is no such file" if named else "is not there"
+
+
+def task_url(cfg: dict, task: dict) -> str:
+    """The address a task starts at: the target, as check_usability() rebuilt it from its parts,
+    plus the task's "start", which is a path and can name no other host."""
+    return cfg["target"]["base_url"] + task["start"]
+
+
+def usability_minutes(cfg: dict) -> float:
+    """The minutes a usability run gets when study.json sets no limits.run.minutes: STEP_SECONDS
+    for each step its tasks permit, plus RUN_MINUTES for reading the instructions and writing the
+    persona file. Measured at 6 to 10 seconds a step on small models, so it leaves room for
+    larger ones."""
+    return sum(t["steps"] for t in cfg["tasks"]) * STEP_SECONDS / 60 + RUN_MINUTES
+
+
+def evidence_dir(study_dir: Path, run: str) -> Path:
+    """Where a usability run keeps its step log and screenshots: panel/evidence/<run id> in a
+    live study, evidence/<run id> in an archived round (archive.py flattens panel/). To name it,
+    and for the scaffold to make it: whatever reads from it opens it with evidence_fd()."""
+    live = (Path(study_dir) / "panel").is_dir()
+    return Path(study_dir) / (EVIDENCE if live else Path(EVIDENCE).name) / run
+
+
+def open_regular(path, dir_fd: int | None = None, most: int = READ_MOST) -> int:
+    """Open a file that a panellist may have put there, to read it: a descriptor. A symbolic link
+    at its name is never followed, and the open never waits, as it would for the other end of a
+    FIFO. Raises Unsafe, with nothing read, unless the descriptor is of a regular file that
+    holds at most `most` bytes, and the system's own error when there is no such file or it may
+    not be read. As run_watchdog.opened() opens a file of an attempt, without its rule that the
+    file be this user's: an archived round may be another's."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError as err:
+        if err.errno in (errno.ELOOP, errno.EMLINK):  # what O_NOFOLLOW says of a link, on Linux and macOS, and on BSD
+            raise Unsafe("it is a symbolic link") from None
+        raise
+    st = os.fstat(fd)
+    why = ("it is not a regular file" if not stat.S_ISREG(st.st_mode)
+           else f"it holds {st.st_size:,} bytes, more than is read" if st.st_size > most else None)
+    if why:
+        os.close(fd)
+        raise Unsafe(why)
+    return fd
+
+
+def unread(err: OSError) -> str:
+    """Why a file or a folder was not read, for a message: the system's words, or Unsafe's."""
+    return err.strerror or str(err)
+
+
+def evidence_fd(study_dir: Path, run: str | None) -> int:
+    """Open a run's evidence folder (evidence_dir()) to read from it, or with run None the
+    evidence root that holds every run's: a descriptor, for evidence_names() and for opening
+    the files in it by dir_fd. A panellist can write under panel/, and so can put a symbolic
+    link where the evidence root or its own folder was: each part of the way below the study
+    directory is opened without following one, so nothing outside the study is ever listed or
+    read through this. Raises FileNotFoundError when there is no such folder, and Unsafe, naming
+    the part, when one is a link or no folder."""
+    live = (Path(study_dir) / "panel").is_dir()
+    parts = (*(Path(EVIDENCE).parts if live else (Path(EVIDENCE).name,)), *([] if run is None else [run]))
+    if run is not None and (not run or run in (".", "..") or "/" in run or "\x00" in run):
+        raise Unsafe("the run id is no folder name")
+    fd = os.open(study_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for i, part in enumerate(parts):
+            try:
+                below = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except OSError as err:
+                if err.errno not in (errno.ELOOP, errno.EMLINK, errno.ENOTDIR):
+                    raise
+                link = stat.S_ISLNK(os.stat(part, dir_fd=fd, follow_symlinks=False).st_mode)
+                raise Unsafe(f"{'/'.join(parts[:i + 1])} is {'a symbolic link' if link else 'not a folder'}, so "
+                             "nothing was read through it") from None
+            os.close(fd)
+            fd = below
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def evidence_names(study_dir: Path, run: str | None) -> list[tuple[str, str]]:
+    """What a run's evidence folder holds, or with run None the evidence root: (name, kind) in
+    name order, kind being "file", "folder" or "other", which a symbolic link is whatever it
+    points at. Empty when there is no such folder. Raises OSError as evidence_fd() does."""
+    try:
+        folder = evidence_fd(study_dir, run)
+    except FileNotFoundError:
+        return []
+    try:
+        with os.scandir(folder) as listing:
+            return sorted((f.name, "file" if f.is_file(follow_symlinks=False) else
+                           "folder" if f.is_dir(follow_symlinks=False) else "other") for f in listing)
+    finally:
+        os.close(folder)
+
+
+def open_evidence(study_dir: Path, run: str, name: str, most: int = READ_MOST) -> int:
+    """Open one file of a run's evidence folder to read it, as evidence_fd() and open_regular()
+    open: no link is followed, to the folder or at the file's name. A descriptor. Raises
+    OSError: FileNotFoundError when there is no such folder or file, Unsafe when one is refused."""
+    if not name or name in (".", "..") or "/" in name or "\x00" in name:
+        raise Unsafe("it is not the name of a file in the folder")
+    folder = evidence_fd(study_dir, run)
+    try:
+        return open_regular(name, dir_fd=folder, most=most)
+    finally:
+        os.close(folder)
+
+
+def read_evidence(study_dir: Path, run: str, name: str) -> bytes:
+    """The content of one file of a run's evidence folder (open_evidence())."""
+    with os.fdopen(open_evidence(study_dir, run, name), "rb") as f:
+        return f.read()
+
+
+def step_log_stamp(study_dir: Path, run: str) -> tuple[int, int] | None:
+    """The size and change time of a run's step log, to tell whether it has changed since it was
+    last read, None when there is none that can be read as the run's. Asked without following a
+    link, as the log is read."""
+    try:
+        folder = evidence_fd(study_dir, run)
+    except OSError:
+        return None
+    try:
+        st = os.stat(STEP_LOG, dir_fd=folder, follow_symlinks=False)
+    except OSError:
+        return None
+    finally:
+        os.close(folder)
+    return (st.st_size, st.st_mtime_ns) if stat.S_ISREG(st.st_mode) else None
+
+
+def step_log(study_dir: Path, run: str) -> str | None:
+    """The text of a run's step log, None when the run has none. Raises OSError, with the reason
+    (unread()), when there is one that cannot be read as the run's: its folder or the evidence
+    root is a symbolic link, the log is one, or a FIFO, or may not be read. A reader that must
+    not pass over such a log asks this: read_steps() reads it as no log."""
+    try:
+        return read_evidence(study_dir, run, STEP_LOG).decode(errors="replace")
+    except FileNotFoundError:
+        return None
+
+
+def read_steps(study_dir: Path, run: str) -> tuple[list[dict], list[int]]:
+    """A run's step log: its entries in file order, and the 1-based numbers of the lines that
+    are no entry (not a JSON object, or one with no task). Both empty when there is no log, or
+    none that can be read as the run's (step_log(), run_evidence() "log_problem"). Each entry is
+    as the panellist wrote it, with "attempt" filled in: 1 where it gave none, and 0, which is
+    never issued (counted()), where it gave one that is no whole number above 0."""
+    try:
+        lines = (step_log(study_dir, run) or "").splitlines()
+    except OSError:
+        return [], []
+    entries, odd = [], []
+    for i, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            entry = None
+        if not isinstance(entry, dict) or not isinstance(entry.get("task"), str):
+            odd.append(i)
+            continue
+        if not _positive(entry.setdefault("attempt", 1), whole=True):
+            entry["attempt"] = 0
+        entries.append(entry)
+    return entries, odd
+
+
+def step_number(entry: dict) -> int | None:
+    """An entry's step number when it is a whole number, 0 or more, else None."""
+    step = entry.get("step")
+    return step if isinstance(step, int) and not isinstance(step, bool) and step >= 0 else None
+
+
+def issued_attempts(entry: dict | None) -> dict[str, int]:
+    """{task id: the latest attempt the launcher has told a run to log the task under}, from the
+    run's entry in runs.json ("task_attempts"). A task it does not name is on attempt 1, as
+    every task is until the run is continued with the task under way (launch.py). The number is
+    the launcher's to give: a panellist that writes another gets nothing by it (counted())."""
+    held = (entry or {}).get("task_attempts")
+    return {task: n for task, n in held.items() if _positive(n, whole=True)} if isinstance(held, dict) else {}
+
+
+def counted(entries: list[dict], issued: dict[str, int]) -> list[dict]:
+    """The entries of a step log that say what a run did, from read_steps(): those in the form
+    the instructions set, a whole step number and a phase that is "intent" or "result", whose
+    attempt the launcher issued for their task (issued_attempts()): 1 up to the task's latest.
+    Every other entry is left out before anything is read from the log, so that none can pass
+    for a later attempt and supersede the steps a run took (step_notes() counts them)."""
+    return [e for e in entries if step_number(e) is not None and e.get("phase") in STEP_PHASES
+            and 1 <= e["attempt"] <= issued.get(e["task"], 1)]
+
+
+def step_attempts(entries: list[dict], issued: dict[str, int]) -> dict[str, int]:
+    """{task id: the number of its latest attempt in a step log}, among the entries that count
+    (counted()). The entries of an earlier attempt of a task are superseded: its run was cut off
+    part-way, and began the task again."""
+    latest = {}
+    for e in counted(entries, issued):
+        latest[e["task"]] = max(latest.get(e["task"], 1), e["attempt"])
+    return latest
+
+
+def task_steps(entries: list[dict], issued: dict[str, int]) -> dict[str, dict]:
+    """What a step log says of each task it has entries for that count (counted()), from
+    read_steps(): {task id: {"attempt", "attempts", "steps"}}. "attempt" is the task's latest
+    attempt (step_attempts()) and "attempts" how many it has had. "steps" has the steps of that
+    attempt alone, in step order: one {"step", "intent", "result"} for each step number from 1
+    up that has an entry, with None where the log has no entry of that phase. A step is complete
+    when it has both. The first entry stands when a step has two of one phase."""
+    latest, out = step_attempts(entries, issued), {}
+    for e in counted(entries, issued):
+        task = out.setdefault(e["task"], {"attempt": latest[e["task"]], "attempts": set(), "steps": {}})
+        task["attempts"].add(e["attempt"])
+        n, phase = step_number(e), e["phase"]
+        if e["attempt"] == task["attempt"] and n:
+            task["steps"].setdefault(n, {"step": n, "intent": None, "result": None})
+            if task["steps"][n][phase] is None:
+                task["steps"][n][phase] = e
+    for task in out.values():
+        task.update(attempts=len(task["attempts"]), steps=[task["steps"][n] for n in sorted(task["steps"])])
+    return out
+
+
+def steps_begun(cfg: dict, added: list[dict]) -> dict | None:
+    """The backstop of a task's step limit (launch.py), over the entries one process of a run
+    added to its step log: {"task", "step", "of"} for the first "intent" entry that begins a
+    step beyond its task's limit, None when none does. An entry is beyond the limit when its
+    step number is above it, or when it is one intent more than the limit allows the process
+    for that task. Every intent of a task of the study counts, whatever attempt it carries: the
+    process logs one attempt of a task, the one the launcher issued, so an entry that names
+    another neither starts the count again nor escapes it. "step" is the entry's own number
+    when that is above the limit, else how many steps of the task the process has begun."""
+    limits, begun = {t["id"]: t["steps"] for t in cfg["tasks"]}, {}
+    for e in added:
+        n = step_number(e)
+        if e.get("phase") != "intent" or n is None or e["task"] not in limits:
+            continue
+        begun[e["task"]] = begun.get(e["task"], 0) + 1
+        if n > limits[e["task"]] or begun[e["task"]] > limits[e["task"]]:
+            return {"task": e["task"], "step": n if n > limits[e["task"]] else begun[e["task"]],
+                    "of": limits[e["task"]]}
+    return None
+
+
+def step_notes(cfg: dict, entries: list[dict], odd: list[int], issued: dict[str, int], known: dict | None) -> list[str]:
+    """What is wrong with the form of a step log, from read_steps(), each as the end of a
+    sentence that begins "its step log has". None of them stops a run or an analysis: lines that
+    are no entry, entries for a task the study does not have, entries with no whole step number
+    or with a phase that is neither "intent" nor "result", entries with an attempt number the
+    launcher did not issue (issued_attempts()), and an intent whose step number is lower than
+    that of the intent before it in the same task and attempt. known is what a scan knows the
+    study's secrets by: a task id the study does not have is a panellist's own text, and is
+    shown as shown() allows."""
+    tasks, notes = {t["id"] for t in cfg["tasks"]}, []
+    if odd:
+        notes.append(f"{plural(len(odd), 'line')} that cannot be read as an entry (line "
+                     f"{', '.join(map(str, odd[:5]))}{', ...' if len(odd) > 5 else ''})")
+    unknown = list(dict.fromkeys(e["task"] for e in entries if e["task"] not in tasks))
+    if unknown:
+        notes.append(f"entries for {agree(len(unknown), 'a task', 'tasks')} this study does not have "
+                     f"({', '.join(shown(known, x, 'a value that is not a task id') for x in unknown[:5])}"
+                     f"{', ...' if len(unknown) > 5 else ''})")
+    shapeless = sum(step_number(e) is None or e.get("phase") not in STEP_PHASES for e in entries)
+    if shapeless:
+        notes.append(f"{plural(shapeless, 'entry', 'entries')} with no whole step number, or with a phase that is "
+                     'neither "intent" nor "result"')
+    strangers = sum(e["task"] in tasks and not 1 <= e["attempt"] <= issued.get(e["task"], 1) for e in entries)
+    if strangers:
+        notes.append(f"{plural(strangers, 'entry', 'entries')} with an attempt number the launcher did not give "
+                     f"{agree(strangers, 'its', 'their')} task, which {agree(strangers, 'is', 'are')} left out of the "
+                     "steps counted")
+    before, back = {}, []
+    for e in counted(entries, issued):
+        n, where = step_number(e), (e["task"], e["attempt"])
+        if e["phase"] != "intent" or e["task"] not in tasks:
+            continue
+        if n < before.get(where, 0):
+            back.append(f"task {e['task']}, step {n} after step {before[where]}")
+        before[where] = n
+    if back:
+        notes.append(f"step numbers that go backwards ({'; '.join(back[:3])}{'; ...' if len(back) > 3 else ''})")
+    return notes
+
+
+_OUTCOMES = "|".join(r"\s+".join(map(re.escape, o.split())) for o in USABILITY_OUTCOMES)
+_OUTCOME_LINE = re.compile(rf"^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*{OUTCOME_LABEL}\b\s*:?\s*(?:\*\*|__)?\s*:?(.*)$", re.I)
+_OUTCOME = re.compile(rf"({_OUTCOMES})\b(.*)$", re.I)
+_NEXT_OUTCOME = re.compile(rf"[\s,/;:-]*(?:(?:and|or|but|then)\s+)?(?:{_OUTCOMES})\b", re.I)
+
+
+def claimed_outcome(section: str | None) -> str:
+    """What a panellist says became of a task, from its task section: one of USABILITY_OUTCOMES,
+    "unparsed", or "" when the task has no section. Only an "Outcome" field that opens with
+    exactly one of the three phrases counts, in any case. One that opens with anything else
+    ("Not completed", "I gave up"), goes straight on to another of the three ("completed / gave
+    up", as the template has it before it is filled in), or is missing, is "unparsed": the
+    parser never guesses a claim."""
+    if section is None:
+        return ""
+    for line in section.split("\n")[1:]:
+        m = _OUTCOME_LINE.match(line)
+        if m:
+            said = _OUTCOME.match(_MARKUP.sub("", m.group(1)).strip())
+            if not said or _NEXT_OUTCOME.match(said.group(2)):
+                return "unparsed"
+            return " ".join(said.group(1).lower().split())
+    return "unparsed"
 
 
 def concept_kind(c: dict) -> str:
@@ -989,6 +1840,20 @@ def single_concept(cfg: dict) -> bool:
     return len(cfg["concepts"]) == 1
 
 
+def ranked(cfg: dict) -> bool:
+    """Whether a run of the study ranks what it went through and has a review order: a review of
+    more than one concept. The tasks of a usability study are attempted in the order written and
+    are not ranked against each other."""
+    return cfg["type"] == "review" and not single_concept(cfg)
+
+
+def unit_order(cfg: dict, pid: str) -> list[str]:
+    """The order a persona goes through the study's units in: its review order (review_order()),
+    or the tasks as study.json lists them, which may build on each other."""
+    units = study_units(cfg)
+    return units if cfg["type"] == "usability" else review_order(cfg, pid, units)
+
+
 def study_brief_copy(study_dir: Path, files) -> Path | None:
     """The first of files that is the study brief or a copy of it, else None: a path named
     study-brief.md in any case, whether or not it exists, a path that resolves to the study's own
@@ -1137,14 +2002,16 @@ def model_keys(cfg: dict) -> list[str]:
 
 def limits_for(cfg: dict, role: str = "panellist", key: str | None = None) -> dict:
     """{"minutes", "budget_usd"} in force: limits.run for a panellist run, with that model key's
-    limits.overrides merged over it; the job's share of limits.synthesis (synthesis_share) for
+    limits.overrides merged over it, where a usability run's "minutes" default to what its tasks
+    permit (usability_minutes()); the job's share of limits.synthesis (synthesis_share) for
     an analyst or writer job; limits.followup for "followup", what each run asked a follow-up
     question may use for that question, apart from its run limits."""
     limits = cfg.get("limits") or {}
     if role == "followup":
         return {**DEFAULT_LIMITS["followup"], **limits.get("followup", {})}
     if role == "panellist":
-        return {**DEFAULT_LIMITS["run"], **limits.get("run", {}), **limits.get("overrides", {}).get(key, {})}
+        timed = {"minutes": usability_minutes(cfg)} if cfg.get("type") == "usability" else {}
+        return {**DEFAULT_LIMITS["run"], **timed, **limits.get("run", {}), **limits.get("overrides", {}).get(key, {})}
     if role in JOB_ROLES:
         return synthesis_share(cfg)
     raise ValueError(f"unknown role {role!r}")
@@ -1482,9 +2349,10 @@ def followup_section(n: int, question: str, answer: str, from_reply: bool = Fals
                       *(["", FROM_REPLY] if from_reply else []), ""])
 
 
-def followup_change(cfg: dict, before: Path, after: Path, n: int) -> tuple[str, str]:
+def followup_change(cfg: dict, before: Path, after: Path, n: int, quote=str) -> tuple[str, str]:
     """What follow-up n did to a persona file, from the copy made before the question (before)
-    and the file now (after): (kind, why).
+    and the file now (after): (kind, why). quote is how why repeats a line of the file, which in
+    a usability study is shown()'s to decide.
 
     "section": the file is the copy plus one appended section that opens with the heading
     "## Follow-up <n>", holds something under it and has no other "## " or "### " heading, and
@@ -1510,10 +2378,10 @@ def followup_change(cfg: dict, before: Path, after: Path, n: int) -> tuple[str, 
         return "none", ""
     if not re.fullmatch(rf"## Follow-up {n}\s*", added[0]):
         return "other", (f"what it appended does not open with the heading `## Follow-up {n}`: it opens "
-                         f"`{added[0][:60]}`")
+                         f"`{quote(added[0][:60])}`")
     extra = [line for line in added[1:] if line.startswith(("## ", "### "))]
     if extra:
-        return "other", f"what it appended has a heading besides `## Follow-up {n}`: `{extra[0][:60]}`"
+        return "other", f"what it appended has a heading besides `## Follow-up {n}`: `{quote(extra[0][:60])}`"
     if any(was[k] != now[k] for k in ("scores", "ranking", "sections", "duplicates", "unknown_labels", "has_final")):
         return "other", "it changed how the scores, ranking or sections of the file read"
     return ("section", "") if any(line.strip() for line in added[1:]) else ("blank", "")
@@ -1551,9 +2419,10 @@ def unit_nouns(cfg: dict) -> tuple[str, str]:
 
 
 def study_units(cfg: dict) -> list[str]:
-    """The units every run must cover, in section-heading form: the concept labels of a review."""
+    """The units every run must cover, in section-heading form: the concept labels of a review,
+    or the task ids of a usability study in the order study.json lists them."""
     if cfg["type"] == "usability":
-        raise SystemExit('study.json: "type": "usability" is not supported yet')
+        return [t["id"] for t in cfg["tasks"]]
     return list(label_map(cfg))
 
 
@@ -2100,6 +2969,372 @@ def run_records(study_dir: Path, cfg: dict) -> list[dict]:
         out.append({"run": run, "pid": pid, "model": key, "replicate": replicate, "segment": seg.get(pid, ""),
                     "parsed": parsed, "progress": prog, "state": run_state(prog, recorded),
                     "unsettled": bool(parsed and parsed["unsettled"])})
+    return out
+
+
+# ---------------------------------------------------------------- secrets and evidence
+
+FINGERPRINTS = "accounts/fingerprints.json"  # what a scan knows the secrets of the test accounts by, lead only
+SECRET_MIN = 4   # a secret shorter than this is not looked for: almost any text holds it by chance
+SECRET_WORD = 8  # one shorter than this is found only as a word of its own, with no letter or digit against it
+REDACTED = "(removed from the archive)"  # what archive.py leaves in accounts.map where a secret was
+LEFT_OUT = ".left-out.txt"  # after a screenshot's name: the note an archive keeps where the screenshot would be
+SHOWN = re.compile(r"[A-Za-z0-9._/:#~-][A-Za-z0-9 ._/:#~-]*")  # what shown() repeats of a panellist's own text
+SHOWN_MOST = 40   # and how long a value it repeats: a longer one is described
+PAGE_MOST = 120   # the same for the page of an address
+PATH_MOST = 200   # and for a path under the study directory, which is what its file is found by: shown_path()
+SCREENSHOT = re.compile(r"(?P<task>[A-Za-z0-9]+)(?:-a(?P<attempt>[1-9]\d*))?-(?P<step>\d+)"
+                        r"(?P<view>[a-z]|-[a-z][a-z0-9-]*)?\.png", re.I)  # screenshot_step()
+
+
+def _fingerprint(salt: bytes, value: str) -> str:
+    return hashlib.blake2b(value.encode("utf-8", "replace"), key=salt, digest_size=16).hexdigest()
+
+
+def read_fingerprints(study_dir: Path) -> dict:
+    """A study's fingerprint record (module docstring, "Secrets"): {"salt", "runs", "secrets"}.
+    A study without one gets an empty record with a salt of its own, which is on file only once
+    remember_secrets() has something to keep. Exits when the file is there and cannot be used:
+    without it the secrets of accounts already torn down can no longer be looked for, and that
+    is not to happen quietly."""
+    path = Path(study_dir) / FINGERPRINTS
+    try:
+        store = json.loads(path.read_text())
+        bytes.fromhex(store["salt"])
+        if not all(isinstance(store[k], list) for k in ("runs", "secrets")):
+            raise ValueError
+    except (FileNotFoundError, NotADirectoryError):
+        return {"salt": os.urandom(16).hex(), "runs": [], "secrets": []}
+    except OSError as err:
+        raise SystemExit(f"Cannot read {path} ({err.strerror}): it is what a scan knows the secrets of the test "
+                         "accounts by, so nothing was scanned.")
+    except (ValueError, TypeError, KeyError):
+        raise SystemExit(f"{path} is not a fingerprint record, so nothing can be scanned for the secrets of the "
+                         "test accounts. Put it back as it was. If it is lost, delete it: the secrets of accounts "
+                         "that were torn down can then no longer be looked for, and check_runs.py names them.")
+    return store
+
+
+def _note_secrets(store: dict, run: str, secrets: dict) -> bool:
+    """Add a run and the fingerprint of each of its secrets to a record, in memory. Returns
+    whether the record learnt anything."""
+    salt, news = bytes.fromhex(store["salt"]), run not in store["runs"]
+    if news:
+        store["runs"].append(run)
+    have = {(s.get("run"), s.get("name"), s.get("length"), s.get("hash")) for s in store["secrets"]}
+    for name, value in secrets.items():
+        value = str(value)
+        if value == REDACTED:
+            continue
+        found = (run, str(name), len(value), _fingerprint(salt, value) if len(value) >= SECRET_MIN else None)
+        if found not in have:
+            have.add(found)
+            store["secrets"].append(dict(zip(("run", "name", "length", "hash"), found)))
+            news = True
+    return news
+
+
+def remember_secrets(study_dir: Path, run: str, secrets: dict | None):
+    """Keep the fingerprint of each secret of a run's test account, so that a scan can still
+    find the value once teardown has taken it off every record (module docstring, "Secrets").
+    Whatever writes an account's record calls this with the secrets the record holds, before it
+    writes. None, for a record that has no "secrets" yet, does nothing. The file is written only
+    when there is something it does not have, in one step, readable by this user alone, and
+    under a lock on its folder, so two writers never lose each other's."""
+    if secrets is None or not _note_secrets(read_fingerprints(study_dir), run, secrets):
+        return
+    path = Path(study_dir) / FINGERPRINTS
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    folder = os.open(path.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(folder, fcntl.LOCK_EX)
+        store = read_fingerprints(study_dir)  # as it is now: another writer may have been here since
+        _note_secrets(store, run, secrets)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            f.write(json.dumps(store, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        os.close(folder)  # which lets the lock go
+
+
+def known_secrets(cfg: dict, records: list[dict] = ()) -> dict:
+    """Everything a scan of this study knows a secret by: the fingerprint record, and with it
+    the secrets still written out, which are remembered first (remember_secrets()): those of
+    accounts.map, and those of records, the account records in force (accounts.py). A study
+    directory that cannot be written knows them for this scan all the same. Returns {"salt",
+    "by_length": {length: {fingerprint: [its entries of the record]}}, "short": the entries of
+    the secrets that are too short to look for, "runs": the runs the record has heard of}."""
+    sd = cfg["_dir"]
+    held = [(r["run"], r.get("secrets") or {}) for r in records]
+    held += [(run, account["secrets"]) for run, account in ((cfg.get("accounts") or {}).get("map") or {}).items()
+             if any(str(v) != REDACTED for v in (account.get("secrets") or {}).values())]
+    try:
+        for run, secrets in held:
+            remember_secrets(sd, run, secrets)
+    except OSError:
+        pass
+    store = read_fingerprints(sd)
+    for run, secrets in held:
+        _note_secrets(store, run, secrets)
+    known = {"salt": bytes.fromhex(store["salt"]), "by_length": {}, "short": [], "runs": set(store["runs"])}
+    for s in store["secrets"]:
+        if s.get("hash"):
+            known["by_length"].setdefault(s["length"], {}).setdefault(s["hash"], []).append(s)
+        else:
+            known["short"].append(s)
+    return known
+
+
+def secrets_in(known: dict, text: str) -> list[dict]:
+    """The secrets whose value stands in a text, each as its entry of the fingerprint record
+    ({"run", "name", ...}): never the value, which nothing here has. Every run of characters as
+    long as a known secret is fingerprinted and compared, so a value is found wherever it
+    stands, inside a longer word too. One shorter than SECRET_WORD is found only as a word of
+    its own."""
+    return list({(s["run"], s["name"]): s for _, s in _secret_places(known, text)}.values())
+
+
+def _secret_places(known: dict, text: str):
+    """Each place a secret's value stands in a text, as secrets_in() finds them: (where it
+    begins, the secret's entry of the fingerprint record)."""
+    salt, blake = known["salt"], hashlib.blake2b
+    for length, prints in known["by_length"].items():
+        whole = length < SECRET_WORD
+        for i in range(len(text) - length + 1):
+            if whole and (i and text[i - 1].isalnum() or text[i + length:i + length + 1].isalnum()):
+                continue
+            hit = prints.get(blake(text[i:i + length].encode("utf-8", "replace"), key=salt, digest_size=16).hexdigest())
+            for s in hit or ():
+                yield i, s
+
+
+def _strings(value):
+    """Every string in a parsed JSON value, keys too."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            yield k
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def scan_text(known: dict, text: str, form: str = "") -> list[tuple[int | None, list[dict]]]:
+    """Where a text holds a secret: (1-based line number, the secrets on that line as
+    secrets_in() gives them), in line order. form "jsonl" reads each line as JSON too, and form
+    "json" the whole text, and looks through every string as it decodes, because a value with a
+    quote, a backslash or a letter outside ASCII is written differently there. One found only
+    in a decoded string of a "json" text has no line: its number is None."""
+    if not known["by_length"]:
+        return []
+
+    def decoded(source: str) -> list[dict]:
+        try:
+            strings = [s for s in _strings(json.loads(source)) if s not in source]  # the others were looked through
+        except ValueError:
+            return []
+        return [hit for s in strings for hit in secrets_in(known, s)]
+
+    def distinct(hits: list[dict]) -> list[dict]:
+        return list({(s["run"], s["name"]): s for s in hits}.values())
+
+    out = []
+    for n, line in enumerate(text.splitlines(), start=1):
+        hits = secrets_in(known, line) + (decoded(line) if form == "jsonl" else [])
+        if hits:
+            out.append((n, distinct(hits)))
+    loose = decoded(text) if form == "json" else []
+    return out + ([(None, distinct(loose))] if loose else [])
+
+
+def scan_file(known: dict, path: Path) -> list[tuple[int | None, list[dict]]]:
+    """scan_text() for a file, read as text whatever it holds: a .jsonl or .json file in its form.
+    Raises OSError, with the reason (unread()), when the file could not be scanned, which is
+    never "nothing found": it may not be read, is a symbolic link or is reached through one, is
+    no regular file, or holds more than READ_MOST bytes. Whoever scans names such a file and
+    stops for it (check_runs.py, archive.py). path is under a study directory as load_study()
+    resolved it, so a path that is not its own real path has a link on the way."""
+    return scan_text(known, read_kept(path), Path(path).suffix.lower().lstrip("."))
+
+
+def read_kept(path: Path) -> str:
+    """The text of a file of a study that is scanned or copied, read as text whatever it holds.
+    Raises OSError, with the reason (unread()), when it is a symbolic link or is reached
+    through one, is no regular file, holds more than READ_MOST bytes, or may not be read."""
+    path = Path(path)
+    if Path(os.path.realpath(path)) != path.absolute():
+        raise Unsafe("it is a symbolic link, or is reached through one")
+    with os.fdopen(open_regular(path), "rb") as f:
+        return f.read().decode(errors="replace")
+
+
+def shown(known: dict | None, value, what: str, most: int = SHOWN_MOST) -> str:
+    """How a value taken from a file a panellist wrote stands in a message or in a file that is
+    kept: a task id the study does not have, a label, the name of a file in an evidence folder,
+    the name of a screenshot or the page of an address in a step log. The one way such a value
+    is quoted, in a usability study: the value itself only when it holds no secret that a scan
+    knows (known_secrets(), by the same search as a scan), is no longer than `most` characters
+    and is made of letters, digits, spaces and . _ - / : # ~ alone. Anything else is described
+    and not repeated, with what it is not, as in "(a value that is not a task id, 14
+    characters)". With known None nothing can be looked for, and every value is described."""
+    text = value if isinstance(value, str) else str(value)
+    if known is not None and len(text) <= most and SHOWN.fullmatch(text) and not secrets_in(known, text):
+        return text
+    return f"({what}, {plural(len(text), 'character')})"
+
+
+def shown_path(known: dict | None, path, most: int = PATH_MOST) -> str:
+    """shown() for the path of a file or a folder of a study, relative to the study directory:
+    how it stands in a message or in a file that is kept. A panellist can write under panel/,
+    so every part of such a path may be its own text, the folders above a file as much as the
+    file's name. The whole path is searched, so a secret is found in the name of a folder too,
+    and one that runs across a slash. The path is repeated in full when it holds no secret
+    that a scan knows, each of its parts is made of shown()'s characters, and it is no longer
+    than `most` characters: more than shown() allows a value, because a path is what its file
+    is found by. Otherwise it is repeated as far down as all of that holds, which is never
+    past where the first secret begins, and what is below is described and not repeated, with
+    how many names deep it goes: "panel/personas/(a path of 2 names that is not shown, 17
+    characters)". With known None nothing can be looked for, and the whole path is described."""
+    parts = Path(path).parts
+    text, keep, end = "/".join(parts), 0, -1
+    if known is not None:
+        most = min([most, *(at for at, _ in _secret_places(known, text))])  # nothing from the first secret on
+        for part in parts:
+            end += 1 + len(part)
+            if end > most or not SHOWN.fullmatch(part):
+                break
+            keep += 1
+    if keep == len(parts):
+        return text
+    rest = "/".join(parts[keep:])
+    what = "a name" if len(parts) - keep == 1 else f"a path of {len(parts) - keep} names"
+    return "/".join([*parts[:keep], f"({what} that is not shown, {plural(len(rest), 'character')})"])
+
+
+def secret_owners(found: list[dict]) -> str:
+    """Whose secrets a scan found, for a message, which never has a value: 'a secret of
+    P03-opus's account ("password")'. Beyond three accounts the rest are counted."""
+    names = {}
+    for s in found:
+        names.setdefault(s["run"], []).append(json.dumps(s["name"]))
+    said = [f"{run}'s account ({', '.join(sorted(of))})" for run, of in sorted(names.items())]
+    more = len(said) - 3
+    return "a secret of " + " and of ".join(said[:3]) + (f" and of {plural(more, 'more account')}" if more > 0 else "")
+
+
+def secret_places(hits: list[tuple[int | None, list[dict]]]) -> str:
+    """Where scan_text() found secrets in one file, for a message: "line 12 (a secret of ...)",
+    the first three places and a count of the rest."""
+    said = [f"{'a value that reads as JSON' if n is None else f'line {n}'} ({secret_owners(found)})"
+            for n, found in hits[:3]]
+    return "; ".join(said) + (f"; and {plural(len(hits) - 3, 'more line')}" if len(hits) > 3 else "")
+
+
+def secret_gaps(known: dict, records: list[dict]) -> list[str]:
+    """What a scan of this study could not look for, a line each, for the script that scanned to
+    print: the secrets of an account that was torn down before the fingerprint record had heard
+    of it (records: every account record of the study), and the secrets too short to look for."""
+    lines = []
+    unheard = [r["run"] for r in records if r.get("torn_down") and r.get("source") != "map"
+               and r["run"] not in known["runs"]]
+    if unheard:
+        lines.append(f"Not looked for: the secrets of the test {agree(len(unheard), 'account')} of "
+                     f"{', '.join(unheard)}, torn down before the fingerprint record ({FINGERPRINTS}) had heard of "
+                     f"{agree(len(unheard), 'it', 'them')}. Read the files of "
+                     f"{agree(len(unheard), 'that run', 'those runs')} yourself.")
+    short = sorted({s["run"] for s in known["short"]})
+    if short:
+        lines.append(f"Not looked for: {plural(len(known['short']), 'secret')} of the test "
+                     f"{agree(len(short), 'account')} of {', '.join(short)}, shorter than {SECRET_MIN} characters, "
+                     "which any text holds by chance.")
+    return lines
+
+
+def screenshot_step(cfg: dict, name: str) -> tuple[str, int, int] | None:
+    """The step a screenshot's file name says it shows, (task id, attempt, step): <task>-<step>.png
+    is of attempt 1 and <task>-a<attempt>-<step>.png of a later one. A letter after the step number
+    names a further view of the same step, taken after scrolling: <task>-<step>b.png. A panellist
+    that names one in words instead, <task>-<step>-scrolled.png, is read the same way. None for
+    any other name and for a task the study does not have. Case is ignored, as task ids are unique
+    without it."""
+    m = SCREENSHOT.fullmatch(name)
+    task = m and next((t["id"] for t in cfg["tasks"] if t["id"].lower() == m["task"].lower()), None)
+    return (task, int(m["attempt"] or 1), int(m["step"])) if task else None
+
+
+def _sensitive(value) -> bool:
+    """Whether a step-log entry's "sensitive" marks its step: anything but a plain no does."""
+    return bool(value) and str(value).strip().lower() not in ("false", "no", "0")
+
+
+def run_evidence(cfg: dict, study_dir: Path, run: str) -> dict:
+    """What a usability run's evidence folder holds, in a live study and in an archived round.
+    The folder is opened and listed without following a link (evidence_fd()), and a link in it
+    is never read:
+
+        entries, odd   its step log (read_steps())
+        log            whether the folder has a steps.jsonl that is a file
+        screenshots    {file name: the steps it shows, each (task id, attempt, step)}: every PNG
+                       file whose name says which step it is of (screenshot_step()) or that a
+                       result entry names, a relative path to it in the folder included
+        sensitive      {file name: (task id, attempt, step)}: the screenshots of a step with an
+                       entry marked "sensitive", by the first such step
+        left_out       the screenshot names an archive kept a note for in place of the file
+                       (LEFT_OUT)
+        missing        [(task id, attempt, step, name)] for each result entry that names a
+                       screenshot which is neither in the folder nor left out by an archive
+        other          the names of everything else in the folder, a folder's with a slash:
+                       nothing an archive copies. A link is among them, whatever it points at
+        refused        why nothing of the folder was read, None when it was, or there is none:
+                       the folder or the evidence root is a symbolic link or no folder, or may
+                       not be listed. Everything above is then empty
+        log_problem    why the step log could not be read as the run's, None when it was, or
+                       there is none: it is a link, a FIFO, or may not be read (step_log())
+
+    Screenshots and "sensitive" go by every entry of the log, counted or not (counted()): an
+    entry of no attempt can still name a file or mark a step, and leaving out more is the safe
+    side.
+    """
+    out = {"entries": [], "odd": [], "log": False, "screenshots": {}, "sensitive": {}, "left_out": [], "other": [],
+           "missing": [], "refused": None, "log_problem": None}
+    try:
+        held = evidence_names(study_dir, run)
+    except OSError as err:
+        return {**out, "refused": unread(err)}
+    files = {name for name, kind in held if kind == "file"}
+    try:
+        step_log(study_dir, run)
+    except OSError as err:
+        out["log_problem"] = unread(err)
+    entries, odd = read_steps(study_dir, run)
+    named, marked = {}, set()
+    for e in entries:
+        step = (e["task"], e["attempt"], step_number(e))
+        if _sensitive(e.get("sensitive")):
+            marked.add((step[0].lower(), *step[1:]))  # a task id is known whatever its case
+        shot = e.get("screenshot")
+        if e.get("phase") == "result" and isinstance(shot, str) and shot.strip():
+            path = Path(shot.strip())
+            inside = path.parent == Path(".") or path.parent.name == run and ".." not in path.parts
+            named.setdefault(path.name if inside else shot.strip(), []).append(step)
+    out.update(entries=entries, odd=odd, log=STEP_LOG in files,
+               left_out=sorted(name[:-len(LEFT_OUT)] for name in files if name.endswith(LEFT_OUT)))
+    for name, kind in held:
+        steps = [*named.get(name, []), *filter(None, [screenshot_step(cfg, name)])]
+        if name in files and steps and Path(name).suffix.lower() == ".png":
+            out["screenshots"][name] = list(dict.fromkeys(steps))
+            secret = [s for s in steps if (s[0].lower(), *s[1:]) in marked]
+            if secret:
+                out["sensitive"][name] = secret[0]
+        elif name not in files or not (name == STEP_LOG or name.endswith(LEFT_OUT)):
+            out["other"].append(name + ("/" if kind == "folder" else ""))
+    out["missing"] = [(*step, name) for name, steps in named.items() for step in steps
+                      if name not in files and name not in out["left_out"]]
     return out
 
 

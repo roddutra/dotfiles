@@ -14,8 +14,9 @@ Registry and helpers (this file):
     launch_effort(run, levels)      the effort a runner passes, refusing a level it does not have
     merge_usage(recorded, usage)    one session's usage after another result
     total_usage(sessions)           a run's usage, summed over its sessions
-    usage(), result(), model_facts(), json_lines(), last_line(), exited(), run_cli()
+    usage(), result(), model_facts(), json_lines(), last_line(), exited(), run_cli(), child_env()
                                     building blocks for runner modules
+    BROWSER_GAPS                    what browsing leaves open on every runner
 
 Every runner module exposes these seven functions.
 
@@ -24,8 +25,8 @@ capabilities() -> dict
                          runner-wide answer: model_status() can say otherwise for one model
     image_attach         bool: the harness can attach images at launch. It says what the
                          harness can do: no runner attaches one yet, and nothing reads it
-    browser              bool: a panellist can drive the agent-browser CLI and keep its session
-                         between commands
+    browser              bool: a panellist can send commands to an agent-browser session that
+                         the caller started for it (see "Browsing")
     budget_cap           bool: the harness enforces a spend cap
     budget_cap_note      str: how far a run can go past an enforced cap, in plain words, as a
                          clause that starts "the budget cap". "" when the cap is exact, or
@@ -48,7 +49,8 @@ capabilities() -> dict
 launch_command(run, prompt, workdir, limits) -> dict
 resume_command(run, session_id, message, workdir, limits) -> dict
     run      a runs.json entry (see panel_lib): "model" (None = the harness default), "effort"
-             (None = unset), "role" and "browse" (may this run use agent-browser; missing = no)
+             (None = unset), "role", "browse" (may this run use agent-browser; missing = no) and,
+             with "browse", "browser_env" (see "Browsing")
     prompt, message   delivered verbatim. A runner adds nothing
     workdir  the directory the process starts in, and the only place it may write: panel/ for
              a panellist, the study directory for an analyst or the writer. The caller starts
@@ -111,6 +113,17 @@ model_status(entry) -> dict
     message    str: the finding in the harness's own terms, for the plan to print. "" when
                there is nothing to say
 
+Browsing. "browse" is the switch, and it is true only on a runner whose "browser" is true. The
+caller owns the browser: it starts an agent-browser session before the process and stops it
+after (browser_session.py), and the run only sends it commands. run["browser_env"] is what the
+process must then find in its environment: {variable: value}, with None for a variable to
+remove. It selects the session and its action policy, which refuses whatever a visitor could not
+do. A runner applies it with child_env() and adds only what its harness needs to let one
+`agent-browser <command>` through from the run's shell, and to reach a socket outside any
+sandbox. It passes no session name on a command line: a harness that lets a run set those
+variables itself would let it leave its session. "browser_env" can be missing with "browse" true
+(check() builds such a command): the command is then built the same, with the environment as it is.
+
 Usage. {"input_tokens", "output_tokens", "cached_tokens", "cost_usd", "duration_s", "scope"},
 None for anything not reported. input_tokens counts all input including the cached part,
 cached_tokens is the part read from a cache, and output_tokens includes thinking. "scope" says
@@ -132,8 +145,21 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import pkgutil
 import subprocess
+
+# What stays open on every runner for a run that may browse: each runner's "browse_gaps" holds them.
+BROWSER_GAPS = [
+    "With browsing on, nothing limits where the browser goes or where it saves a screenshot: it can open "
+    "any address on the network and any file:// path the user can read, and write an image wherever the "
+    "user can.",
+    "With browsing on, the element list a panellist acts from is what a screen reader gets: it holds "
+    "text a visitor cannot see and elements that are off screen. Only the instructions tell a panellist "
+    "to judge from the screenshot.",
+    "With browsing on, the browser has a debugging port on this machine. The session's policy refuses "
+    "reading cookies and page source, but a run that reached that port could read them.",
+]
 
 INTERFACE = ("capabilities", "launch_command", "resume_command", "parse_result", "check", "purge_command",
              "model_status")
@@ -261,6 +287,22 @@ def last_line(text) -> str:
 def exited(exit_code) -> str:
     """How a process ended, for a message: its exit code, which nothing recorded when it is None."""
     return "exit code unknown" if exit_code is None else f"exit code {exit_code}"
+
+
+def child_env(run: dict, env: dict | None = None) -> dict | None:
+    """The environment of a run's process: env (None: the caller's own, unchanged) with
+    run["browser_env"] applied, each variable set, or removed where its value is None. None when
+    there is nothing to change in the caller's own."""
+    changes = run.get("browser_env") if run.get("browse") else None
+    if not changes:
+        return env
+    out = dict(os.environ if env is None else env)
+    for name, value in changes.items():
+        if value is None:
+            out.pop(name, None)
+        else:
+            out[name] = value
+    return out
 
 
 def run_cli(argv: list[str], env: dict | None = None, timeout: int = 30):
