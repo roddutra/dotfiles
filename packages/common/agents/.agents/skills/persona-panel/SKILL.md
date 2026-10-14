@@ -1,6 +1,7 @@
 ---
 name: persona-panel
 description: "Run simulated customer research with AI agents playing personas (buyers, users, gatekeepers, sceptics) on several models. Review: personas score design concepts such as landing pages, pricing pages or onboarding flows (site folders, live URLs, PDFs, screenshots), giving a leaderboard, quotes, ICP signal and recommendations. Usability: personas attempt tasks in a running local build through a browser, giving task completion and stuck points. Interview: an interviewer agent runs Mom Test style discovery interviews with each persona, giving transcripts, problem themes and a critique of the questions. Load whenever the user wants personas, a persona panel, simulated or synthetic users, customers or user research, AI agents to review, score or give feedback on concepts 'like real customers would', which concept prospects prefer or who the ideal customer is, usability or task testing with AI personas, simulated user or customer interviews, or to rerun or extend an earlier round, even without the word 'panel'."
+disable-model-invocation: true
 ---
 
 # Persona panel
@@ -29,11 +30,18 @@ Scripts are in `scripts/` (Python 3 standard library; capture and every run that
 <study>/.launch.lock    the study's lock file: locked while a launcher has the study (one launcher per study), empty between launchers, never deleted
 ```
 
-One study directory per round (`round-1/`, `round-2/`). Keep the study outside the concepts folder, and never inside the product's source tree where panellists could wander into docs.
+`<study>` stands for the study directory's path, which you choose and pass to every script. One study directory per round (`round-1/`, `round-2/`).
+
+**Where the study lives.** By default under `~/panel-studies/<yyyy-mm-dd>-<neutral slug>/round-<n>/`, outside every repository. Confirm the place with the user when framing the study.
+- Never inside a repository, gitignored folder included: a study holds harness sessions, the full input and output of every process in `logs/` and, in a usability study, test accounts with their secrets. Panellists could also wander into the product's docs.
+- Keep it outside the concepts folder too.
+- The slug names nothing about the product or the hypothesis, such as `study-a`: the full path is in every panellist's context.
+- A study is working data, never committed. When the user wants it kept, `archive.py` copies a round into the research repo without its secrets and bulk, and the findings go into the product repo (`references/archive.md`).
+- If your harness's sandbox can write only inside the project, hand the launcher's commands to the user to run outside it (`references/runners.md`, When the lead's own sandbox blocks the launcher). Never move the study into the project to suit the sandbox.
 
 ## Workflow
 
-1. **Frame the study with the user.** What is being decided, who the target audience is, which concepts, what's fictitious or a placeholder (demo company, prices), and what must stay local or uncommitted. Record what is agreed in `<study>/study-brief.md`, copied from `assets/study-brief.md`. It holds the team's hypotheses, so it stays beside `study.json`: `init_study.py` refuses to scaffold while a copy is under `panel/` or in a concept folder. Agree the scale: images dominate cost, about 20k tokens per concept page per run, and step 6 puts figures on it. Run a small panel early, after the first round of concepts, rather than after several rounds of iterating on judgement.
+1. **Frame the study with the user.** What is being decided, who the target audience is, which concepts, what's fictitious or a placeholder (demo company, prices), what must stay local or uncommitted, and where the study directory goes (Study layout, above). Record what is agreed in `<study>/study-brief.md`, copied from `assets/study-brief.md`. It holds the team's hypotheses, so it stays beside `study.json`: `init_study.py` refuses to scaffold while a copy is under `panel/` or in a concept folder. Agree the scale: images dominate cost, about 20k tokens per concept page per run, and step 6 puts figures on it. Run a small panel early, after the first round of concepts, rather than after several rounds of iterating on judgement.
 2. **Design the roster.** Read `references/personas.md`. Cover role x experience x personality, add 2 to 4 adjacent or out-of-scope personas on a wide round, and keep only the closest-to-target personas on a follow-up. Fix the full persona x model matrix now; adding models later means re-queuing.
    - **From a grid:** put a `roster` block (roles, personalities, stages, caps) in `study.json` and run `roster.py <study> grid`. It writes skeleton personas named `TODO`. Write each one's name and bio: `init_study.py` refuses a study with a skeleton left.
    - **From a roster file:** `roster.py <study> export --to <file>` and `roster.py <study> import --from <file>` move written personas to and from a JSON file kept in the project's own repository, so later studies reuse the same people under the same ids and results compare.
