@@ -5,7 +5,7 @@ verified and committed on the branch `persona-panel-interviews`: discovery
 on 13 October 2026, recorded under [Discovery](#discovery), and the
 interview study (milestone 2) and its analysis (milestone 3) on 14 October
 2026. Milestone 4, debrief interviews, was built and verified on real
-harnesses the same day and committed as `a103bda`. The last acceptance
+harnesses the same day and committed as `5552c2b`. The last acceptance
 criterion, a lead on a harness other than Claude Code running an interview
 study by following `SKILL.md`, was verified the same day with a Codex
 session as the lead. See
@@ -40,7 +40,7 @@ That PRD lists moderated interviews as a non-goal. This one reverses that.
 
 As at 14 October 2026. Milestones 1 to 3 are built, verified and committed
 on the branch `persona-panel-interviews`. Milestone 4, debrief interviews,
-is built and verified on real harnesses, and committed as `a103bda`. The
+is built and verified on real harnesses, and committed as `5552c2b`. The
 skill's documents were written the same day, their debrief parts were
 written again from the code once milestone 4 was in, and they were
 corrected after a Codex lead ran a study from them
@@ -77,7 +77,7 @@ Milestone 1, discovery:
 | Item | Detail |
 | --- | --- |
 | Done | The ten items and the [tier probe](#tiers), on a throwaway prototype of the turn loop, with the decisions they forced |
-| Commit | `81c774b`, which records the results in this document |
+| Commit | `9b9c289`, which records the results in this document |
 | Record | [Discovery](#discovery) and [Deviations decided during discovery](#deviations-decided-during-discovery) |
 
 Milestone 2, the interview study:
@@ -85,7 +85,7 @@ Milestone 2, the interview study:
 | Item | Detail |
 | --- | --- |
 | Built | `"type": "interview"` with its keys, its limits and the turn log (`panel_lib.py`), the scaffold (`init_study.py`), `scripts/interview.py` (the reply grammar, the next step of a conversation, the messages, the transcripts, the checks), the turn loop with its states, limits, resume and session rules (`launch.py`), the plan (`launch_plan.py`), `check_runs.py`, the `interview`, `no_tools` and `no_tools_note` capabilities with the no-tools option of both runners, three more isolation switches on the `codex` runner for every study type, the refusal in `followup.py`, and the assets: `interviewer-brief.md`, `interview-reference/`, `participant-brief.md` with its prompt and requests, the three frames, `interview-notices.md` and `study.interview.example.json` |
-| Commit | `a989a9e` |
+| Commit | `487daaf` |
 | Tests | `InterviewRulesTest.test_interviewer_reply_is_read_by_one_grammar_and_every_failure_is_named` and, in `LauncherTest`, `test_interview_is_carried_turn_by_turn_and_only_the_words_under_say_reach_the_participant`, `test_launcher_killed_at_any_point_of_a_turn_loses_no_turn_and_records_none_twice`, `test_interview_ends_short_of_its_cap_without_a_close_and_an_early_end_is_asked_about_once`, `test_interview_turn_at_the_turn_limit_waits_for_resume_and_a_side_out_of_its_allowance_for_extend`, `test_usage_limit_on_either_side_blocks_an_interview_and_on_the_interviewers_runner_stops_every_one`, `test_interview_with_a_session_that_is_gone_starts_afresh_only_while_it_has_no_answer_on_record`, `test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none` and `test_checks_block_an_interview_with_no_end_record_and_note_a_topic_that_was_never_opened`. 116 tests passed when the milestone was committed |
 | Real run | Passed on Claude Code and Codex, in two passes on 14 October 2026. One study of two personas on two model entries (four interviews), three topics capped at 4, a cap of 12 exchanges, the card on, and markers planted in the goals, the topic ids, the bios and the cards. First pass: a pilot of two interviews, one `run` for the other two, then `init_study.py --force` and a second round in which the launcher was killed twice with every interview's turn in flight, stopped once and resumed three times. All four interviews were done at 12 exchanges both times, with no blocking problem in `check_runs.py`, and 64 of 64 checks of the logs and of every process's input passed each time. One more interview was led by an `opus` interviewer. Second pass, on the tree with the fixes below: one `run` of all four, a `stop`, a `resume`, the launcher killed with all four turns in flight, and a `resume`: four done, 64 of 64 checks, 48 questions with none sent back |
 | Found by the real run, and fixed | A mid-tier interviewer opened the next topic under the old topic's label in 4 of 8 interviews ([build deviation 1](#deviations-decided-during-the-build)). Every interviewer copied `T1` from the brief's examples where the guide's ids were others, and spent its first repair, in 8 of 8 (build deviation 3). `check_runs.py` said to wait for an interview that a killed launcher had left (build deviation 18). The usage record was stale after an interview ended at its cap |
@@ -96,7 +96,7 @@ Milestone 3, the analysis:
 | Item | Detail |
 | --- | --- |
 | Built | The job roles `critic` and `themes` and the order of the six steps (`launch.py`), the four briefs and what each job is given and kept from (`interview.py`), `scripts/extract_notes.py`, `scripts/interview_report.py` with its branch in `analyze.py`, `interview.py <study> quotes` and the same check at the writer's end, the rules that say when a done job is out of date, the archive of an interview study (`archive.py`), and the assets `interview-qual-brief.md`, `interview-critique-brief.md`, `interview-themes-brief.md`, `interview-synthesis-brief.md` and `interview-study-brief.md` |
-| Commit | `6bf10a3` |
+| Commit | `53d841d` |
 | Tests | `test_jobs_of_an_interview_study_share_the_pool_wait_for_what_they_read_and_are_given_only_their_own`, `test_notes_and_critique_become_rows_and_what_cannot_be_read_or_verified_is_listed_and_never_guessed`, `test_tallies_count_participants_who_raised_a_theme_apart_from_those_it_is_no_problem_for`, `test_archive_of_an_interview_study_keeps_the_turn_logs_and_both_transcripts` and `test_quotations_of_the_synthesis_are_checked_against_the_exchange_each_names`. 121 tests passed when the milestone was committed |
 | Real run | Passed on Claude Code and Codex, in two passes on 14 October 2026, on the four finished interviews of milestone 2. Each pass ran the whole chain: two analysts, two critics, `extract_notes.py`, the themes job, `analyze.py`, the writer and the quote check. Real models wrote 42 notes and 41 critique entries in the first pass and 36 and 29 in the second: none was unparsed and no quote was unverified. The tallies were recounted by hand from the analysts' files, `themes.md` and the turn logs, three interviews in the first pass and all four in the second, with no difference from `quant.json`. The first synthesis failed the quote check on one term in double quotation marks and passed after that one edit. The second passed as written, with 17 quotations. An archive of the study was extracted, analysed and checked again with the same commands. A second study, with its interviewer's prompt edited to ask "Would you pay for an app that does this?" at exchange 2, gave the method criteria below. 49 probes of the quote check behaved as designed, the 49th by design: a question's words credited to the participant pass |
 | Found by the real run, and fixed | Quotations in single quotation marks passed unchecked (build deviation 7). "Said it did not matter" overclaimed, and one sentence of `quant.md` was untrue for a participant with notes of both kinds (build deviation 4). A critic had nothing to do on part of a panel (build deviation 9). A job run again left every later step done and wrong (build deviation 8). Flags were compared across critics. The first writer ran to 4,365 words (build deviation 15) |
@@ -107,7 +107,7 @@ Milestone 4, debrief interviews:
 | Item | Detail |
 | --- | --- |
 | Built | `interview.py <study> debrief --runs <ids>\|all` with `--dry-run` and `--skip-unfit`, the `debrief` block and `limits.debrief` (`panel_lib.py`), a debrief as a conversation of the turn loop with a finished run for its participant, the copy and put-back of that run's persona file and of a usability run's evidence folder, and what `stop`, `status`, `run` and `resume` do with one (`launch.py`), the plan's section "Debriefs" and the role `debrief` of the usage record (`launch_plan.py`), what the analysts' and the writer's briefs say of the transcripts, the archive of a debriefed study (`archive.py`), what `init_study.py --force` sets aside, and the assets `interviewer-brief-debrief.md`, `debrief-opening.md`, `debrief-question.md` and the four `*-debriefs.md` notes, with a `<DEBRIEFS>` line in the four briefs of a review and a usability study |
-| Commit | `a103bda` |
+| Commit | `5552c2b` |
 | Tests | `LauncherTest.test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were`, with rows in `test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none` (a review study with a Pi entry and a `debrief` block) and in `test_invalid_model_entries_and_options_are_refused` (`debrief` in an interview study, a key a debrief guide does not have, a topic id that is a task's). 122 tests passed when the milestone was verified |
 | Real run | Passed on Claude Code and Codex on 14 October 2026: 14 debriefs with finished runs, in three usability studies against a small local site and three review studies, 74 questions and 148 turns. What it checked is under [Acceptance criteria, verified or not](#acceptance-criteria-verified-or-not) |
 | Measured | A turn took a median of 3.9 seconds and 7.6 at the 95th percentile. A side of a six-exchange debrief used 20 to 45 seconds of process time. On Claude Code a `sonnet` participant cost 0.03 USD for the debrief of a review run and 0.19 to 0.24 USD for that of a usability run, 0.17 to 0.19 of it for its first turn, which wrote 45,000 to 47,000 tokens to the prompt cache again: a debrief turn has no browser, so its tools are not the run's and the cache is missed. A `sonnet` interviewer cost 0.02 to 0.06 USD and an `opus` one 0.14 to 0.15. A Codex participant used 101,000 to 208,000 input tokens. In one pass two Claude Code turns hung after their start and were stopped at the turn limit, and the same command finished both debriefs |
@@ -3336,10 +3336,10 @@ Each milestone is usable without the ones after it.
    the no-tools option of both runners and the two switches added to
    Codex's isolation flags
    ([deviations 8 and 11](#deviations-decided-during-discovery)).* *Done on
-   14 October 2026, commit `a989a9e`.*
+   14 October 2026, commit `487daaf`.*
 3. **Analysis.** Coding, `extract_notes.py`, the themes job, the tallies, the
    critique and the writer's brief. The archive. *Done on 14 October 2026,
-   commit `6bf10a3`, with the quote check.*
+   commit `53d841d`, with the quote check.*
 4. **Debrief interviews** on finished review and usability runs. *Built
    and verified on 14 October 2026, with the default of `limits.debrief`
    set from what was measured.*
