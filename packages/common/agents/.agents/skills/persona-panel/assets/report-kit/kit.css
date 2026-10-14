@@ -131,7 +131,7 @@ body { background: var(--pp-bg); color: var(--pp-ink); font-family: var(--pp-fon
 .pp-section > h2 { font-size: 1.4rem; line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; margin: 0; text-wrap: balance; padding-top: 16px; border-top: 2px solid var(--pp-ink); }
 .pp-section h3 { font-size: 1.02rem; font-weight: 600; margin: 0; }
 .pp-lede { margin: -8px 0 0; color: var(--pp-ink-2); max-width: 68ch; }
-.pp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.pp-grid { display: grid; gap: 16px; align-content: start; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .pp-grid > * { min-width: 0; }
 .pp-grid.two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 24px 32px; }
 
@@ -187,12 +187,12 @@ body { background: var(--pp-bg); color: var(--pp-ink); font-family: var(--pp-fon
 .pp-quote.plain { border-left-color: var(--pp-line-2); } /* words that are neither for nor against: a usability run's log */
 
 /* ---------- Personas ---------- */
-.pp-persona { display: grid; grid-template-columns: 40px 1fr; gap: 4px 12px; background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 14px 16px; }
+.pp-persona { display: grid; grid-template-columns: 40px 1fr; gap: 4px 12px; align-content: start; background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 14px 16px; }
 .pp-avatar { grid-row: span 3; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--pp-line-2); display: grid; place-items: center; font-family: var(--pp-font-code); font-size: 0.72rem; color: var(--pp-ink);
   background: repeating-linear-gradient(135deg, var(--pp-line) 0 1.5px, transparent 1.5px 5px); font-weight: 500; } /* hatched: an invented person */
 .pp-persona strong { font-weight: 600; }
 .pp-persona p { margin: 0; grid-column: 2; font-size: 0.88rem; color: var(--pp-ink-2); }
-.pp-persona .pp-chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.pp-persona .pp-chips { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
 
 /* ---------- Tables ---------- */
 .pp-scroll { overflow-x: auto; border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); background: var(--pp-surface); position: relative; } /* positioned, so screen-reader text inside stays in the box */
@@ -307,7 +307,7 @@ body { background: var(--pp-bg); color: var(--pp-ink); font-family: var(--pp-fon
 .pp-guide li::before { content: counter(g); font-family: var(--pp-font-code); font-size: 0.85rem; color: var(--pp-ink-3); padding-top: 4px; }
 .pp-guide .ask { font-family: var(--pp-font-voice); font-size: 1.08rem; }
 .pp-guide .how { grid-column: 2; font-size: 0.9rem; color: var(--pp-ink-2); max-width: 68ch; }
-.pp-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 72ch; }
+.pp-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; align-content: start; max-width: 72ch; }
 .pp-list li { padding-left: 22px; position: relative; }
 .pp-list li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 10px; height: 1.5px; background: var(--pp-ink-3); }
 .pp-list b { font-weight: 600; }
