@@ -22,7 +22,7 @@ It needs:
 
 ## `study.json`
 
-Personas, `models`, `runner`, `runners`, `limits`, `synthesis`, `replicates`, `segments`, `leak_terms` and `model_notes` work as in a review study (`references/runners.md`). These are the keys a usability study adds or reads differently:
+Personas, `models`, `runner`, `runners`, `limits`, `synthesis`, `replicates`, `segments`, `leak_terms` and `model_notes` work as in a review study (`references/runners.md`), and so does the optional `debrief` block, whose topic ids may not be task ids (`references/debriefs.md`). These are the keys a usability study adds or reads differently:
 
 | Key | Meaning |
 |---|---|
@@ -44,10 +44,11 @@ Personas, `models`, `runner`, `runners`, `limits`, `synthesis`, `replicates`, `s
 | `factors` | Default: Task success, Ease, Confidence, Clarity of next step, Trust, Overall (keys `success`, `ease`, `confidence`, `clarity`, `trust`, `overall`), scored 1 to 10 for each task |
 | `context_notes` | Bullets in the instructions: what is made up, what is stubbed |
 
-A study is one type or the other, and a key that would be quietly ignored is refused:
+A study is one type, and a key of another type, which would be quietly ignored, is refused:
 
 - A usability study refuses `concepts`, `labels`, `label_style`, `shuffle_labels`, `find_the_answer`, `artefact`, `artefact_plural`, `arrival`, `copy_ignore`, `extra_yes_bullets`, `"materials": "text"` and `"browse": false`.
 - A review study refuses `target`, `tasks`, `accounts` and `sequential`.
+- Both refuse `interview`, the guide of an interview study, which in turn refuses the keys of both (`references/interviews.md`).
 
 **Commands** (`success_check`, `accounts.provision`, `accounts.teardown`, `accounts.reset`) are all run the same way:
 
@@ -242,7 +243,8 @@ A panellist acts through refs from the element list (`agent-browser snapshot -i`
 | `check_runs.py <study>` | Also scans for secrets and checks the evidence (Safety, below) |
 | `extract_scores.py`, `analyze.py` | Also write `analysis/tasks.csv` and `steps.csv`, and a report of its own shape |
 | `followup.py <study> ask` | The run gets no browser: its account is gone, so it answers from its persona file, step log and screenshots |
-| `launch.py <study> run --role analyst`, `--role writer` | From `assets/usability-qual-brief.md` and `assets/usability-synthesis-brief.md` |
+| `interview.py <study> debrief --runs <ids>\|all` | Optional, after the runs and before the analysts: an interviewer questions finished runs about the session each had, to learn what a panellist expected where it got stuck. The run gets no browser and no account and answers from what its session holds. Its persona file, step log and screenshots are put back if a turn changes them (`references/debriefs.md`) |
+| `launch.py <study> run --role analyst`, `--role writer` | From `assets/usability-qual-brief.md` and `assets/usability-synthesis-brief.md`. Both name the transcripts of the debriefs held by then |
 
 **Read in the plan:**
 

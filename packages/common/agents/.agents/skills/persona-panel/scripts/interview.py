@@ -132,7 +132,9 @@ synthetic panel notice. A launcher writes them when an interview ends, and the r
 writes them again for every interview with a turn on record, finished or not.
 
 The checks (problems(), advice()). check_runs.py asks problems() of every interview and writes
-what it returns in its table. Blocking, each of which keeps an interview out of the analysis:
+what it returns in its table. Blocking, each of which makes check_runs.py exit with 1 (the
+tallies leave out only an interview with no "end" record, so a finished one is repaired or
+discarded before the analysis):
 
     no "end" record                  the interview is not finished, or was never held. The row
                                      says what it reads as and how far it got
@@ -261,8 +263,10 @@ goal that holds a leak term is noted and not refused: a goal is never read out. 
 area that holds one is refused before a debrief is held (panel_lib.debrief_problems()), since
 the interviewer says both.
 
-The command. "debrief --runs <ids>|all" is built like "followup.py ask". Every refusal comes
-before anything is recorded: an interview study; no "debrief" in study.json; a study in native
+The command. "debrief --runs <ids>|all" is built like "followup.py ask". A refusal begins no
+debrief and records nothing of its own (the command first settles what a launcher that is gone
+left, which can change the records before it refuses): an interview study; no "debrief" in
+study.json; a study in native
 mode; then for each run named what refuses a follow-up (followup.cannot_ask(): not a panellist
 run, not done, a process still running, a session purged, lost, not saved or never recorded, a
 runner that cannot resume), a persona with no topic, a follow-up that is not settled, and a
@@ -2375,8 +2379,9 @@ def set_up(cfg: dict, runs: list[dict], e: dict):
 def debrief(args, cfg: dict) -> int:
     """The debrief command: interview finished runs of a review or usability study, each in the
     session it worked in, through launch.py's supervisor, as followup.py puts a question to
-    them. Every refusal comes before anything is recorded. Returns the exit code: 0 when every
-    debrief it held is done."""
+    them. A refusal begins no debrief and records nothing of its own: the command first settles
+    what a launcher that is gone left, which can change the records. Returns the exit code: 0
+    when every debrief it held is done."""
     import launch
     sd = cfg["_dir"]
     whole = no_debrief(cfg)

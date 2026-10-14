@@ -42,7 +42,7 @@ Every word that would tell a participant what the team hopes to hear, for `leak_
 - the team's own words for its idea, and the names of its features
 - any phrase from "Hypotheses" that a participant would not use unprompted
 
-The launcher holds back a question that contains one, and `init_study.py` refuses a goal, an opener, an `area` or `interview.about` that does. `interview.about` names an area of work, never the idea.
+The launcher holds back a question that contains one, and `init_study.py` refuses a goal, an opener, an `area` or `interview.about` that does. `interview.about` names an area of work, never the idea. The interviewer states it to the participant as the purpose when it opens every interview, so it must name the subject area without the user's product or the team's hypothesis.
 
 ## What this round cannot prove
 

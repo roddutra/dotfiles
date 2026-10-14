@@ -12,7 +12,7 @@ This maintainer file is excluded through `.stow-local-ignore`.
 
 ## Persona panel
 
-The `persona-panel` skill (`.agents/skills/persona-panel/`) was extended on the branch `persona-panel-expansion`, merged to `main` in pull request 3. What is built, what is not built and what is not tested is under "Implementation status" in `docs/specs/persona-panel-expansion.md`. Its tests are in `tests/test_persona_panel.py`.
+The `persona-panel` skill (`.agents/skills/persona-panel/`) was extended on the branch `persona-panel-expansion`, merged to `main` in pull request 3. What is built, what is not built and what is not tested is under "Implementation status" in `docs/specs/persona-panel-expansion.md`. Interview studies, a third study type, and debrief interviews with finished review and usability runs are built on the branch `persona-panel-interviews`: what is verified, what is tested on fake CLIs only and what is left is under "Implementation status" in `docs/specs/persona-panel-interviews.md`. Its tests are in `tests/test_persona_panel.py`.
 
 ## 1Password approval alerts
 

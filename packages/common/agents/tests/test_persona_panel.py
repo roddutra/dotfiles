@@ -5986,7 +5986,7 @@ if what == "provision":
         none = self.debrief("--runs", "all")
         self.assertEqual((none.returncode, len(self.starts())), (0, processes), none.stdout)
 
-        # A finished run on a runner that is not verified for interviews is refused before anything is recorded.
+        # A finished run on a runner that is not verified for interviews is refused, and the refusal records nothing.
         self.study({"P01-opus": [["write:all"], ["say:Fine."]]}, personas=1, models=[self.CLAUDE, self.PI],
                    materials="text", debrief=self.DEBRIEF)
         self.assertEqual(self.launch("run").returncode, 0)

@@ -1,15 +1,23 @@
 # Persona panel: interview studies
 
-**Status:** Ready, 13 October 2026. Discovery (milestone 1) was done that
-day and is recorded under [Discovery](#discovery). Milestones 2 to 4 are not
-built or tested. What will be built differs from the text below in places:
-each is in
-[Deviations decided during discovery](#deviations-decided-during-discovery),
-which wins where the two disagree, and the body points to it at each such
-place. The user settled the open questions on 13 October 2026, and two more
-after discovery: [The user's decisions](#the-users-decisions). Codex reviewed
-the PRD over three rounds that day, before discovery, and approved it with
-the first twelve decisions in.
+**Status:** Implemented, not yet merged, as at 14 October 2026. All four milestones are built,
+verified and committed on the branch `persona-panel-interviews`: discovery
+on 13 October 2026, recorded under [Discovery](#discovery), and the
+interview study (milestone 2) and its analysis (milestone 3) on 14 October
+2026. Milestone 4, debrief interviews, was built and verified on real
+harnesses the same day and committed as `a103bda`. The last acceptance
+criterion, a lead on a harness other than Claude Code running an interview
+study by following `SKILL.md`, was verified the same day with a Codex
+session as the lead. See
+[Implementation status](#implementation-status). What was
+built differs from the text below in places: each is in
+[Deviations decided during discovery](#deviations-decided-during-discovery)
+or [Deviations decided during the build](#deviations-decided-during-the-build),
+which win where they and the body disagree, and the body points to them at
+each such place. The user settled the open questions on 13 October 2026, and
+two more after discovery: [The user's decisions](#the-users-decisions). Codex
+reviewed the PRD over three rounds that day, before discovery, and approved
+it with the first twelve decisions in.
 
 PRD for a third study type in the `persona-panel` skill
 (`packages/common/agents/.agents/skills/persona-panel/`): simulated discovery
@@ -27,6 +35,335 @@ interviews, run the way [The Mom Test](https://www.momtestbook.com/) teaches.
 It follows [persona-panel-expansion.md](persona-panel-expansion.md), which
 built the runners, the launcher, follow-up questions and usability studies.
 That PRD lists moderated interviews as a non-goal. This one reverses that.
+
+## Implementation status
+
+As at 14 October 2026. Milestones 1 to 3 are built, verified and committed
+on the branch `persona-panel-interviews`. Milestone 4, debrief interviews,
+is built and verified on real harnesses, and committed as `a103bda`. The
+skill's documents were written the same day, their debrief parts were
+written again from the code once milestone 4 was in, and they were
+corrected after a Codex lead ran a study from them
+([below](#what-the-codex-leads-run-changed-in-the-documents)).
+
+Terms used here:
+
+- **Milestone** is this PRD's [order of work](#order-of-work).
+- **Real run** means interviews held end to end with real harness CLIs and
+  real models: Claude Code 2.1.296 on a Claude Max subscription login and
+  codex-cli 0.162.1 on a ChatGPT plan login, on Linux. Participants ran on
+  Claude Code `sonnet` and on Codex's default model, the interviewer on
+  `sonnet` (and on `opus` in one interview), the analysts, the themes job
+  and the writer on `sonnet`, and the critics on Codex's default model.
+  The debriefs of milestone 4 were held with finished runs on Claude Code
+  `sonnet` and on Codex's default model, with the interviewer on `sonnet`
+  and, in two debriefs, on `opus`.
+  These are what was run, not a floor: the rule is by tier
+  ([deviation 10](#deviations-decided-during-discovery)).
+- **Tests** are the contract tests in
+  `packages/common/agents/tests/test_persona_panel.py`, which run against
+  fake CLIs and call no model. Run them with
+  `python3 -m unittest discover -s packages/common/agents/tests -p 'test_persona_panel.py'`.
+- **The lead** is the agent leading the implementation, as under
+  [Discovery](#discovery).
+
+The evidence of the real runs was kept outside the repository and will not
+survive, so this section carries the conclusions.
+
+### What is built, milestone by milestone
+
+Milestone 1, discovery:
+
+| Item | Detail |
+| --- | --- |
+| Done | The ten items and the [tier probe](#tiers), on a throwaway prototype of the turn loop, with the decisions they forced |
+| Commit | `81c774b`, which records the results in this document |
+| Record | [Discovery](#discovery) and [Deviations decided during discovery](#deviations-decided-during-discovery) |
+
+Milestone 2, the interview study:
+
+| Item | Detail |
+| --- | --- |
+| Built | `"type": "interview"` with its keys, its limits and the turn log (`panel_lib.py`), the scaffold (`init_study.py`), `scripts/interview.py` (the reply grammar, the next step of a conversation, the messages, the transcripts, the checks), the turn loop with its states, limits, resume and session rules (`launch.py`), the plan (`launch_plan.py`), `check_runs.py`, the `interview`, `no_tools` and `no_tools_note` capabilities with the no-tools option of both runners, three more isolation switches on the `codex` runner for every study type, the refusal in `followup.py`, and the assets: `interviewer-brief.md`, `interview-reference/`, `participant-brief.md` with its prompt and requests, the three frames, `interview-notices.md` and `study.interview.example.json` |
+| Commit | `a989a9e` |
+| Tests | `InterviewRulesTest.test_interviewer_reply_is_read_by_one_grammar_and_every_failure_is_named` and, in `LauncherTest`, `test_interview_is_carried_turn_by_turn_and_only_the_words_under_say_reach_the_participant`, `test_launcher_killed_at_any_point_of_a_turn_loses_no_turn_and_records_none_twice`, `test_interview_ends_short_of_its_cap_without_a_close_and_an_early_end_is_asked_about_once`, `test_interview_turn_at_the_turn_limit_waits_for_resume_and_a_side_out_of_its_allowance_for_extend`, `test_usage_limit_on_either_side_blocks_an_interview_and_on_the_interviewers_runner_stops_every_one`, `test_interview_with_a_session_that_is_gone_starts_afresh_only_while_it_has_no_answer_on_record`, `test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none` and `test_checks_block_an_interview_with_no_end_record_and_note_a_topic_that_was_never_opened`. 116 tests passed when the milestone was committed |
+| Real run | Passed on Claude Code and Codex, in two passes on 14 October 2026. One study of two personas on two model entries (four interviews), three topics capped at 4, a cap of 12 exchanges, the card on, and markers planted in the goals, the topic ids, the bios and the cards. First pass: a pilot of two interviews, one `run` for the other two, then `init_study.py --force` and a second round in which the launcher was killed twice with every interview's turn in flight, stopped once and resumed three times. All four interviews were done at 12 exchanges both times, with no blocking problem in `check_runs.py`, and 64 of 64 checks of the logs and of every process's input passed each time. One more interview was led by an `opus` interviewer. Second pass, on the tree with the fixes below: one `run` of all four, a `stop`, a `resume`, the launcher killed with all four turns in flight, and a `resume`: four done, 64 of 64 checks, 48 questions with none sent back |
+| Found by the real run, and fixed | A mid-tier interviewer opened the next topic under the old topic's label in 4 of 8 interviews ([build deviation 1](#deviations-decided-during-the-build)). Every interviewer copied `T1` from the brief's examples where the guide's ids were others, and spent its first repair, in 8 of 8 (build deviation 3). `check_runs.py` said to wait for an interview that a killed launcher had left (build deviation 18). The usage record was stale after an interview ended at its cap |
+| Codex review | The design: rounds 1 to 3. The code: rounds 4 to 7 |
+
+Milestone 3, the analysis:
+
+| Item | Detail |
+| --- | --- |
+| Built | The job roles `critic` and `themes` and the order of the six steps (`launch.py`), the four briefs and what each job is given and kept from (`interview.py`), `scripts/extract_notes.py`, `scripts/interview_report.py` with its branch in `analyze.py`, `interview.py <study> quotes` and the same check at the writer's end, the rules that say when a done job is out of date, the archive of an interview study (`archive.py`), and the assets `interview-qual-brief.md`, `interview-critique-brief.md`, `interview-themes-brief.md`, `interview-synthesis-brief.md` and `interview-study-brief.md` |
+| Commit | `6bf10a3` |
+| Tests | `test_jobs_of_an_interview_study_share_the_pool_wait_for_what_they_read_and_are_given_only_their_own`, `test_notes_and_critique_become_rows_and_what_cannot_be_read_or_verified_is_listed_and_never_guessed`, `test_tallies_count_participants_who_raised_a_theme_apart_from_those_it_is_no_problem_for`, `test_archive_of_an_interview_study_keeps_the_turn_logs_and_both_transcripts` and `test_quotations_of_the_synthesis_are_checked_against_the_exchange_each_names`. 121 tests passed when the milestone was committed |
+| Real run | Passed on Claude Code and Codex, in two passes on 14 October 2026, on the four finished interviews of milestone 2. Each pass ran the whole chain: two analysts, two critics, `extract_notes.py`, the themes job, `analyze.py`, the writer and the quote check. Real models wrote 42 notes and 41 critique entries in the first pass and 36 and 29 in the second: none was unparsed and no quote was unverified. The tallies were recounted by hand from the analysts' files, `themes.md` and the turn logs, three interviews in the first pass and all four in the second, with no difference from `quant.json`. The first synthesis failed the quote check on one term in double quotation marks and passed after that one edit. The second passed as written, with 17 quotations. An archive of the study was extracted, analysed and checked again with the same commands. A second study, with its interviewer's prompt edited to ask "Would you pay for an app that does this?" at exchange 2, gave the method criteria below. 49 probes of the quote check behaved as designed, the 49th by design: a question's words credited to the participant pass |
+| Found by the real run, and fixed | Quotations in single quotation marks passed unchecked (build deviation 7). "Said it did not matter" overclaimed, and one sentence of `quant.md` was untrue for a participant with notes of both kinds (build deviation 4). A critic had nothing to do on part of a panel (build deviation 9). A job run again left every later step done and wrong (build deviation 8). Flags were compared across critics. The first writer ran to 4,365 words (build deviation 15) |
+| Codex review | Rounds 8 to 10 |
+
+Milestone 4, debrief interviews:
+
+| Item | Detail |
+| --- | --- |
+| Built | `interview.py <study> debrief --runs <ids>\|all` with `--dry-run` and `--skip-unfit`, the `debrief` block and `limits.debrief` (`panel_lib.py`), a debrief as a conversation of the turn loop with a finished run for its participant, the copy and put-back of that run's persona file and of a usability run's evidence folder, and what `stop`, `status`, `run` and `resume` do with one (`launch.py`), the plan's section "Debriefs" and the role `debrief` of the usage record (`launch_plan.py`), what the analysts' and the writer's briefs say of the transcripts, the archive of a debriefed study (`archive.py`), what `init_study.py --force` sets aside, and the assets `interviewer-brief-debrief.md`, `debrief-opening.md`, `debrief-question.md` and the four `*-debriefs.md` notes, with a `<DEBRIEFS>` line in the four briefs of a review and a usability study |
+| Commit | `a103bda` |
+| Tests | `LauncherTest.test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were`, with rows in `test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none` (a review study with a Pi entry and a `debrief` block) and in `test_invalid_model_entries_and_options_are_refused` (`debrief` in an interview study, a key a debrief guide does not have, a topic id that is a task's). 122 tests passed when the milestone was verified |
+| Real run | Passed on Claude Code and Codex on 14 October 2026: 14 debriefs with finished runs, in three usability studies against a small local site and three review studies, 74 questions and 148 turns. What it checked is under [Acceptance criteria, verified or not](#acceptance-criteria-verified-or-not) |
+| Measured | A turn took a median of 3.9 seconds and 7.6 at the 95th percentile. A side of a six-exchange debrief used 20 to 45 seconds of process time. On Claude Code a `sonnet` participant cost 0.03 USD for the debrief of a review run and 0.19 to 0.24 USD for that of a usability run, 0.17 to 0.19 of it for its first turn, which wrote 45,000 to 47,000 tokens to the prompt cache again: a debrief turn has no browser, so its tools are not the run's and the cache is missed. A `sonnet` interviewer cost 0.02 to 0.06 USD and an `opus` one 0.14 to 0.15. A Codex participant used 101,000 to 208,000 input tokens. In one pass two Claude Code turns hung after their start and were stopped at the turn limit, and the same command finished both debriefs |
+| The default chosen | `limits.debrief` is 10 minutes and 2.00 USD a side, with 3 minutes a turn ([build deviation 25](#deviations-decided-during-the-build)). It replaces a placeholder of 15 minutes and 1.50 USD |
+| Found before the review, and fixed | A debrief turn can write anywhere under `panel/` on both runners, and only the persona file was put back (build deviation 34). A `themes.md` that opened with a theme's heading lost that theme from the tallies once the notice was added (build deviation 37) |
+| Found by the real run and the review, and fixed | The dry run's time bound left the grace out, and it said nothing of a turn a killed launcher had left, then "would go on with" of one that had ended at its side's limit, then refused a run with such a turn that `--runs all` would pass over (build deviation 39). `--runs all` was refused once every run had been debriefed (build deviation 32). The analysts started on unfinished debriefs with no line to say so (build deviation 33). `status` named transcripts that were not written yet, and `stop` printed the same sentences whatever had been at work. A turn that used the last of its side's budget gave the harness's figure for one process as its reason (build deviation 38). A cap of four exchanges left the second of two topics unopened, with no warning (build deviation 39) |
+| Codex review | Rounds 11 to 13 |
+
+The documents: `SKILL.md`, the new `references/interviews.md`, and the
+parts of `references/method.md`, `runners.md`, `usability.md`,
+`archive.md`, `communicating.md` and `personas.md` on interviews were
+written on 14 October 2026, after milestone 3. Their debrief parts were
+written again from the code and from running it after milestone 4, and the
+contract test of the `description`'s length was added then. The debrief
+documentation was then moved out of `references/interviews.md` into a
+reference file of its own, `references/debriefs.md`
+([build deviation 42](#deviations-decided-during-the-build)).
+
+### Acceptance criteria, verified or not
+
+Every criterion from [Acceptance criteria](#acceptance-criteria), with one
+of three marks. A criterion marked "verified on real harnesses" may have a
+test as well, named in its evidence.
+
+Interviews:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A study with participants on Claude Code and Codex and one interviewer runs to completion from one `launch.py run`, and every interview passes `check_runs.py` | verified on real harnesses | Milestone 2, first pass: one `run` finished the two interviews left after the pilot, 4 of 4 with no blocking problem. Second pass: 4 of 4 again, from a `run` that was stopped and resumed |
+| A transcript shows the topic, the move and the reason for every question | verified on real harnesses | Milestone 2, second pass: all 48 questions of the four turn logs have a topic, a move and a reason, and the transcripts show them |
+| No participant input holds a learning goal, a topic id or the interviewer's notes | verified on real harnesses | `test_interview_is_carried_turn_by_turn_and_only_the_words_under_say_reach_the_participant`. Milestone 2: in every prompt, every message and every command line of every participant process, no planted goal marker, no topic id, no goal's text, no `WHY` sentence and no line of a reply that was sent back, in three rounds of four interviews |
+| No interviewer input holds a persona's bio or card | verified on real harnesses | The same test. Milestone 2: no planted bio or card marker, no bio line, no personality and no line of a card in any interviewer process's input, in the same three rounds |
+| Killing the launcher mid-interview and starting it again loses no turn and repeats none | verified on real harnesses | `test_launcher_killed_at_any_point_of_a_turn_loses_no_turn_and_records_none_twice`. Milestone 2: three kills of the launcher with every interview's turn in flight. Each question's words were in exactly one participant input and each answer in exactly one interviewer input, one more only for a turn that was lost and put again, and the exchanges ran from 1 to 12 with none skipped or repeated |
+| An interview stopped by a limit keeps its turns and is reported `limited` | verified by tests only | `test_interview_turn_at_the_turn_limit_waits_for_resume_and_a_side_out_of_its_allowance_for_extend`. No real interview reached a limit |
+| `plan` starts no process and makes no model call | verified by tests only | `test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none` |
+
+Method:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| In a pilot, the critique finds no `pitch` and no `price-guess` in an interview led by the interviewer brief | verified on real harnesses | Milestone 3: in neither pass was a flag on the four interviews `pitch` or `price-guess`. The flags were `compound`, `zoom`, `leading` and `talking`, and in the first pass also `rescue` and `generic` |
+| With the interviewer brief swapped for a test brief that makes it ask "would you pay for an app that does this?", the participant gives an agreeable answer and the critic flags the question | verified on real harnesses | Milestone 3, the second study: the Codex participant agreed ("Yes, I'd be open to it if it helped the team and the price made sense"), the `sonnet` participant hedged ("Sounds fine in principle"), and the critic flagged the question `hypothetical` and `price-guess` in both interviews. How agreeable an answer is depends on the model, as discovery item 8 found |
+| Asked about something its card lists as no problem, a participant says so | verified on real harnesses | Discovery item 8, on both harnesses, and milestone 2: participants said of document collection, which their cards list as no problem, that it is rarely an issue |
+
+Analysis:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| The tallies for a finished study match a hand count of three interviews | verified on real harnesses | Milestone 3: no difference in three interviews in the first pass, and none in all four in the second, for every theme and topic and every group. `test_tallies_count_participants_who_raised_a_theme_apart_from_those_it_is_no_problem_for` |
+| Every quote in the synthesis is in the transcript it names, word for word | verified on real harnesses | `test_quotations_of_the_synthesis_are_checked_against_the_exchange_each_names`. Milestone 3: both real syntheses pass `interview.py <study> quotes`, the first after one edit by the lead. What the check cannot see is under [Known limitations](#known-limitations) |
+| An incomplete interview is absent from the headline tables | verified by tests only | The tallies test above, whose panel has one interview left partial |
+| The synthesis carries the notice and states the known weaknesses | verified on real harnesses | Milestone 3: both real syntheses open with the notice and state all seven limits their brief lists, with which interviews shared the interviewer's model |
+
+Debrief:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A debrief reaches the session of a finished usability run and changes nothing in its persona file | verified on real harnesses | `test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were`. Milestone 4: on Claude Code and on Codex the answers of a usability run named what only its session held, the error message it had met and what it tried next, as steps 7 to 10 and steps 8 and 9 of the two step logs have them. The SHA-256 of every persona file and every evidence file was the same before and after, with no file added or removed |
+
+What the real run of milestone 4 checked beside that criterion:
+
+| Checked | Status | Evidence |
+| --- | --- | --- |
+| The dry run says what then happens, and writes nothing | verified on real harnesses | The study's file tree was the same before and after each dry run, and the command that followed began the debriefs it had named |
+| A debrief changes three keys of its run's entry and nothing else | verified on real harnesses | `attempts`, `sessions` and `debrief` alone differed in each of the 12 entries compared, and `status` showed every run `done` with its debrief |
+| The checks, the scores and the tallies are as they were | verified on real harnesses | `check_runs.py`, the extract scripts and `analyze.py` gave the same output before and after, `quant.md` byte for byte. Only `usage.md` and the transcripts differ |
+| No participant writes or uses a tool, and no interviewer reply needs a repair | verified on real harnesses | None did. In one study the opener asked both participants to edit their file, their score and their step log, and both declined |
+| The analysts' and the writer's briefs name the transcripts as product feedback | verified on real harnesses | Both briefs did. The synthesis cited answers by run and exchange, said they were "given in answer to the interviewer's questions, not raised unasked", and carries the notice |
+| The usage record has the debriefs under a role of their own | verified on real harnesses | `analysis/usage.md` has the role `debrief` and a table with one row a side |
+| A command killed mid-turn loses no exchange and repeats none | verified on real harnesses | `kill -9` of the command mid-turn, in a review and in a usability study, then the same command again: every exchange once, the copies gone and the hashes unchanged. `launch.py stop` during a debrief, then the same command, went the same way |
+| A debrief that uses a side's allowance is at its end | verified on real harnesses | With `limits.debrief` set to 0.03 USD a side, a Claude Code participant used it: the debrief read `limited` after 5 exchanges, its transcripts were written, and the same command refused it |
+| An archive keeps the debriefs, and is refused while a turn is not settled | verified on real harnesses | The round held the turn logs and both transcripts and still checked and analysed. The archive was refused with a turn of a debrief unsettled |
+| A turn that changes the persona file or the evidence folder has it put back | verified by tests only | `test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were`, and by hand on the fake CLIs: a turn that appended to the step log and saved a new screenshot, a launcher killed while the turn waited, a log made a link, the folder removed. No real model wrote anything |
+| A run on Pi is refused, and the refusal records nothing | verified by tests only | The same test |
+
+Documents:
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| A lead on a harness other than Claude Code runs an interview study by following `SKILL.md` | verified on real harnesses | 14 October 2026: a Codex session as the lead, in a `workspace-write` sandbox and reading no script source, completed a four-interview study and its whole analysis from `SKILL.md` and the references alone (two personas, each on Claude Code `sonnet` and on Codex's default model, an `opus` interviewer). Its sandbox could not start the launcher, so it handed every launcher command to the user to run from a terminal, as the documents direct. Reported cost 1.61 USD on Claude Code, with the three Codex sides and jobs in tokens only. What it did not cover is under [Built but not tested](#built-but-not-tested), and what it changed in the documents [below](#what-the-codex-leads-run-changed-in-the-documents) |
+| The `description` is under 1,024 characters | verified by tests only | `PersonaPanelTest.test_skill_description_is_under_the_1024_characters_a_harness_loads`. It is 1,018 characters as written on 14 October 2026 |
+
+### What the Codex lead's run changed in the documents
+
+The Codex lead logged every place the documents left it unsure, wrong or
+guessing. None stopped the study. Corrected on 14 October 2026, each where
+that lead had looked:
+
+- **`interview.about` is said to every participant.** The interviewer
+  states it when it opens each interview, before the first opener.
+  `references/interviews.md`, `study.json`, said only that it may state it
+  when asked.
+- **`check_runs.py` exits with 1 after a pilot,** for the interviews the
+  pilot left, and that is expected: `references/interviews.md`, What a
+  pilot should confirm, and Troubleshooting.
+- **The ceiling counts the synthesis pool whole,** so the share of a job
+  with no cap is in the figure, where a run or a side with no cap is left
+  out: `references/method.md`, Limits and the plan, and
+  `references/interviews.md`, The plan.
+- **A job whose process reached its budget after writing its file reads
+  `done`,** with a note to check the file: `references/interviews.md`,
+  Doing a job again. The lead's writer did so, at 0.36 USD of a 0.30 USD
+  share.
+- **Analysts and critics are one step,** and both may run before either is
+  read. `Raised` stays `unprompted` for detail that a later question draws
+  out: `references/interviews.md`, The analysis.
+- **A lead on Codex:** the scripts of an interview study that run inside
+  the sandbox, and the hand-over to a terminal as it was run:
+  `references/runners.md`.
+
+Limits of the skill that the documents now state where a lead meets them,
+with what to tell the user. None has a remedy in the code:
+
+- **No setting holds a study to a total in dollars** across harnesses:
+  Codex has no budget cap, and a Claude Code cap can be passed by one turn.
+- **Codex reports tokens and no dollars,** so a total with a Codex run in it
+  is a subtotal, and nothing converts the tokens.
+- **The tier of an account's default model cannot be checked from the
+  study.** The plan prints `default`, and neither it, `status` nor the usage
+  record names the model.
+- **What keeps a job of the synthesis from the guide, the full transcripts
+  and the study brief is its brief alone.**
+
+### Built but not tested
+
+Built and covered by the tests on the fake CLIs, with no real run on record:
+
+- **`blocked`.** No usage limit, rate limit or capacity refusal met an
+  interview.
+- **`limited` and `resume --extend`.** No real side used up its allowance.
+- **The end check.** No real interviewer ended with a topic unopened.
+- **The leak gate's send-back.** No real question held a leak term. The one
+  kind of repair seen in a real run was for a `TOPIC` outside the guide.
+- **The last-exchange send-back.** Every real interviewer closed on the
+  notice.
+- **A session that is gone,** with and without an answer on record.
+- **A turn stopped at `limits.turn`.** No real turn came near it.
+
+Checked another way:
+
+- **The launcher's reading of a mislabelled topic** (build deviation 1)
+  was confirmed by replaying the eight real turn logs that held four such
+  questions, not by a new live run: the second pass, with the reworded
+  brief, mislabelled none.
+
+Not run at all:
+
+- **macOS.** Everything ran on Linux.
+- **A study larger than four interviews,** an interview longer than 19
+  exchanges through the launcher (discovery ran 34 on the prototype),
+  replicates, variants and a topic kept to some segments.
+- **Analysts, the themes job or the writer on Codex,** and a critic on
+  Claude Code.
+- **From a lead on Codex:** an interactive Codex session, where the
+  request to run a command outside the sandbox goes to the user as an
+  approval prompt (the lead that was run handed each command to the user's
+  terminal instead), full access mode, `resume`, a debrief and an archive.
+  Follow-up questions do not apply to an interview study.
+- **A debrief on a real harness:** the put-back of a persona file or an
+  evidence folder (`.rejected.md`, `.rejected.evidence/`), since no real model
+  wrote, the refusal of a Pi run, a debrief more than an hour after its run,
+  `purge-sessions` after a debrief, a follow-up question to a run that has
+  been debriefed, a `blocked` debrief, and a smallest-tier model on either
+  side.
+
+### Known limitations
+
+Found during the build, and left as they are:
+
+- **The quote check holds words to an exchange, never to a speaker.** A
+  question's words credited to the participant pass.
+- **A short term in single quotation marks passes** the quote check, and
+  so does one word that is in the exchange named.
+- **A file that was absent when a job was launched and appears later is
+  not seen:** a `checks.md` written after the writer does not make the
+  writer out of date. Nor is any job whose file was put in place by hand,
+  with no launch on record.
+- **The writer runs over its word limit,** by up to a fifth: 2,957 and
+  2,573 words in two real runs, against a ceiling of 2,500.
+- **On Codex "no tools" is not none.** A patch tool can still write in the
+  session's own empty folder (not exercised), and a clock, three MCP
+  resource tools, a wait tool, tools that ask the user for input and the
+  sub-agent tools stay.
+- **A lost session is found only by trying.** The resume that finds it
+  gone is what puts it on record.
+- **After an interview is left alone for a lost session, the summary still
+  prints "Next: resume".** The line above it says what to do.
+- **`init_study.py --force` leaves stale per-attempt files in `logs/`** for
+  a review or a usability study, as before. An interview study's are moved.
+- **An open attempt whose record is not on a malformed turn log is still
+  settled onto that log,** from what is left of it. `run` and `resume`
+  then leave the interview alone.
+- **Marks by different critics are not comparable,** and nothing
+  calibrates them: in one real round one critic gave 11 flags to two
+  interviews and the other 3.
+- **The critique and the coding are models' readings.** Judged by hand, 32
+  of 41 critique entries were fair, 7 arguable and 2 wrong (both good
+  moves credited for the guide's own opener, since ruled out in the
+  critic's brief), and 79 of 85 coded fields were right in the second
+  pass.
+
+Of debriefs:
+
+- **A debrief guards the run's own files only:** its persona file and, for a
+  usability run, its evidence folder. As during any run, nothing puts back
+  another run's persona file (the modification record flags it, and
+  `check_runs.py` blocks on it), another run's evidence, the scratch folders,
+  the instructions, the materials or the site copies. On Codex a turn has its
+  shell, and a study kept under `/tmp` is writable whole by it, as by any
+  Codex run that does not browse.
+- **While a turn of a debrief runs, readers see the evidence folder as it
+  stands.** Only the persona file is read from the copy made before the turn.
+- **No script reads a debrief for problems.** `check_runs.py` checks the runs
+  of a review or a usability study and none of their debriefs: a leak term in
+  an answer is the lead's to find.
+- **The first turn of a usability run's debrief misses the prompt cache,** and
+  pays for the run's whole session again. A debrief turn has no browser, so
+  its tools are not the run's.
+- **The plan prints no tier line for a debrief,** and nothing checks the tier
+  of its interviewer.
+- **The dry run still gives a definite refusal for a run whose follow-up
+  question was cut short,** where the command settles that question first
+  and may then hold the debrief. Seen in review, not fixed.
+  `followup.py <study> list` settles the question.
+
+Follow-ups, not built:
+
+- **The plan's time bounds leave the grace out.** "At most N min of run time",
+  for the runs, the jobs and the sides of an interview study, and the same
+  line of `followup.allowance_lines()`, come from the limits alone, without
+  the seconds a stopped process gets to finish: the plan does not know which
+  `--grace` a later `run` is given. Only the debrief dry run counts it. For
+  review and usability studies this is older than this PRD.
+- **"Next: resume" after an interview that was left alone,** as above, known
+  since milestone 2.
+- **The stale per-attempt files `init_study.py --force` leaves** for a review
+  or a usability study, as above.
+
+### Review rounds
+
+An independent reviewer, Codex, reviewed the work in one session that was
+resumed across the whole build, over 14 rounds: the design in rounds 1 to 3,
+milestone 2 in 4 to 7, milestone 3 in 8 to 10, milestone 4 in 11 to 13 and
+the documents in 14. Round 1 required changes, and every later round
+approved or approved with notes. One finding was declined, with its reason:
+the first of round 11.
+
+| Rounds | Of | Outcome |
+| --- | --- | --- |
+| 1 to 3 | The design, before any code was written | Round 1 required changes (8 findings). Rounds 2 and 3 approved with notes (3 and 1). All applied |
+| 4 to 7 | The code of milestone 2 | Each approved with notes (2, 2, 3 and 2). All fixed |
+| 8 to 10 | The code of milestone 3 | Each approved with notes (6, 2 and 1). All fixed |
+| 11 | The code of milestone 4 | Approved with notes (3). Two fixed. One declined: the form of fingerprint it concerns exists only on this unmerged branch |
+| 12 | The code of milestone 4, after its fixes | Approved with notes (1): the dry run said "would go on" of a turn that had ended unrecorded after using the last of its side's allowance, where the command records the debrief at its end. Fixed: the dry run answers "not known" with exit code 1 |
+| 13 | Confirmation of round 12's fix | Approved with notes (1): the dry run's eligibility checks ran before the not-known handling, so it could refuse a run that `--runs all` would pass over. Fixed: a run with an ended, unrecorded turn is set apart before any check that settling the turn could change |
+| 14 | The skill's documents and this section, with the confirmation of round 13's fix | The fix approved. The documents approved with notes (2), each a false statement: a blocking check does not by itself keep a finished interview out of the tallies, and a refused `debrief` command can first record a turn that a dead launcher left. Both corrected. The reviewer asked for no further round |
 
 ## Checked against the code
 
@@ -352,6 +689,9 @@ Rules:
   do today. `context_notes` go to participants, as facts about the setting.
   *Added after discovery: `product` and `product_phrase` are refused too
   ([deviation 13](#deviations-decided-during-discovery)).*
+  *Added during the build: `model_notes`, `debrief` and `limits.followup`
+  are refused too, and `synthesis.context_files` may name no transcript
+  ([build deviations 14 and 17](#deviations-decided-during-the-build)).*
 - **Run ids and model keys** keep their rules. The interviewer of run
   `P01-sonnet` is the job entry `interviewer-P01-sonnet`.
 
@@ -425,6 +765,12 @@ included, and each interviewer slot gets one send-back whatever the reasons
 (deviation 2). Both are in
 [Deviations decided during discovery](#deviations-decided-during-discovery).*
 
+*Changed during the build: the parser also forgives a margin that every
+line shares, and reads a line before `SAY:` with no key as a continuation.
+The launcher counts an exchange for the topic whose opener the question's
+words hold, and keeps the `TOPIC` the interviewer wrote beside it
+([build deviations 1 and 2](#deviations-decided-during-the-build)).*
+
 ### What each message carries
 
 - **To the participant:** the `SAY` text and nothing else. No frame, no turn
@@ -481,6 +827,14 @@ read their state from the turn log, so they never disagree.
 reply that failed twice" and "a side's first process ended with no reply",
 and no more. `run` and `pilot` retry a failed first process once.*
 
+*Changed during the build: an interview reads `running` only while a
+launcher has the study, so one that a killed launcher left reads `partial`.
+A `limited` interview names the side that used its allowance, `resume
+--runs <ids> --extend` gives that side one more, and the grant is on the
+turn log. A turn log that is not as a launcher writes one stops `run` and
+`resume` for its interview
+([build deviations 10, 11 and 18](#deviations-decided-during-the-build)).*
+
 ### Resume
 
 - **Every turn is recorded before the next starts**, in this order: the turn
@@ -503,6 +857,11 @@ and no more. `run` and `pilot` retry a failed first process once.*
   some, it is reported for the lead to decide, as a partial review is.
 - **`init_study.py --force`** resets every interview and moves the turn logs
   and transcripts it replaces to `logs/`.
+
+*Changed during the build: the records a turn comes to reach the log whole
+or not at all, a session that is gone is asked of both sides before every
+turn, and `--force` moves more than the turn logs
+([build deviations 10, 19 and 24](#deviations-decided-during-the-build)).*
 
 ### Limits and the plan
 
@@ -545,6 +904,11 @@ the interview's cap.
 - *before a pilot has run, an estimate from the token figures of discovery
   item 1 (deviation 12)*
 
+*Added during the build: the plan has a section on the study and a table of
+interviews, lists the jobs of the synthesis in the order they run with what
+each has used of its share of the pool, and says against a done job when it
+is out of date ([build deviations 8, 20 and 23](#deviations-decided-during-the-build)).*
+
 `pilot` runs one whole interview on each model entry. Read its transcript
 before the rest: whether the persona holds, how long the answers are, and
 whether the interviewer keeps to the method. *After discovery: the pilot is
@@ -563,7 +927,9 @@ interviews.
 - **Pi is refused.** The launcher reads a capability a runner does not
   declare as false, so `runners/pi.py` is not edited. The plan step refuses
   a participant, an interviewer or a debrief on such a runner, naming the
-  runner and the reason.
+  runner and the reason. *As built, a debrief on such a runner is refused
+  by the `debrief` command and listed by the plan, which it does not fail
+  ([build deviation 30](#deviations-decided-during-the-build)).*
 - **A runner that cannot resume** is refused at the plan step.
 - **Both runners keep their harness's default system prompt.** Whether a
   conversation needs otherwise is a [discovery](#discovery) question. If it
@@ -579,6 +945,11 @@ interviews.
 - *The `codex` runner's isolation flags gain two switches, for every run
   and job of every study type: the signed-in account's connected apps off
   and web search off (deviation 11).*
+
+*Added during the build: a third capability, `no_tools_note`, in which a
+runner says what "no tools" leaves on its harness, and a third switch on the
+`codex` runner, image generation off
+([build deviations 12 and 20](#deviations-decided-during-the-build)).*
 
 ## Isolation and safety
 
@@ -656,7 +1027,9 @@ flags as they were, a session could see the signed-in account's connected
 apps and use web search and image generation (item 4). The runner's
 isolation flags gain `--disable apps` and `-c 'web_search="disabled"'` for
 every run and job of every study type, as part of milestone 2
-([deviation 11](#deviations-decided-during-discovery)).
+([deviation 11](#deviations-decided-during-discovery)). *Built with a third
+switch, `--disable image_generation`
+([build deviation 12](#deviations-decided-during-the-build)).*
 
 ### Keeping hypotheses from the participant
 
@@ -703,7 +1076,10 @@ user".
 `assets/interviewer-brief.md` teaches the method first, then points to the
 reference files. *After discovery: the reference text follows the brief in
 the same prompt, as sections of it
-([deviation 9](#deviations-decided-during-discovery)).* In this order:
+([deviation 9](#deviations-decided-during-discovery)). Changed during the
+build: its examples show the study's own topic ids, and it says that the
+question which moves to the next topic is that topic's
+([build deviation 3](#deviations-decided-during-the-build)).* In this order:
 
 | Part of the brief | Rule | From |
 | --- | --- | --- |
@@ -746,7 +1122,9 @@ the brief and the interviewer's file tools go.
 
 *Outcome: the text moved and the tools went, on both runners. On Claude Code
 the condition was met outright. On Codex it was not, since the default
-model's interviewers did open the files, and the lead of the implementation
+model's interviewers did open the files (a mid-tier Codex model opened none
+in its one interview, in the [tier probe](#tiers)), and the lead of the
+implementation
 took the same course there, for the reasons under discovery item 7. That
 goes past the letter of the rule above.*
 
@@ -819,6 +1197,12 @@ No scores. The steps, each a script or a job the launcher starts:
 The synthesis pool is divided equally among every job planned: the analysts,
 as many critics, the themes job and the writer.
 
+*Changed during the build: a seventh step, `interview.py <study> quotes`,
+which the writer's command also runs. Each step waits for what it reads and
+refuses until the chain is consistent, a job is done again by deleting its
+file and running its role again, and analysts and critics may start on part
+of a panel ([build deviations 7, 8 and 9](#deviations-decided-during-the-build)).*
+
 ### What `check_runs.py` checks
 
 Blocking:
@@ -836,6 +1220,12 @@ Notes, none blocking:
 - an interviewer turn with more than two question marks
 - the median length of the answers, when it is over 120 words
 - a repair turn, and a turn that was put again
+
+*Changed during the build: an interview that was never started blocks, and
+so does a turn log of the wrong form. A leak term is looked for in the card
+as well as in the answers, and a question labelled for another topic than
+its words open is noted
+([build deviations 10 and 21](#deviations-decided-during-the-build)).*
 
 ### Coding
 
@@ -868,6 +1258,11 @@ script reads:
 [Deviations decided during discovery](#deviations-decided-during-discovery):
 `Signal` has a tenth value, `NON-PROBLEM` (deviation 14), and `Turns` names
 exchanges (deviation 1).*
+
+*Changed during the build: `notes.csv` also records the one exchange a
+verified quote was found in, a note is read line by line against its form,
+and `Raised` is whose words first brought the note's subject into the
+interview ([build deviations 6 and 22](#deviations-decided-during-the-build)).*
 
 `extract_notes.py` writes `analysis/notes.csv`, one row for each note. It
 gives each note its topic from the turn log, by the first turn the note
@@ -908,6 +1303,14 @@ heading, and none is labelled frequency or prevalence.
 notes, and a theme's counts leave such notes out and show them in a column
 of their own ([deviation 14](#deviations-decided-during-discovery)).*
 
+*Changed during the build: for a theme and for a topic a participant is in
+exactly one of three groups (raised it, said it is not a problem, both), and
+"said it did not matter" is gone. The themes job and `analyze.py` each
+refuse while what they read is out of date. `quant.md` carries the notice,
+lists every verified quote in the form a quotation must have, and has
+sections for themes by persona and for the critique's marks
+([build deviations 4, 6, 8, 13 and 22](#deviations-decided-during-the-build)).*
+
 ### Critique
 
 Each critic reads the full transcripts of its half, with `MOVE` and `WHY`,
@@ -944,6 +1347,11 @@ found or their absence recorded, whether priority came before detail, whether
 user and buyer were told apart, and what was learned against each goal. Then
 the card: which of its problems the interview found and which it missed.
 
+*Changed during the build: a missed signal and a good move each carry a
+one-line `Note`, an opener gets no flag and no good move, a question gets at
+most two flags, and marks by different critics are reported as not
+comparable ([build deviations 5 and 16](#deviations-decided-during-the-build)).*
+
 ### The transcript
 
 `interviews/<run id>.md`, rendered from the turn log, opens with the notice,
@@ -956,6 +1364,12 @@ The analysts' copy, `analysis/transcripts/<run id>.md`, has the notice, the
 recruitment facts and the numbered questions and answers, and nothing else:
 no card, no topic, no move and no reason. The launcher writes both when an
 interview ends, and `interview.py <study> render` writes them again.
+
+*Added during the build: the topic line also gives the label the
+interviewer wrote where its words opened another topic, and lines in square
+brackets say what the launcher did: a reply sent back, a turn that left no
+reply, the end check and how the interview ended
+([build deviation 1](#deviations-decided-during-the-build)).*
 
 ### The final summary
 
@@ -983,6 +1397,11 @@ decision record:
     problem exists, this segment puts it first, a solution delivers, a buyer
     pays. A simulated round bears on none of them, and offers guesses about
     the first two.
+
+*Changed during the build: at most 2,500 words, quotation marks kept for
+attributed quotations alone, and the quotation rule of
+[build deviation 7](#deviations-decided-during-the-build), which replaces the one deviation 15 gave
+([build deviations 7 and 15](#deviations-decided-during-the-build)).*
 
 ## Debrief interviews
 
@@ -1015,6 +1434,11 @@ puts a question to one.
 
 A debrief has no situation card, and nothing in it counts as discovery: the
 participant has seen the product.
+
+*As built: [build deviations 25 to 41](#deviations-decided-during-the-build),
+which add the default of `limits.debrief`, the framing of every question,
+the guard on a usability run's evidence folder and how a debrief is gone on
+with.*
 
 ## Deferred
 
@@ -1077,6 +1501,10 @@ this PRD depends on either.
   tier ([deviations 4 and 10](#deviations-decided-during-discovery)).
   Nothing checks a tier, so a small model that does write its card runs.
 
+*After the build: what the build and its real runs found is under
+[Known limitations](#known-limitations), and `references/interviews.md`
+states both lists.*
+
 ## Changes to the skill's documents
 
 **`SKILL.md`:**
@@ -1099,6 +1527,10 @@ this PRD depends on either.
   > or customer interviews, or to rerun or extend an earlier round, even
   > without the word 'panel'.
 
+  *As written on 14 October 2026: 1,018 characters. "review, compare or
+  score concepts" became "review, score or give feedback on concepts", to
+  keep a trigger the description had before. The rest is the draft.*
+
 - The study layout gains `interviews/`, `interviewer/` and `panel/rooms/`.
 - One paragraph for an interview study, as usability has: read
   `references/interviews.md` first, start from
@@ -1116,7 +1548,10 @@ this PRD depends on either.
 - New `references/interviews.md`: when to run one, drafting the goals and the
   guide with the user (the toolkit's discovery brief), the protocol, reading
   a transcript, the analysis steps, debriefs, safety and how much to trust
-  the result.
+  the result. *As written: also models, running with every state and the
+  command that follows it, the checks, part of a panel, doing a job again,
+  reporting and troubleshooting. `references/personas.md` gained a section
+  on personas for an interview study.*
 - `references/method.md`: a short section that points to it.
 - `references/runners.md`: what an interview asks of a runner, and the
   `interview` capability. *After discovery: also the `no_tools` capability
@@ -1764,7 +2199,9 @@ What followed from the results is in
    - **Decision (the lead):** the reference text moves into the
      interviewer's brief and the interviewer runs with no tools, on both
      runners (deviation 9). On Claude Code this PRD's condition, "if
-     interviewers never open them", is met outright. On Codex it is not.
+     interviewers never open them", is met outright. On Codex it is not, on
+     the default model: a mid-tier Codex model opened none in its one
+     interview (the [tier probe](#tiers)).
      The lead took the same course there because the brief placement cost
      less, was faster and scored no worse, because one layout for both
      runners is simpler than two, and because it removes the Codex
@@ -2084,7 +2521,9 @@ The turn loop:
    `SAY:` line and text before the first key still get the repair. The
    interviewer brief shows its example replies with no fence. Reason:
    discovery item 6. The fence is the one failure seen in 375 replies, and
-   it would have spent the slot's one repair. The lead.
+   it would have spent the slot's one repair. The lead. *Extended during
+   the build: a shared margin and a continuation line are forgiven too
+   ([build deviation 2](#deviations-decided-during-the-build)).*
 4. **A participant's first reply must be the situation card, or "Ready"
    when the card is off.** A card is a reply that holds at least three of
    the four parts the card request asks for, by their labels. Anything else
@@ -2145,7 +2584,8 @@ Tools, isolation and models:
    in the brief scored no worse on either harness, and the change removes
    the interviewer's file access, which on Codex was the whole disk. It
    goes past the letter of this PRD's rule for Codex, whose default model's
-   interviewers did open the files. The lead.
+   interviewers did open the files, while a mid-tier Codex model opened
+   none in its one interview. The lead.
 10. **No model is named or matched,** in code or as the floor in a
     document. An interview needs a mid-tier model or larger on both sides,
     never a vendor's smallest and fastest tier, and the strongest model
@@ -2160,7 +2600,9 @@ Tools, isolation and models:
     session could see the signed-in account's connected apps and use web
     search. Image generation, found open at the same time, is switched off
     only by the no-tools set of deviation 8, so a Codex session that keeps
-    its tools still has it. The lead.
+    its tools still has it. The lead. *Changed during the build: image
+    generation is switched off for every run and job too
+    ([build deviation 12](#deviations-decided-during-the-build)).*
 
 The study definition and its limits:
 
@@ -2205,6 +2647,10 @@ The analysis:
     for the participants who said it was not a problem for them. Reason:
     this PRD names no source for that count, and `MOVE: accept` cannot be
     one, since the brief gives that move for any bad news. The lead.
+    *Superseded during the build in what is counted: coverage no longer
+    counts "said it did not matter", and a participant is in one of three
+    groups for a theme and for a topic
+    ([build deviation 4](#deviations-decided-during-the-build)).*
 15. **A quotation in the synthesis has a fixed attribution and is checked
     by a script.**
     - The form: the words between double quotation marks, then at once the
@@ -2221,17 +2667,400 @@ The analysis:
 
     Reason: this PRD asks for every quote to be in the transcript it names,
     which only a form a script can find makes checkable. The lead.
+    *Superseded during the build in its second point: a stretch of any
+    length is listed, not one of six words or more, and more is checked
+    ([build deviation 7](#deviations-decided-during-the-build)).*
 
 Debriefs:
 
 16. **`limits.debrief` is each side's allowance,** so `--dry-run` prints
     twice the figure for each run. Reason: a slow participant cannot then
-    starve its interviewer. One figure is still open: the default of
-    `limits.debrief` is a placeholder until milestone 4 measures a debrief
-    on a finished run. The lead.
+    starve its interviewer. One figure was left open: the default of
+    `limits.debrief`, until milestone 4 measured a debrief on a finished
+    run. The lead. *Settled in milestone 4: 10 minutes and 2.00 USD a side
+    ([build deviation 25](#deviations-decided-during-the-build)).*
 17. **A debrief that reads `limited` is at its end.** There is no
     `--extend` for a debrief. Reason: `limits.debrief` is an allowance for
     the whole debrief, as `limits.followup` is for a question. The lead.
+
+## Deviations decided during the build
+
+Where what was built in milestones 2 to 4 differs from, or adds to, the
+text of this PRD and the entries above. Where an entry here and an entry
+above disagree, this one wins. All were decided on 14 October 2026, by the
+lead of the implementation unless an entry says otherwise, and reported to
+the user as above. The body points here as "build deviation N".
+
+By area: the turn loop, entries 1, 2, 3, 10, 11, 18 and 19. Tools,
+isolation and the plan, 12 and 20. The study definition, 14, 17 and 24.
+The checks, 21. The analysis, 4 to 9, 13, 15, 16 and 22. Other study types,
+23. Debriefs, 25 to 36 and 39 to 41. Every study type, 37 and 38. The
+documents, 42.
+
+1. **A question counts for the topic whose opener its words hold.** Where
+   the words under `SAY` hold, word for word, the opener of a topic that
+   no question has carried yet, the question is that topic's, whatever
+   `TOPIC` the interviewer wrote. The turn log's `topic` is the topic
+   counted, and `labelled` keeps the interviewer's own label when the two
+   differ. Case, white space, curly quotation marks and a closing full
+   stop are not looked at, and the opener must stand as words of its own.
+   No repair is spent on a mislabel. The caps, the status line, the end
+   check, the checks, the transcripts and each note's topic all read the
+   record. Reason: a mid-tier interviewer took leave of one topic and
+   opened the next under the old label in 4 of 8 real interviews, so the
+   answer was filed under the wrong topic and the new topic read as
+   unopened.
+2. **The parser forgives two things more.** A margin that every line of
+   the reply shares is taken off, and a line before `SAY:` that opens with
+   no key continues the key above it, so a `WHY` of two lines is one. A
+   code fence that is not the one fence around the whole reply is a format
+   problem, and `END` beside `TOPIC`, `MOVE` or `WHY` is one too. Reason:
+   the brief shows its examples indented, and the one unusable reply of
+   discovery was a model copying how the brief presented its example. This
+   extends [deviation 3](#deviations-decided-during-discovery).
+3. **The interviewer brief's examples show the study's own topic ids.**
+   Its example reply, its example status line and its "Your first reply"
+   are filled from the guide. The brief also says that the question which
+   moves to the next topic is that topic's question, with its id and
+   `MOVE: open`. Reason: with ids other than `T1` and `T2`, eight of eight
+   real interviewers copied `T1` from the examples and spent their first
+   repair.
+4. **Three groups, which never overlap.** Under a theme, and under a
+   topic, a participant with a note there is in exactly one of: raised it
+   (a note that is not `NON-PROBLEM`, and no `NON-PROBLEM` note), said it
+   is not a problem (`NON-PROBLEM` notes alone), or both. Unprompted, with
+   an incident and `Effort` are counted over the first and the third. The
+   single count "said it did not matter" is gone, from the themes and from
+   the coverage of a topic. A `NON-PROBLEM` note is about its own
+   statement, the third group says nothing of trouble (its other note may
+   be a workaround, a person, money or context), and the groups are never
+   added into one total. Reason: in the real study one participant sat
+   under both "raised" and "not a problem" for a theme, and coverage read
+   4 of 4 "did not matter" for a topic under which three of the four also
+   told of something. This refines
+   [deviation 14](#deviations-decided-during-discovery).
+5. **`Missed` and `Good` critique entries carry a one-line `Note`,** in the
+   critic's own words, which `critique.csv` keeps. An opener as the guide
+   has it gets no `Flag` and no `Good` entry, and a question gets at most
+   two flags. Two flags on one exchange are two entries with one heading.
+   The lists of values are settled: seven missed signals
+   (`praise-taken`, `generality`, `feature-request`, `feeling`,
+   `contradiction`, `payer`, `pushed-no-problem`) and seven good moves
+   (`anchored`, `consequence`, `accepted`, `deflected`, `dug`, `priority`,
+   `spend`). Reason: the user learns from an entry without opening the
+   transcript, and real critics credited the interviewer for the guide's
+   own opener and put four marks on one question.
+6. **`notes.csv` records the exchange a verified quote was found in**
+   (`quote_turn`), and `quant.md` lists every verified quote in the
+   attribution form, `"..." (run id, exchange)`. The writer takes a
+   participant's words and their attribution from that list and from
+   nowhere else. Reason: a note's `Turns` may be a range, and a quotation
+   names one exchange.
+7. **The quotation rule as built.** This replaces the "six words or more"
+   of [deviation 15](#deviations-decided-during-discovery).
+   - A quotation is verified when its words stand in the question or the
+     answer of the one exchange named, as words of their own, with
+     quotation marks made straight, white space made single, case folded
+     and one closing full stop dropped. An ellipsis must be in the
+     transcript.
+   - Any other stretch between double quotation marks, of any length, is
+     listed as a quotation with no attribution.
+   - Every bracket `(run id, exchange)` must follow a verified stretch
+     between double marks at once. Any other is listed: after a
+     paraphrase, in a code span or a fenced block.
+   - A stretch in single quotation marks or guillemets is listed when an
+     attribution follows it or it reads as speech: six words or more, or
+     a sentence.
+   - A synthesis in which no quotation was verified fails.
+   - The check writes `analysis/quote-check.md`, and the launcher runs it
+     whenever `run --role writer` finds the writer done.
+
+   Reason: a real synthesis that set every quotation in single marks
+   passed with nothing checked, and a term in double marks is not told
+   from a quotation by its length.
+8. **A done job says when it is out of date, for three reasons, and each
+   later step refuses until the chain is consistent.** A job is done again
+   by deleting its file and running its role again, and a done job stays
+   done. It is out of date when (a) an analyst's or a critic's interviews
+   were held, went on or ended after its brief was written, (b) a job
+   that a themes job or a writer reads was launched again after its own
+   last launch, or (c) a file a themes job or a writer was given has
+   changed or gone with no job run again, by a fingerprint of each file
+   that its launch records in `runs.json`. The role's own command says so
+   in place of what comes next and exits with 1, the plan says so against
+   the job, a role that reads a job out of date for (b) or (c) is
+   refused, and so is `analyze.py`. The two scripts leave no record, so
+   each is asked what it would write now: the themes job is refused while
+   `notes.csv` is not what the analysts' files give, and the writer while
+   `quant.json` is not what `analyze.py` would write. No file's time is
+   compared. Each role also waits for the file it reads (`notes.csv`,
+   `quant.md`), and the refusal names the script that writes it. Reason:
+   after a real analyst was run again, the themes job, the tallies and
+   the synthesis all read done on the old notes.
+9. **`extract_notes.py` reads whichever of the analysts' and the critics'
+   files exist,** and writes the other CSV file with its header alone.
+   `--allow-incomplete` goes with `--role critic` as with `--role
+   analyst`, and passes over a job none of whose interviews has a turn on
+   record while the others run. A job that was passed over stays pending.
+   Reason: after a pilot, one half of the personas may have no interview,
+   and a critic had nothing it could do on part of a panel.
+10. **A malformed turn-log record is set aside as unread, and blocks. A
+    settlement is on the log whole or not at all.** A record of no known
+    type, one that lacks a field a launcher always writes, or one with
+    another kind of value there, is handed to every reader as unread, so
+    no reader fails on a damaged log. `check_runs.py` blocks on it and
+    names the record, `status` and the plan give it as what stands in the
+    interview's way, and `run` and `resume` leave the interview alone and
+    exit with 1. The records of one settlement are written in one write,
+    each but the last marked as unfinished, so a launcher killed in the
+    write leaves neither a lost turn nor the halt that goes with it, and
+    the next launcher writes both. Reason: the code review found that a
+    half-written settlement lost the halt for good, and that a record
+    with a missing answer was read as an empty one.
+11. **A `--extend` grant is read from the turn log.** The grant is the
+    `resume` record that names the side. The count on the side's
+    `runs.json` entry is a copy, brought level with the log whenever an
+    interview is taken up, and a log that begins again carries every
+    grant in its `start` record. Reason: a launcher killed between the
+    two files lost the grant.
+12. **The `codex` runner also switches image generation off,** with
+    `--disable image_generation`, for every run and job of every study
+    type, beside the two switches of
+    [deviation 11](#deviations-decided-during-discovery), which said that
+    a Codex session that keeps its tools still has it. The no-tools set is
+    the other eight switches, so none is passed twice. Reason: no panellist or job has a reason to
+    make an image.
+13. **An interview study's `quant.md`, `checks.md` and `quote-check.md`
+    carry the synthetic panel notice from the script,** under the title,
+    so each is the same file in the study and in an archived round. A
+    review or a usability study's reports are unchanged and get the line
+    from `archive.py`. Reason: a script run again inside an archived round
+    wrote its report anew without the line. *Where the line goes in a file
+    that lacks it was narrowed in entry 37.*
+14. **`synthesis.context_files` may not name a transcript, a prompt or a
+    log in an interview study.** A path under `interviews/`,
+    `analysis/transcripts/`, `prompts/`, `interviewer/`, `panel/` or
+    `logs/` is refused when `study.json` is loaded, as written or as where
+    a link at it leads. Context files go to the writer alone. Reason: the
+    writer is never given what was said or how it was asked, and the
+    code review found that a context file could hand it a transcript.
+15. **The writer's brief sets a ceiling of 2,500 words,** tables and
+    quotes included, and keeps quotation marks of any kind for attributed
+    quotations: a term, a label, a theme's name and a proposed question
+    go in italics. A question it proposes for the revised guide is held to
+    the method. Reason: the first real synthesis ran to 4,365 words, and a
+    term in double marks failed the quote check.
+16. **The critic is given each persona's facts with the bio.** This is no
+    deviation: the table under [What each side sees](#what-each-side-sees)
+    allows it. It is recorded because the critique brief first lacked
+    them. The brief says the personality and the bio were the
+    participant's own and are no evidence of what was said.
+17. **More refusals, and one reading of the guide.** An interview study
+    also refuses `model_notes`, `debrief` and `limits.followup`, a
+    `leak_terms` that is not a list of words with none empty (an empty
+    term is in every question), and a persona whose id is `interviewer`.
+    `init_study.py` refuses, for every study type, what the plan would
+    refuse of `study.json` alone, and ends each refusal "Nothing was
+    written." A goal that only topics kept from a persona serve is left
+    out of that persona's interviewer prompt, where this PRD gave every
+    goal to every interviewer. Reason for the last: an interviewer told to
+    find out who buys would ask a persona with no topic for it, which is
+    what `segments` is there to prevent.
+18. **An interview reads `running` only while a launcher has the study.**
+    One that a killed launcher left reads as its log reads: `partial`
+    with a turn on record, else `pending`, to `status`, the plan, the
+    usage record and `check_runs.py` alike, and the next step is
+    `resume`, never to wait. This narrows the `running` row of
+    [States](#states), which also gave "a turn's process is alive".
+    Reason: `check_runs.py` told the lead to wait for interviews that
+    nothing carried.
+19. **A session that is gone is asked of both sides before every turn.**
+    Only a side with a reply on record counts. With no answer on record
+    the interview starts afresh, once for a command: its turn log moves
+    to `logs/<run id>.interview-<k>.jsonl`, both sides are launched anew
+    and keep their attempts, their usage and every grant. With an answer
+    on record it is left alone, the command exits with 1, and the line
+    says to move the turn log into `logs/` and use `run` to hold it again.
+    This fills in [Resume](#resume), which left the mechanics open.
+    Reason: asked only of the side about to speak, an interview spent a
+    turn of the other side before it was found that it could not go on.
+20. **A third capability, `no_tools_note`, and a plan in two parts.** A
+    runner with `no_tools` says in `no_tools_note` what "no tools" leaves
+    on its harness, and the plan prints it under "Tools": none at all on
+    Claude Code, and on Codex no shell, no file or image reading and no
+    network, with a patch tool and a few others left. The plan has a
+    section on the study in place of the materials and a table of
+    interviews in place of the runs, and lists the themes job as a model
+    entry of its own. Reason: the plan names no harness, so it could not
+    say by itself that "none" is not literally none on Codex.
+21. **`check_runs.py` differs from the lists under
+    [What `check_runs.py` checks](#what-check_runspy-checks).** An
+    interview that was never started blocks, as a run with no section
+    does. A malformed log blocks, and nothing else of it is checked
+    (entry 10). Topics never opened and a capped interview with no close
+    are noted for a finished interview only. A leak term is looked for in
+    the card as well as in the answers. A question that its words put
+    under another topic than its label is noted (entry 1), and so is a
+    turn log that ends in a write a killed launcher never finished. Under
+    the table the script gives the command for each unfinished interview,
+    and says how to discard one.
+22. **The forms are read line by line, and nothing is guessed.** A note,
+    a critique entry or a theme is a heading and the lines under it, up
+    to the next blank line or heading. Blank lines under the heading and
+    a code fence around the entry are forgiven, and nothing else is. A
+    note is also unparsed when its `Turns` run backwards or name an
+    exchange with no answer on record. A `## <run id>` section is found
+    by the run id in any heading, so that a file which says nothing of an
+    interview can be told from one whose critic marked nothing in it.
+    `Raised` is whose words first brought the note's subject into the
+    interview. `quant.md` has three sections this PRD does not list:
+    themes by persona, the critique's marks by kind and by interview with
+    the critic that marked each, and the verified quotes.
+23. **Four changes reach a review and a usability study.** The Codex
+    switch of entry 12. The names in `--runs` are checked before a job is
+    planned, so a wrong name writes nothing. The plan shows what a job
+    that has run has used and has left of its share of the pool, and
+    measures a job by its finished attempts. And `init_study.py` refuses
+    what the plan would refuse of `study.json` alone. Their reports, their
+    archives and their `runs.json` are otherwise as they were: the plan's
+    and the usage record's JSON gain keys that are null for them.
+24. **`init_study.py --force` moves more than the turn logs.** In an
+    interview study the turn logs and both sets of transcripts go to
+    `logs/interviews-<epoch seconds>/`, with the files of the replaced
+    attempts, any log an earlier fresh start had set aside, and
+    `analysis/usage.md` and `checks.md`. Reason: the new interviews number
+    their attempts from 1 again and would sit among the old ones' files.
+25. **`limits.debrief` defaults to 10 minutes and 2.00 USD a side, and one
+    turn of a debrief has 3 minutes.** `limits.turn` stays an interview
+    study's key and is refused in a review or a usability study. Reason:
+    measured on real harnesses. A side of a six-exchange debrief used 20 to 45
+    seconds. The dearest side cost 0.235 USD, 0.19 of it for the first turn of
+    a usability run, which misses the prompt cache because a debrief turn has
+    no browser tool. A top-tier participant with a session over about 100,000
+    tokens would pay about 1 USD for that turn alone. This settles the figure
+    that [deviation 16](#deviations-decided-during-discovery) left open. The
+    lead.
+26. **The leak gate stays on in a debrief.** A question that holds a
+    `leak_terms` entry is sent back, as in an interview. A leak term in a goal
+    is a printed note and no refusal. One in a topic's opener or area is
+    refused before a debrief is held, by the `debrief` command and in the
+    plan, never when `study.json` is loaded. Reason: in a review or a
+    usability study `leak_terms` are the internal words no panellist may be
+    shown, and a debrief speaks to the panellist, while a goal is never read
+    out.
+27. **Every question to the participant is framed.** The first is inside
+    `assets/debrief-opening.md`, which says what a debrief is, to answer aloud
+    and to write and open nothing, and each later one is under the one line of
+    `assets/debrief-question.md`. In an interview only the words under `SAY`
+    are sent. Reason: the session was told for a whole run to write to its
+    file and, in a usability study, to drive a browser.
+28. **The same command goes on with a debrief.** `interview.py <study> debrief
+    --runs <ids>` again begins one that reads `pending` or `failed` and goes
+    on with one that reads `partial` or `blocked`. `launch.py run` and
+    `resume` take up none: they settle a turn that a killed launcher left, or
+    adopt one still running. `stop` stops one, and `status` names the command.
+    Reason: a debrief is none of the runs and jobs that `run` and `resume`
+    choose among, and its own command says who can be debriefed.
+29. **A debrief topic id may not be a task id,** ignoring case, refused when
+    `study.json` is loaded with "such as D1". Reason: the interviewer is told
+    the tasks by their ids, and a transcript shows a topic id beside them.
+30. **A runner that cannot carry a debrief is no problem of the plan.**
+    [Runners](#runners) had the plan step refuse it. As built the plan lists
+    it under "Debriefs" and exits as it would without it, and the `debrief`
+    command refuses. Reason: it stops a debrief and never `run`, and a review
+    study with a Pi entry must still plan and run.
+31. **A run is debriefed once, and more is refused than this PRD named.** A
+    second debrief of a run that has one, a run on Pi, a study in native mode,
+    an interview study, a run that is not finished, a run whose session is
+    gone, a run with a follow-up question that is not settled, and a persona
+    that the topics' `segments` leave with no topic. A refusal begins no
+    debrief and records nothing of its own. The command first settles what a
+    launcher that is gone left, and can change the records in doing so before
+    it refuses: a turn that has ended since is appended to its turn log and
+    saved to `runs.json`. The dry run writes nothing. Reason: each could not
+    be held, or, for a second debrief, would go on a turn log and a
+    transcript that hold one conversation.
+32. **`--runs all` is every finished run whose debrief is not at its end.** A
+    run that is not finished is left out with no line, as `followup.py ask
+    --runs all` leaves it. One whose debrief reads `done` or `limited` is
+    passed over in one line, and with none left the command says so and exits
+    with 0. The same run named is refused. Reason: `all` after a first pass is
+    how the rest are debriefed, and it was refused once every run had been.
+33. **An unfinished debrief does not hold the analysts and the writer back,
+    and a turn that is not settled does.** With no turn in flight the jobs
+    start, a line names the debriefs and the command that finishes them, and
+    the briefs list what there is as unfinished. The briefs name the analysts'
+    copy of each transcript, written again before the brief. Reason: the lead
+    may want what a stopped debrief got, while an unsettled turn's answer is
+    not on record and its run's persona file may be about to be put back.
+34. **A usability run's evidence folder is kept and put back as its persona
+    file is.** It is copied to `logs/<run id>.<attempt>.before.evidence/`
+    before each turn, a file that differs afterwards is put back with what the
+    turn left kept in `logs/<run id>.<attempt>.rejected.evidence/`, and a file
+    the turn added is left in place and named. This PRD guarded the persona
+    file alone. Reason: a debrief turn can write anywhere under `panel/` on
+    both runners, and the analysts and the archive read the step log and the
+    screenshots. The rest of `panel/` is as open as during any run, and
+    readers are given no copy of the folder while a turn runs.
+35. **A debrief never starts afresh for want of its participant's session.**
+    It is left alone, and the line says that the run cannot be debriefed.
+    Reason: the finished run's session is the only place a debrief can be
+    held, and a fresh start would only find it gone again. An interviewer's
+    session that is gone with no answer on record still starts afresh, as in
+    an interview.
+36. **A debrief that reads `limited` has its transcripts written when it is
+    put down,** not only by `render`. Reason: it is at its end, with no
+    `--extend` ([deviation 17](#deviations-decided-during-discovery)).
+37. **The synthetic panel notice goes under a level-1 title only.** Where a
+    script adds the line to a file that lacks it, it goes under the `# ` title
+    the file opens with, and at the very top when the file opens with anything
+    else. This narrows entry 13 and reaches every study type. Reason: a
+    `themes.md` that opened with `### Theme TH1:` got the line between that
+    heading and its fields, and TH1 left every tally.
+38. **The reason of a turn that used the last of its side's allowance names
+    the whole allowance:** "the participant's turn used the last of its side's
+    budget: none of its $2 left", and of time "none of its 10 min left". The
+    same for an interview study. Reason: the harness's line names the cap that
+    one process was given, the slice that was left, which read as an allowance
+    nobody had set.
+39. **The dry run's time bound counts the grace, a tight cap is noted, and a
+    turn that a killed launcher left is said as it stands.** `--dry-run`
+    prints twice the minutes of `limits.debrief` plus the grace for each side.
+    Of a turn that a launcher that is gone left still running, it says that
+    the command takes it over and goes on, with exit code 0. Of one that has
+    ended with nothing recorded it says "not known" and exits with 1, and
+    judges nothing of that run that settling the turn could change (its
+    session, its runner, the interviewer's), only whether its debrief reads
+    at its end already: `launch.py <study> stop` records the turn and holds
+    no debrief, and a dry run after it says which. A `debrief.turns` that leaves two topics or more
+    fewer than three exchanges each is a note in the dry run and the plan.
+    Reason: a side stopped at its limit gets the grace to finish. Only
+    settling a turn reads whether it was the debrief's last, and settling
+    records, which a dry run may not: one that said "would go on with" of an
+    ended turn was contradicted by the command when that turn had used the
+    last of its side's budget, and one that judged such a run before setting
+    it apart could refuse a run that `--runs all` passes over. And a real
+    debrief of two topics capped at four
+    exchanges never opened the second.
+40. **Other scripts know a debrief.** `init_study.py --force` moves the
+    debriefs of the runs it replaces to `logs/interviews-<epoch seconds>/`,
+    since a new run has the id of the one it replaces. `followup.py` refuses a
+    debrief's interviewer by name. `archive.py` keeps the turn logs and both
+    transcripts, and refuses while a turn of a debrief is in flight.
+    `purge-sessions` covers a run's session and its interviewer's.
+41. **What a debrief records.** A new entry `interviewer-<run id>` with
+    `"kind": "debrief"`, whose file is the turn log. On the finished run's
+    entry: one attempt of kind `debrief` for each turn, its session's totals,
+    and `debrief`, `{"turns", "seconds", "usage"}`. Never its `state`,
+    `reason`, `seconds_used` or `extended`. Reason: the run stays done with
+    the limits and the usage it had, and what its debrief used is counted
+    against `limits.debrief` alone.
+42. **The debrief documentation is a reference file of its own,**
+    `references/debriefs.md`, and `references/interviews.md` keeps a short
+    pointer to it. Reason: an agent loads a reference file whole, and a
+    debrief is held by the lead of a review or usability study, who would
+    otherwise load the 67 KB on interview studies, as the lead of an
+    interview study would the 41 KB on debriefs.
 
 ## Edge cases
 
@@ -2350,10 +3179,49 @@ Contracts the deviations add:
 - the quote check lists a quotation that is not in the exchange it names,
   and one with no attribution (deviation 15)
 
+Changed during the build, in the lists above, each in
+[Deviations decided during the build](#deviations-decided-during-the-build):
+
+- "the tallies count participants": each in exactly one of three groups for
+  a theme and for a topic (build deviation 4)
+- "the quote check lists ... one with no attribution": of any length, and
+  also an attribution that follows no quotation, a quotation in single
+  quotation marks and a synthesis with no verified quotation (build
+  deviation 7)
+- "`extract_notes.py` lists an unparsed note and an unverified quote": and
+  reads whichever of the two roles has written (build deviation 9)
+- "`check_runs.py` blocks on a missing end record": and on a turn log of the
+  wrong form, which `run` and `resume` then leave alone (build deviations 10
+  and 21)
+- "an interview stopped by a limit": the side is named, and `--extend`
+  gives that side one more allowance, read from the turn log (build
+  deviation 11)
+
+Contracts the build adds:
+
+- a question counts for the topic whose opener its words hold, whatever its
+  label says (build deviation 1)
+- each job of the synthesis is given only its own: the guide never reaches
+  an analyst or the themes job, a bio never the writer, and a full
+  transcript only a critic
+- a done job that is out of date says so, and a role that reads it is
+  refused (build deviation 8)
+- an interview with a session that is gone starts afresh only while it has
+  no answer on record (build deviation 19)
+
+Written since, for the two contracts that were left:
+
+- `LauncherTest.test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were`,
+  with a row for the plan of a review study with a Pi entry and three rows in
+  the table of refused keys (milestone 4)
+- `PersonaPanelTest.test_skill_description_is_under_the_1024_characters_a_harness_loads`:
+  the `description` of `SKILL.md` is under 1,024 characters
+
 ## Acceptance criteria
 
 **E2E** means verified with real harnesses. **Tests** means covered by the
-contract tests.
+contract tests. Where each criterion stands is under
+[Acceptance criteria, verified or not](#acceptance-criteria-verified-or-not).
 
 Interviews:
 
@@ -2456,10 +3324,14 @@ Each milestone is usable without the ones after it.
    the transcript, the plan and `check_runs.py`. *Added after discovery:
    the no-tools option of both runners and the two switches added to
    Codex's isolation flags
-   ([deviations 8 and 11](#deviations-decided-during-discovery)).*
+   ([deviations 8 and 11](#deviations-decided-during-discovery)).* *Done on
+   14 October 2026, commit `a989a9e`.*
 3. **Analysis.** Coding, `extract_notes.py`, the themes job, the tallies, the
-   critique and the writer's brief. The archive.
-4. **Debrief interviews** on finished review and usability runs.
+   critique and the writer's brief. The archive. *Done on 14 October 2026,
+   commit `6bf10a3`, with the quote check.*
+4. **Debrief interviews** on finished review and usability runs. *Built
+   and verified on 14 October 2026, with the default of `limits.debrief`
+   set from what was measured.*
 
 ## The user's decisions
 
