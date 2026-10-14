@@ -1,0 +1,458 @@
+/* Panel report kit: baseline styles for persona-panel HTML reports.
+   Layout: one reading column (68ch prose); tables and charts use the full 1040px measure.
+   Light is the default and the only theme on paper. Dark applies when the reader picks it with the
+   page's own button (kit.js), never from the system setting.
+   A project with its own design system overrides the BRAND block below and leaves the rest,
+   or drops this file and styles the same class names itself (kit.html, "Using a project's own design system"). */
+
+/* ---------- BRAND: swap these for the project's own ---------- */
+:root {
+  color-scheme: light;
+  --pp-font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --pp-font-voice: "IBM Plex Serif", Georgia, "Times New Roman", serif; /* spoken words: quotes, questions */
+  --pp-font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; /* run ids, references */
+  --pp-bg: #f1f3f6;
+  --pp-surface: #ffffff;
+  --pp-sunk: #e6e9ee;
+  --pp-ink: #10131a;
+  --pp-ink-2: #3a414f;
+  --pp-ink-3: #5c6372;
+  --pp-line: #d2d6de;
+  --pp-line-2: #a9b0bc;
+  --pp-accent: #2b3a8c;        /* structure: eyebrows, ranks, links, decisions */
+  --pp-accent-wash: #e6e9f8;
+  /* ---------- CHART AND MEANING: a validated set; re-run the palette validator if you change it ----------
+     Series colours (s1 to s6) mark identity: on one page each means one thing, and only that.
+     Interview pages: s1 "raised it, evidence for", s3 "said it is not a problem, evidence against".
+     Review pages: the concepts, A = s1, B = s2, C = s3 and on. Status colours (good, warn, crit) are for states.
+     Neutral greys (n1 to n4) are for composition: the panel, counts by kind, anything without a meaning. */
+  --pp-s1: #2a78d6;
+  --pp-s2: #eb6834;
+  --pp-s3: #1baf7a;
+  --pp-s4: #eda100; --pp-s5: #e87ba4; --pp-s6: #008300; /* further series, in this fixed order; a seventh folds into "Other" */
+  --pp-n1: #3a414f; --pp-n2: #6b7280; --pp-n3: #a3aab6; --pp-n4: #cfd4db;
+  --pp-good: #0ca30c;
+  --pp-warn: #fab219;
+  --pp-serious: #ec835a;
+  --pp-crit: #d03b3b;
+  --pp-on-crit: #ffffff;
+  --pp-good-wash: #dff3dc;
+  --pp-warn-wash: #fdf0cc;
+  --pp-crit-wash: #fbe2e0;
+  /* One-hue scale, low to high. Every step's ink is at least 4.5:1 on its fill in both themes (kit.html lists the ratios). */
+  --pp-seq-1: #cde2fb; --pp-seq-ink-1: #10131a;
+  --pp-seq-2: #86b6ef; --pp-seq-ink-2: #10131a;
+  --pp-seq-3: #3987e5; --pp-seq-ink-3: #10131a;
+  --pp-seq-4: #1c5cab; --pp-seq-ink-4: #ffffff;
+  --pp-seq-5: #0d366b; --pp-seq-ink-5: #ffffff;
+  --pp-radius: 6px;
+}
+@media screen {
+  :root[data-pp-theme="dark"] {
+    color-scheme: dark;
+    --pp-bg: #0e1014; --pp-surface: #171a21; --pp-sunk: #222630;
+    --pp-ink: #f1f3f7; --pp-ink-2: #c4cad5; --pp-ink-3: #99a0ae;
+    --pp-line: #2d323c; --pp-line-2: #4d5361;
+    --pp-accent: #a3b0f2; --pp-accent-wash: #1d2242;
+    --pp-s1: #3987e5; --pp-s2: #d95926; --pp-s3: #199e70;
+    --pp-s4: #c98500; --pp-s5: #d55181; --pp-s6: #008300;
+    --pp-n1: #c4cad5; --pp-n2: #8f97a5; --pp-n3: #5f6674; --pp-n4: #3d434f;
+    --pp-good-wash: #12290f; --pp-warn-wash: #33290d; --pp-crit-wash: #371615;
+    /* In dark the scale runs from the page outwards: the high end is the one that stands out most. */
+    --pp-seq-1: #0d366b; --pp-seq-ink-1: #ffffff;
+    --pp-seq-2: #1c5cab; --pp-seq-ink-2: #ffffff;
+    --pp-seq-3: #3987e5; --pp-seq-ink-3: #10131a;
+    --pp-seq-4: #86b6ef; --pp-seq-ink-4: #10131a;
+    --pp-seq-5: #cde2fb; --pp-seq-ink-5: #10131a;
+  }
+}
+
+/* ---------- Page ---------- */
+body { background: var(--pp-bg); color: var(--pp-ink); font-family: var(--pp-font-ui); font-size: 16px; line-height: 1.55; }
+.pp-page { max-width: 1040px; margin-inline: auto; padding-inline: 20px; padding-block: 40px 72px; display: flex; flex-direction: column; gap: 56px; }
+.pp-page * { box-sizing: border-box; }
+.pp-page a { color: var(--pp-accent); text-underline-offset: 2px; }
+.pp-page :focus-visible { outline: 2px solid var(--pp-accent); outline-offset: 2px; }
+.pp-prose { max-width: 68ch; }
+.pp-prose p { margin: 0 0 0.9em; }
+.pp-prose p:last-child { margin-bottom: 0; }
+.pp-muted { color: var(--pp-ink-2); }
+.pp-small { font-size: 0.85rem; color: var(--pp-ink-2); }
+.pp-ref { font-family: var(--pp-font-code); font-size: 0.8em; color: var(--pp-ink-2); white-space: nowrap; }
+.pp-num { font-variant-numeric: tabular-nums; }
+.pp-block { display: grid; gap: 12px; min-width: 0; } /* a heading and its figure, as one block inside a section */
+
+/* ---------- Header and the synthetic panel notice ---------- */
+.pp-head { display: flex; flex-direction: column; gap: 14px; position: relative; }
+.pp-eyebrow { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pp-accent); margin: 0; max-width: calc(100% - 7.5rem); }
+.pp-head h1 { font-size: clamp(1.8rem, 4.2vw, 2.6rem); line-height: 1.12; font-weight: 600; letter-spacing: -0.015em; margin: 0; text-wrap: balance; max-width: 22ch; }
+.pp-question { font-family: var(--pp-font-voice); font-size: 1.15rem; color: var(--pp-ink-2); margin: 0; max-width: 60ch; }
+/* The notice text is fixed by the skill. Restyle the box if a brand needs it; never reword or hide it. */
+.pp-notice { margin: 0; padding: 12px 16px 12px 46px; position: relative; background: var(--pp-surface); border: 1.5px solid var(--pp-ink); border-radius: var(--pp-radius); font-weight: 500; max-width: 78ch; }
+.pp-notice::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 30px; border-radius: var(--pp-radius) 0 0 var(--pp-radius); border-right: 1.5px solid var(--pp-ink);
+  background: repeating-linear-gradient(135deg, var(--pp-ink) 0 1.5px, transparent 1.5px 6px); }
+/* Specimen: a second notice under the first, on a page whose data is invented. Amber and dashed, so it cannot pass for a study. */
+.pp-notice.specimen { background: var(--pp-warn-wash); border-style: dashed; font-weight: 400; }
+.pp-notice.specimen::before { border-right-style: dashed; background: repeating-linear-gradient(135deg, var(--pp-warn) 0 3px, transparent 3px 6px); }
+.pp-notice.specimen b { font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; font-size: 0.82rem; margin-right: 6px; }
+.pp-meta { display: flex; flex-wrap: wrap; gap: 12px 36px; margin: 6px 0 0; padding: 16px 0 0; border-top: 1px solid var(--pp-line-2); }
+.pp-meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pp-meta dt { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pp-ink-3); }
+.pp-meta dd { margin: 0; font-weight: 600; font-size: 1.05rem; }
+
+/* ---------- Verdict: the answer, how sure, and what to do next, in three cells under the notice ---------- */
+.pp-verdict { margin: 0; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr); background: var(--pp-surface); border: 1.5px solid var(--pp-ink); border-radius: var(--pp-radius); }
+.pp-verdict > div { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px 16px; min-width: 0; }
+.pp-verdict > div + div { border-left: 1px solid var(--pp-line-2); }
+.pp-verdict dt { font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600; color: var(--pp-ink-2); }
+.pp-verdict dd { margin: 0; font-size: 1.02rem; line-height: 1.45; font-weight: 500; }
+.pp-verdict > div:first-child dd { font-size: 1.12rem; font-weight: 600; }
+/* How sure: a word (low, medium, high), never a number. Three bars repeat the word for the eye. */
+.pp-sure { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin-right: 4px; }
+.pp-sure::before { content: ""; flex: none; width: 34px; height: 10px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--pp-ink) 0 30%, transparent 30% 35%, var(--pp-line-2) 35% 65%, transparent 65% 70%, var(--pp-line-2) 70%); }
+.pp-sure.medium::before { background: linear-gradient(90deg, var(--pp-ink) 0 30%, transparent 30% 35%, var(--pp-ink) 35% 65%, transparent 65% 70%, var(--pp-line-2) 70%); }
+.pp-sure.high::before { background: linear-gradient(90deg, var(--pp-ink) 0 30%, transparent 30% 35%, var(--pp-ink) 35% 65%, transparent 65% 70%, var(--pp-ink) 70%); }
+@media (max-width: 760px) {
+  .pp-verdict { grid-template-columns: minmax(0, 1fr); }
+  .pp-verdict > div + div { border-left: 0; border-top: 1px solid var(--pp-line-2); }
+}
+
+/* ---------- On this page: kit.js fills an empty <nav class="pp-toc"></nav> from the section headings ---------- */
+.pp-toc { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; font-size: 0.88rem; margin: 0; }
+.pp-toc:empty { display: none; }
+.pp-toc .label { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--pp-ink-3); }
+.pp-page .pp-toc a { color: var(--pp-ink-2); text-decoration-color: var(--pp-line-2); }
+.pp-page .pp-toc a:hover { color: var(--pp-accent); text-decoration-color: currentColor; }
+.pp-section, .pp-stuck { scroll-margin-top: 16px; }
+
+/* ---------- Sections ---------- */
+.pp-section { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.pp-section > h2 { font-size: 1.4rem; line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; margin: 0; text-wrap: balance; padding-top: 16px; border-top: 2px solid var(--pp-ink); }
+.pp-section h3 { font-size: 1.02rem; font-weight: 600; margin: 0; }
+.pp-lede { margin: -8px 0 0; color: var(--pp-ink-2); max-width: 68ch; }
+.pp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.pp-grid > * { min-width: 0; }
+.pp-grid.two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 24px 32px; }
+
+/* Takeaways: numbered because they are ranked by strength of evidence */
+.pp-take { list-style: none; margin: 0; padding: 0; counter-reset: take; display: grid; gap: 0; border-top: 1px solid var(--pp-line); }
+.pp-take li { counter-increment: take; display: grid; grid-template-columns: 2.2rem 1fr; gap: 4px 12px; padding: 16px 0; border-bottom: 1px solid var(--pp-line); }
+.pp-take li::before { content: counter(take); font-family: var(--pp-font-code); font-size: 0.82rem; font-weight: 500; width: 1.75rem; height: 1.75rem; display: grid; place-items: center; border-radius: 50%; background: var(--pp-accent); color: var(--pp-surface); }
+.pp-take strong { display: block; font-size: 1.08rem; font-weight: 600; }
+.pp-take span { grid-column: 2; color: var(--pp-ink-2); max-width: 68ch; }
+
+/* Callouts: limit (what not to conclude), caution (lean on less), decision (only the user can make) */
+.pp-callout { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.pp-callout > strong { font-size: 0.78rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--pp-ink-2); font-weight: 600; }
+.pp-callout p, .pp-callout ul { margin: 0; max-width: 72ch; }
+.pp-callout ul:not(.pp-list) { padding-left: 1.1em; display: grid; gap: 4px; }
+.pp-callout.limit { background: var(--pp-warn-wash); border-color: var(--pp-warn); } /* amber: read before you conclude anything */
+.pp-callout.decision { border-color: var(--pp-accent); background: var(--pp-accent-wash); }
+.pp-callout.decision > strong { color: var(--pp-accent); }
+
+/* ---------- Chips, pills, legend, swatches ---------- */
+.pp-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; line-height: 1; padding: 4px 8px; border: 1px solid var(--pp-line-2); border-radius: 999px; color: var(--pp-ink-2); background: var(--pp-surface); white-space: nowrap; }
+.pp-chip.model { font-family: var(--pp-font-code); border-radius: 4px; }
+.pp-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 500; line-height: 1; padding: 4px 9px 4px 7px; border-radius: 999px; background: var(--pp-sunk); color: var(--pp-ink); white-space: nowrap; }
+.pp-pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--pp-ink-3); flex: none; }
+.pp-pill.solved, .pp-pill.good { background: var(--pp-good-wash); }
+.pp-pill.partly, .pp-pill.missed { background: var(--pp-warn-wash); }
+.pp-pill.regressed, .pp-pill.flag { background: var(--pp-crit-wash); }
+.pp-pill.solved::before { background: var(--pp-good); }
+.pp-pill.partly::before { background: linear-gradient(90deg, var(--pp-warn) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--pp-warn); }
+.pp-pill.missing::before { background: transparent; box-shadow: inset 0 0 0 2px var(--pp-serious); }
+.pp-pill.regressed::before { background: var(--pp-crit); border-radius: 0; clip-path: polygon(0 10%, 100% 10%, 50% 100%); }
+.pp-pill.flag::before { background: var(--pp-crit); border-radius: 0; clip-path: polygon(0 0, 100% 0, 100% 60%, 30% 60%, 30% 100%, 0 100%); }
+.pp-pill.good::before { background: var(--pp-good); }
+.pp-pill.missed::before { background: transparent; box-shadow: inset 0 0 0 2px var(--pp-warn); }
+.pp-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.82rem; color: var(--pp-ink-2); margin: 0; padding: 0; list-style: none; }
+.pp-legend li { display: inline-flex; align-items: center; gap: 7px; }
+/* Series identity: one class names the series a thing belongs to, and the parts that take a colour read --pp-c from it. */
+.pp-s1 { --pp-c: var(--pp-s1); } .pp-s2 { --pp-c: var(--pp-s2); } .pp-s3 { --pp-c: var(--pp-s3); }
+.pp-s4 { --pp-c: var(--pp-s4); } .pp-s5 { --pp-c: var(--pp-s5); } .pp-s6 { --pp-c: var(--pp-s6); }
+/* Swatch: a legend key for a series (with a pp-s class) or a step of the heat scale (h1 to h5). Always beside a word or a number. */
+.pp-sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; flex: none; vertical-align: -1px; background: var(--pp-c, var(--pp-n2)); }
+.pp-sw.h1 { background: var(--pp-seq-1); } .pp-sw.h2 { background: var(--pp-seq-2); } .pp-sw.h3 { background: var(--pp-seq-3); }
+.pp-sw.h4 { background: var(--pp-seq-4); } .pp-sw.h5 { background: var(--pp-seq-5); }
+.pp-legend .scale { gap: 3px; }
+.pp-legend .scale .pp-num { margin-inline: 4px; }
+.pp-table tbody th .pp-sw { margin-right: 7px; }
+
+/* ---------- Quotes ---------- */
+.pp-quote { margin: 0; padding: 0 0 0 16px; border-left: 3px solid var(--pp-c, var(--pp-s1)); display: flex; flex-direction: column; gap: 8px; min-width: 0; } /* blue: evidence for, unless a pp-s class names its series */
+.pp-quote blockquote { margin: 0; font-family: var(--pp-font-voice); font-size: 1.06rem; line-height: 1.5; }
+.pp-quote figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 0.84rem; color: var(--pp-ink-2); }
+.pp-quote.counter { border-left: 3px dashed var(--pp-c, var(--pp-s3)); } /* dashed: evidence against, a non-problem or counterexample */
+.pp-quote.plain { border-left-color: var(--pp-line-2); } /* words that are neither for nor against: a usability run's log */
+
+/* ---------- Personas ---------- */
+.pp-persona { display: grid; grid-template-columns: 40px 1fr; gap: 4px 12px; background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 14px 16px; }
+.pp-avatar { grid-row: span 3; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--pp-line-2); display: grid; place-items: center; font-family: var(--pp-font-code); font-size: 0.72rem; color: var(--pp-ink);
+  background: repeating-linear-gradient(135deg, var(--pp-line) 0 1.5px, transparent 1.5px 5px); font-weight: 500; } /* hatched: an invented person */
+.pp-persona strong { font-weight: 600; }
+.pp-persona p { margin: 0; grid-column: 2; font-size: 0.88rem; color: var(--pp-ink-2); }
+.pp-persona .pp-chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+/* ---------- Tables ---------- */
+.pp-scroll { overflow-x: auto; border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); background: var(--pp-surface); position: relative; } /* positioned, so screen-reader text inside stays in the box */
+.pp-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.pp-table th, .pp-table td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--pp-line); }
+.pp-table thead th { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--pp-ink-2); background: var(--pp-sunk); white-space: nowrap; vertical-align: bottom; border-bottom: 1px solid var(--pp-line-2); }
+.pp-table thead th.wrap { white-space: normal; min-width: 9rem; }
+.pp-table tbody tr:last-child > * { border-bottom: 0; }
+.pp-table tbody th { font-weight: 600; min-width: min(13rem, 40vw); }
+.pp-table td.n, .pp-table th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pp-table .sub { display: block; font-weight: 400; font-size: 0.84rem; color: var(--pp-ink-2); margin-top: 2px; }
+/* Group row: a sub-heading inside a table body, such as a segment above its personas. <tr class="group"><th colspan="..." scope="colgroup"> */
+.pp-table tr.group > th { background: var(--pp-sunk); font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; color: var(--pp-ink-2); padding-block: 6px; }
+.pp-caption { font-size: 0.84rem; color: var(--pp-ink-2); margin: -8px 0 0; max-width: 78ch; }
+
+/* ---------- Unit marks: one square per simulated participant (use up to about 12) ---------- */
+.pp-units { display: inline-flex; flex-wrap: wrap; gap: 3px; vertical-align: middle; }
+.pp-u { width: 16px; height: 16px; border-radius: 3px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--pp-line-2); }
+.pp-u.r { background: var(--pp-s1); box-shadow: none; }
+.pp-u.n { background: var(--pp-s3); box-shadow: none; }
+.pp-u.b { background: linear-gradient(135deg, var(--pp-s1) 0 47%, var(--pp-surface) 47% 53%, var(--pp-s3) 53% 100%); box-shadow: none; }
+.pp-u.on { background: var(--pp-ink-2); box-shadow: none; }
+.pp-u.c { background: var(--pp-c, var(--pp-n2)); box-shadow: none; } /* in the colour of its series: add a pp-s class */
+/* Split bar: the same three groups for larger panels. Children carry style="--n: <count>" */
+.pp-split { display: flex; gap: 2px; height: 12px; min-width: 120px; }
+.pp-split > i { flex: var(--n) 0 0; min-width: 3px; border-radius: 2px; background: var(--pp-line-2); }
+.pp-split > i.r { background: var(--pp-s1); }
+.pp-split > i.n { background: var(--pp-s3); }
+.pp-split > i.b { background: repeating-linear-gradient(90deg, var(--pp-s1) 0 4px, var(--pp-s3) 4px 8px); }
+.pp-split > i[style*="--n: 0"], .pp-split > i[style*="--n:0"] { display: none; }
+
+/* Evidence counts beside a theme */
+.pp-evid { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.84rem; color: var(--pp-ink-2); }
+.pp-evid b { font-weight: 600; color: var(--pp-ink); font-variant-numeric: tabular-nums; }
+.pp-evid .zero { color: var(--pp-ink-3); }
+.pp-evid .zero b { color: var(--pp-ink-3); font-weight: 400; }
+
+/* ---------- Bar list: counts by kind (one measure, one neutral hue unless a tone names a state) ---------- */
+.pp-bars { display: grid; grid-template-columns: max-content minmax(60px, 1fr) max-content; gap: 8px 12px; align-items: center; font-size: 0.9rem; margin: 0; }
+.pp-bars dt { color: var(--pp-ink-2); }
+.pp-bars dd { margin: 0; }
+.pp-bars .bar { height: 10px; border-radius: 0 4px 4px 0; background: var(--pp-c, var(--pp-n2)); width: calc(var(--n) / var(--max, 10) * 100%); min-width: 2px; }
+.pp-bars .val { font-variant-numeric: tabular-nums; font-weight: 500; }
+.pp-bars.good .bar { background: var(--pp-good); }
+.pp-bars.warn .bar { background: var(--pp-warn); }
+.pp-bars.crit .bar { background: var(--pp-crit); }
+.pp-bars.wrap { grid-template-columns: minmax(0, 11rem) minmax(60px, 1fr) max-content; } /* long labels wrap instead of pushing the bars off a phone */
+
+/* ---------- Dot plot: scores on one shared scale (review studies) ---------- */
+.pp-dotplot { display: grid; grid-template-columns: minmax(8rem, max-content) 1fr; gap: 0 16px; align-items: center; font-size: 0.9rem; }
+.pp-dotplot .label { padding: 9px 0; font-weight: 500; }
+.pp-dotplot .label .sub { display: block; font-weight: 400; font-size: 0.82rem; color: var(--pp-ink-2); }
+.pp-dotplot .track { position: relative; height: 100%; min-height: 36px; border-bottom: 1px solid var(--pp-line); background: linear-gradient(90deg, var(--pp-line) 1px, transparent 1px) 0 0 / var(--grid, 25%) 100%; border-right: 1px solid var(--pp-line); }
+.pp-dotplot .dot { position: absolute; left: var(--x); top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--pp-ink-3); box-shadow: 0 0 0 2px var(--pp-surface); }
+.pp-dotplot .dot.mean { width: 16px; height: 16px; margin: -8px 0 0 -8px; background: var(--pp-c, var(--pp-ink)); z-index: 1; } /* ink, or the colour of the row's series */
+.pp-dotplot .val { position: absolute; left: var(--x); top: 50%; transform: translate(14px, -50%); font-weight: 600; font-variant-numeric: tabular-nums; background: var(--pp-surface); padding: 0 4px; border-radius: 3px; z-index: 2; }
+.pp-dotplot .axis { position: relative; height: 22px; font-size: 0.76rem; color: var(--pp-ink-3); font-variant-numeric: tabular-nums; }
+.pp-dotplot .axis span { position: absolute; left: var(--x); transform: translateX(-50%); top: 5px; }
+.pp-dotplot .axis span:first-child { transform: none; }
+.pp-dotplot .axis span:last-child { transform: translateX(-100%); }
+.pp-dotplot.dense .dot:not(.mean) { width: 8px; height: 8px; margin: -4px 0 0 -4px; box-shadow: none; opacity: 0.4; } /* past about 30 dots a row: the pile shows where runs gather */
+.pp-plot { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 16px 20px 10px; min-width: 0; }
+
+/* ---------- Heat cells: one hue (classes h1 to h5, low to high). Pair the table with a pp-sw scale key ---------- */
+.pp-heat td { vertical-align: middle; }
+.pp-heat td.h { text-align: center; font-variant-numeric: tabular-nums; font-weight: 500; min-width: 3.4rem; border-bottom: 2px solid var(--pp-surface); border-left: 2px solid var(--pp-surface); }
+.pp-heat td.h1 { background: var(--pp-seq-1); color: var(--pp-seq-ink-1); }
+.pp-heat td.h2 { background: var(--pp-seq-2); color: var(--pp-seq-ink-2); }
+.pp-heat td.h3 { background: var(--pp-seq-3); color: var(--pp-seq-ink-3); }
+.pp-heat td.h4 { background: var(--pp-seq-4); color: var(--pp-seq-ink-4); }
+.pp-heat td.h5 { background: var(--pp-seq-5); color: var(--pp-seq-ink-5); }
+.pp-heat td.lead { box-shadow: inset 0 0 0 2px var(--pp-ink), inset 0 0 0 4px var(--pp-surface); } /* an ink ring and a surface ring: one of them shows on every step */
+
+/* ---------- Matrix cells: yes / no / partly / not checked, with a text label for screen readers ---------- */
+.pp-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; flex: none; }
+.pp-mark.yes { background: var(--pp-ink); }
+.pp-mark.no { box-shadow: inset 0 0 0 1.5px var(--pp-line-2); }
+.pp-mark.part { background: linear-gradient(90deg, var(--pp-ink) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px var(--pp-ink); }
+.pp-mark.na { border: 1.5px dashed var(--pp-ink-3); } /* not checked or not measured: never reads as a "no" */
+.pp-mark.first { background: var(--pp-c, var(--pp-s1)); box-shadow: 0 0 0 2px var(--pp-surface), 0 0 0 3.5px var(--pp-c, var(--pp-s1)); width: 14px; height: 14px; }
+.pp-marks { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 4px; vertical-align: middle; } /* several runs in one cell */
+.pp-marks .pp-mark, .pp-legend .pp-mark { width: 14px; height: 14px; }
+.pp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.pp-table td.c, .pp-table th.c { text-align: center; }
+.pp-table tr.solo > * { background: var(--pp-warn-wash); }
+
+/* ---------- Learning goals: what was heard, and what was heard against ---------- */
+.pp-goal { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 18px 20px; display: grid; gap: 14px; }
+.pp-goal header { display: flex; gap: 10px; align-items: baseline; }
+.pp-goal header .pp-ref, .pp-goal header .tag { color: var(--pp-accent); font-size: 0.85rem; }
+.pp-goal header .tag { font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600; white-space: nowrap; }
+.pp-goal .sides { display: grid; gap: 14px 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.pp-goal .sides > div { min-width: 0; }
+.pp-goal h4 { margin: 0 0 4px; font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--pp-ink-2); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.pp-goal h4::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--pp-s1); }
+.pp-goal .sides > div + div h4::before { background: var(--pp-s3); } /* the second side is what was heard against */
+.pp-goal p { margin: 0; color: var(--pp-ink-2); }
+
+/* ---------- Annotated question: the interviewer's question, the mark, a better question ---------- */
+.pp-exchange { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 16px 18px; display: grid; gap: 10px; min-width: 0; align-content: start; }
+.pp-exchange .who { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.82rem; color: var(--pp-ink-2); }
+.pp-exchange .q, .pp-exchange .a { margin: 0; font-family: var(--pp-font-voice); font-size: 1.04rem; line-height: 1.5; }
+.pp-exchange .a { color: var(--pp-ink-2); padding-left: 16px; border-left: 2px solid var(--pp-line-2); }
+.pp-exchange .note { margin: 0; font-size: 0.9rem; color: var(--pp-ink-2); }
+.pp-exchange .better { margin: 0; font-size: 0.92rem; padding: 10px 12px; background: var(--pp-good-wash); border-radius: 4px; }
+.pp-exchange .better b { display: block; font-size: 0.72rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--pp-ink-3); font-weight: 600; margin-bottom: 2px; }
+.pp-exchange .better i { font-family: var(--pp-font-voice); font-size: 1.02rem; }
+
+/* ---------- Guide and plain lists ---------- */
+.pp-guide { margin: 0; padding: 0; list-style: none; counter-reset: g; display: grid; gap: 0; border-top: 1px solid var(--pp-line); }
+.pp-guide li { counter-increment: g; display: grid; grid-template-columns: 2.2rem 1fr; gap: 2px 12px; padding: 14px 0; border-bottom: 1px solid var(--pp-line); }
+.pp-guide li::before { content: counter(g); font-family: var(--pp-font-code); font-size: 0.85rem; color: var(--pp-ink-3); padding-top: 4px; }
+.pp-guide .ask { font-family: var(--pp-font-voice); font-size: 1.08rem; }
+.pp-guide .how { grid-column: 2; font-size: 0.9rem; color: var(--pp-ink-2); max-width: 68ch; }
+.pp-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; max-width: 72ch; }
+.pp-list li { padding-left: 22px; position: relative; }
+.pp-list li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 10px; height: 1.5px; background: var(--pp-ink-3); }
+.pp-list b { font-weight: 600; }
+.pp-list.open li::before { width: 9px; height: 9px; top: 0.42em; left: 1px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--pp-ink-3); border-radius: 2px; } /* unproven: an unticked box */
+/* Ranked: lighter than pp-take, for fixes in order */
+.pp-list.ranked { counter-reset: rank; }
+.pp-list.ranked li { counter-increment: rank; padding-left: 30px; }
+.pp-list.ranked li::before { content: counter(rank); top: 0.2em; left: 0; width: auto; height: auto; background: none; font-family: var(--pp-font-code); font-size: 0.82rem; color: var(--pp-ink-3); }
+
+/* ---------- Files: the markdown record behind the page, a path and a line on what it holds ---------- */
+.pp-files { margin: 0; display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 0; border-top: 1px solid var(--pp-line); }
+.pp-files dt, .pp-files dd { margin: 0; padding: 11px 0; border-bottom: 1px solid var(--pp-line); }
+.pp-files dt { font-family: var(--pp-font-code); font-size: 0.84rem; overflow-wrap: anywhere; padding-right: 28px; }
+.pp-files dd { color: var(--pp-ink-2); font-size: 0.92rem; }
+@media (max-width: 680px) { .pp-files { grid-template-columns: minmax(0, 1fr); } .pp-files dt { border-bottom: 0; padding-bottom: 0; padding-right: 0; } .pp-files dd { padding-top: 3px; } }
+
+/* ---------- ICP tiers and asks (review studies) ---------- */
+.pp-tier { display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: 6px 20px; padding: 14px 0; border-bottom: 1px solid var(--pp-line); }
+.pp-tier:first-child { border-top: 1px solid var(--pp-line); }
+.pp-tier .name { font-weight: 600; }
+.pp-tier .who { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-tier p { grid-column: 2; margin: 0; color: var(--pp-ink-2); max-width: 68ch; }
+
+/* ---------- Concept scorecard: one option, its series colour and two headline numbers. Add a pp-s class ---------- */
+.pp-concept { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-top: 4px solid var(--pp-c, var(--pp-line-2)); border-radius: var(--pp-radius); padding: 14px 16px 16px; display: grid; gap: 4px; align-content: start; }
+.pp-concept .tag { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pp-ink-2); font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.pp-concept strong { font-size: 1.08rem; font-weight: 600; }
+.pp-concept p { margin: 0; font-size: 0.9rem; color: var(--pp-ink-2); }
+.pp-concept dl { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--pp-line); display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.pp-concept dl div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pp-concept dt { font-size: 0.8rem; color: var(--pp-ink-2); }
+.pp-concept dd { margin: 0; order: -1; font-size: 1.9rem; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.pp-concept dd small { font-size: 0.86rem; font-weight: 400; letter-spacing: 0; color: var(--pp-ink-2); }
+
+/* ---------- Usability: steps, routes, stuck points, screenshots ---------- */
+.pp-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; max-width: 76ch; }
+.pp-steps li { display: grid; grid-template-columns: 2.4rem 1fr; gap: 2px 12px; padding: 10px 0 14px; position: relative; }
+.pp-steps li > * { grid-column: 2; min-width: 0; } /* the action, and everything after it, in the content column */
+.pp-steps li::before { content: attr(data-n); font-family: var(--pp-font-code); font-size: 0.8rem; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--pp-surface); border: 1px solid var(--pp-line-2); color: var(--pp-ink-2); z-index: 1; }
+.pp-steps li::after { content: ""; position: absolute; left: 13px; top: 36px; bottom: 0; width: 1px; background: var(--pp-line-2); }
+.pp-steps li:last-child::after { display: none; }
+.pp-steps li.stuck::before { background: var(--pp-crit); border-color: var(--pp-crit); color: var(--pp-on-crit); }
+.pp-steps li.done::before { background: var(--pp-ink); border-color: var(--pp-ink); color: var(--pp-surface); }
+.pp-steps li.range::before { width: auto; min-width: 26px; padding-inline: 5px; border-radius: 13px; justify-self: start; } /* data-n="2-3": quiet steps in one row */
+.pp-steps .act { font-weight: 500; }
+.pp-steps .say { font-family: var(--pp-font-voice); color: var(--pp-ink-2); margin: 0; }
+.pp-steps .ref { font-size: 0.84rem; color: var(--pp-ink-2); }
+.pp-steps img, .pp-steps .pp-shot, .pp-steps .pp-zoom, .pp-steps .pp-fig { margin-top: 6px; }
+.pp-shot, .pp-steps img { max-width: min(100%, 420px); border: 1px solid var(--pp-line-2); border-radius: 4px; display: block; }
+/* Route strip: one cell for each step the task allows, one strip a run, so runs compare at a glance */
+.pp-routes { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 12px 16px; align-items: center; }
+.pp-routes > .pp-chip { justify-self: start; }
+.pp-strip { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-start; gap: 3px; min-width: 0; }
+.pp-strip li, .pp-key { flex: 1 1 0; min-width: 0; max-width: 28px; aspect-ratio: 1; display: grid; place-items: center; border-radius: 4px; font-family: var(--pp-font-code); font-size: 0.7rem; font-variant-numeric: tabular-nums; background: var(--pp-sunk); color: var(--pp-ink-2); }
+.pp-strip li.stuck, .pp-key.stuck { background: var(--pp-crit-wash); box-shadow: inset 0 0 0 2px var(--pp-crit); color: var(--pp-ink); font-weight: 500; }
+.pp-strip li.done, .pp-key.done { background: var(--pp-ink); color: var(--pp-surface); }
+.pp-strip li.spare, .pp-key.spare { background: transparent; box-shadow: inset 0 0 0 1px var(--pp-line-2); color: var(--pp-ink-3); }
+.pp-key { flex: none; width: 14px; border-radius: 3px; }
+.pp-routes + .pp-legend { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--pp-line); }
+@media (max-width: 560px) { .pp-routes { grid-template-columns: minmax(0, 1fr); gap: 6px; } .pp-routes .pp-small { margin-bottom: 10px; } }
+/* Stuck point: where, what happened, how many runs, their words. Add "wide" to set the screenshot beside the words */
+.pp-stuck { background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-top: 3px solid var(--pp-crit); border-radius: var(--pp-radius); padding: 16px 18px; display: grid; gap: 8px; }
+.pp-stuck .where { font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pp-ink-3); font-weight: 600; }
+.pp-stuck strong { font-size: 1.05rem; }
+.pp-stuck p { margin: 0; color: var(--pp-ink-2); }
+.pp-stuck .body { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.pp-stuck .hit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 0.88rem; }
+.pp-stuck.wide { grid-template-columns: minmax(0, 1fr); gap: 16px 28px; align-items: start; }
+@media (min-width: 800px) { .pp-stuck.wide { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); } }
+/* Screenshot figure: the image, and its run, step and file under it. <button class="pp-zoom"> opens it full size (kit.js) */
+.pp-fig { margin: 0; display: grid; gap: 6px; min-width: 0; align-content: start; }
+.pp-fig figcaption { font-size: 0.8rem; color: var(--pp-ink-2); }
+.pp-zoom { display: block; width: 100%; max-width: 420px; padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 4px; font: inherit; }
+.pp-zoom img, .pp-steps .pp-zoom img { display: block; width: 100%; max-width: 100%; height: auto; margin: 0; border: 1px solid var(--pp-line-2); border-radius: 4px; }
+.pp-lightbox { width: min(94vw, 740px); padding: 12px; border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); background: var(--pp-surface); color: var(--pp-ink); }
+.pp-lightbox::backdrop { background: color-mix(in srgb, var(--pp-bg) 82%, transparent); }
+.pp-lightbox img { display: block; width: 100%; height: auto; border: 1px solid var(--pp-line-2); border-radius: 4px; cursor: zoom-out; }
+.pp-lightbox form { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; }
+.pp-lightbox p { margin: 0; }
+.pp-lightbox button { font: inherit; font-size: 0.84rem; padding: 5px 12px; border: 1px solid var(--pp-line-2); border-radius: 4px; background: var(--pp-sunk); color: var(--pp-ink); cursor: pointer; }
+
+/* ---------- Usage, footer, tooltip ---------- */
+.pp-foot { border-top: 1px solid var(--pp-line); padding-top: 20px; font-size: 0.84rem; color: var(--pp-ink-2); display: grid; gap: 6px; }
+.pp-foot p { margin: 0; max-width: 80ch; }
+.pp-tip { position: fixed; z-index: 50; pointer-events: none; max-width: 260px; padding: 7px 10px; font-size: 0.8rem; line-height: 1.35; background: var(--pp-ink); color: var(--pp-bg); border-radius: 4px; transform: translate(-50%, calc(-100% - 10px)); }
+[data-tip] { cursor: default; }
+
+@media (max-width: 560px) {
+  .pp-page { gap: 44px; padding-block: 28px 56px; }
+  .pp-dotplot { grid-template-columns: 1fr; }
+  .pp-dotplot .label { padding-bottom: 0; }
+  .pp-bars { grid-template-columns: max-content 1fr max-content; }
+  .pp-bars.wrap { grid-template-columns: minmax(0, 9rem) minmax(48px, 1fr) max-content; }
+  .pp-tier { grid-template-columns: 1fr; }
+  .pp-tier p { grid-column: 1; }
+}
+@media (prefers-reduced-motion: no-preference) { .pp-u, .pp-dotplot .dot { transition: transform 0.12s; } .pp-u[data-tip]:hover { transform: scale(1.2); } }
+
+/* ---------- Fold: a section the reader opens when they want it. On paper every fold prints open. ---------- */
+.pp-fold { border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); background: var(--pp-surface); min-width: 0; }
+.pp-fold > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 14px 44px 14px 18px; position: relative; font-weight: 600; font-size: 1.05rem; }
+.pp-fold > summary::-webkit-details-marker { display: none; }
+.pp-fold > summary::after { content: ""; position: absolute; right: 20px; top: 50%; width: 9px; height: 9px; margin-top: -7px; border-right: 2px solid var(--pp-ink-2); border-bottom: 2px solid var(--pp-ink-2); transform: rotate(45deg); }
+.pp-fold[open] > summary::after { transform: rotate(-135deg); margin-top: -2px; }
+.pp-fold > summary .count { font-weight: 400; font-size: 0.9rem; color: var(--pp-ink-2); }
+.pp-fold > .body { display: grid; gap: 22px; padding: 20px 18px; border-top: 1px solid var(--pp-line); min-width: 0; }
+.pp-fold > .body > * { min-width: 0; }
+.pp-fold.plain { border: 0; background: none; }
+.pp-fold.plain > summary { padding: 6px 26px 6px 0; font-size: 0.84rem; font-weight: 500; color: var(--pp-ink-2); display: inline-flex; }
+.pp-fold.plain > summary::after { right: 4px; width: 7px; height: 7px; margin-top: -6px; }
+.pp-fold.plain > .body { padding: 8px 0 0; border-top: 0; }
+
+/* ---------- Stat tiles: the size of the study in three or four numbers ---------- */
+.pp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 0; }
+.pp-stat { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; background: var(--pp-sunk); border-radius: var(--pp-radius); }
+.pp-stat dd { margin: 0; order: -1; font-size: 2rem; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+.pp-stat dt { font-size: 0.84rem; color: var(--pp-ink-2); }
+
+/* ---------- Charts (drawn by kit.js with Chart.js; each carries its numbers in a fold) ---------- */
+.pp-chart { margin: 0; display: grid; gap: 10px; min-width: 0; background: var(--pp-surface); border: 1px solid var(--pp-line-2); border-radius: var(--pp-radius); padding: 16px 18px 12px; align-content: start; }
+.pp-chart > figcaption { font-weight: 600; }
+.pp-chart > figcaption small { display: block; font-weight: 400; font-size: 0.84rem; color: var(--pp-ink-2); }
+.pp-canvas { position: relative; height: var(--h, 260px); min-width: 0; }
+.pp-canvas canvas { max-width: 100%; }
+
+/* ---------- Panel: persona cards that open, and the models that played them ---------- */
+.pp-persona .pp-more { grid-column: 2; margin-top: 6px; }
+.pp-persona .pp-more > summary { cursor: pointer; font-size: 0.84rem; color: var(--pp-accent); }
+.pp-persona .pp-more ul { margin: 8px 0 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: 0.88rem; color: var(--pp-ink-2); }
+.pp-persona .trait { font-style: italic; }
+
+/* ---------- Theme button (kit.js adds it to .pp-head) ---------- */
+.pp-theme { position: absolute; top: -4px; right: 0; font: inherit; font-size: 0.8rem; padding: 5px 11px; border: 1px solid var(--pp-line-2); border-radius: 999px; background: var(--pp-surface); color: var(--pp-ink); cursor: pointer; }
+.pp-theme:hover { border-color: var(--pp-ink); }
+
+/* ---------- Paper: always light, colours kept, nothing split across pages ---------- */
+@media print {
+  :root { --pp-bg: #ffffff; }
+  body { font-size: 10.5pt; }
+  .pp-page { max-width: none; padding: 0; gap: 28px; }
+  .pp-theme, .pp-tip, .pp-toc, .pp-lightbox, [data-copy] { display: none !important; }
+  .pp-scroll { overflow: visible; }
+  .pp-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pp-section > h2, .pp-section h3 { break-after: avoid; }
+  .pp-callout, .pp-goal, .pp-exchange, .pp-stuck, .pp-quote, .pp-persona, .pp-plot, .pp-chart, .pp-stat, .pp-verdict, .pp-concept, .pp-take li, .pp-guide li, .pp-steps li, .pp-tier, .pp-table tr { break-inside: avoid; }
+  .pp-verdict { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .pp-page a { color: inherit; text-decoration: none; }
+}

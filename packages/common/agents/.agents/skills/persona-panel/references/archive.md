@@ -13,7 +13,8 @@ Keep two tiers:
   customer-research/
     <yyyy-mm-dd>-<topic>/            date the study finished + short topic slug
       README.md                      study card: question, rounds, method, headline, links
-      report/index.html              the visual report (source of any published page)
+      report/                        the study's visual summary page: the last round's report/, or one
+                                     written for every round (source of any published page)
       findings/                      synthesis per round (round-1.md, round-2.md) and the ICP
       inputs/                        briefs, decisions and constraints given to designers
       concepts/<id>/                 each concept's source, once, with its gallery index: a site's folder,
@@ -22,6 +23,8 @@ Keep two tiers:
       panel/round-<n>/               one folder per panel round (archive.py)
         study.json  study-brief.md  key.md  forms.json  runs.json  followups.json  panel-instructions.md
         personas/  prompts/  analysis/  scripts/ (only if the round used one-off scripts)
+        report/                      the round's page as the lead left it: index.html, kit.css, kit.js,
+                                     standalone.html and anything beside them (references/report-page.md)
         evidence/<run id>/           usability only: steps.jsonl and the screenshots of its steps
         interviews/                  interviews and debriefs: the turn log and full transcript of each
 ```
@@ -44,6 +47,7 @@ What travels with a round besides the persona files:
 - `analysis/`, whole: `usage.md`, `runs.csv`, `answers.csv` and `lines.csv` with it, and the analysts' copies of the transcripts in `analysis/transcripts/`, in an interview study and in a study that held debriefs. An archived round still analyses.
 - `study-brief.md`: what was agreed with the user, hypotheses included.
 - `forms.json`: whether each `files` concept is images, PDFs or both. An archive without `--concepts` has no source file to tell them apart, and `analyze.py` needs it for the format caution (`references/method.md`). `archive.py` writes it from the source files while they can be read, else from the study's own copy.
+- `report/`: the round's visual summary page, whole. The page carries the notice itself, so its HTML is copied byte for byte. In a usability study its files are scanned for secrets with every other kept file, but a screenshot inside the page cannot be: the page must show none that the evidence rules below leave out.
 - `followups.json`: the follow-up questions asked and how each run answered. The answers themselves are in the persona files. `archive.py` refuses a study with a follow-up that is not settled: its persona file may hold what settling will reject, and an archive has no `logs/` to put it back from. It also refuses a study that a launcher has, and holds the study lock while it copies the round, so no follow-up starts under the copy. Of a study it cannot write, as in a read-only sandbox, it keeps a shared lock on `.launch.lock` for as long, which turns every launcher away: one that tries says that something is reading the study, and to try again. A study at rest has that file to share: `init_study.py` makes it and no launcher removes it. Only a study from before that has none, and there `archive.py` refuses a study with a run on record as running and copies any other unprotected (`references/runners.md`, A lead on Codex).
 
 ## What the copy reads
@@ -141,13 +145,13 @@ Everything archived carries the notice, word for word (`references/communicating
 
 - **`archive.py` adds it to every markdown file it copies that lacks it:** under the `# ` title the file opens with, or at the very top when it opens with anything else, a `##` or deeper heading included, so a theme or a note that opens a file keeps its fields directly under its heading. A file that has the line anywhere is left alone, so archiving twice changes nothing. The closing line says the same both times: how many markdown files of the round carry the notice, not how many were given it.
 - **CSV, JSON and every other kind of file are copied byte for byte,** as is everything `--concepts` copies.
-- **The lead adds it to what the script does not write:** under the title of the study card README, of each file in `findings/`, of the product repo's findings README and of the report page. A synthesis copied into `findings/` already has it. Check it survived any editing.
+- **The lead adds it to what the script does not write:** under the title of the study card README, of each file in `findings/`, of the product repo's findings README and of the report page (which `report_kit.py <study> init` writes into the starting page). A synthesis copied into `findings/` already has it. Check it survived any editing.
 
 ## Steps
 
 1. `archive.py <study-dir> --dest <repo>/customer-research/<date-topic>/panel/round-<n> --concepts` for each round (use `--concepts` once).
 2. Write the study card README and copy the synthesis into `findings/`. Each carries the synthetic panel notice under its title.
-3. Copy the report source into `report/`. A published artifact link is account-private; keep the HTML in the repo.
+3. Copy the last round's `panel/round-<n>/report/` to the study's `report/`, or write one page for every round there. A published page's link may be private to an account, so keep the HTML in the repo.
 4. Add a line to the repo README index.
 5. Mark anything invented for the concepts (placeholder prices, unconfirmed claims) as unconfirmed in the study card, so later readers don't treat it as fact.
 6. Check size before committing: `du -sh`. Screenshots at 50% JPEG are about 100 to 700 KB per page; use Git LFS only if a study exceeds ~100 MB.

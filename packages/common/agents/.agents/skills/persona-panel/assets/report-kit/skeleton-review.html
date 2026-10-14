@@ -1,0 +1,91 @@
+<title>${STUDY}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<link rel="stylesheet" href="kit.css">
+<!-- A starting point from report_kit.py init. Every part, its markup and the helpers are in the skill's assets/report-kit/kit.html; a finished page of this type, with invented data, is example-review-specimen.html beside it. Restyle, reorder, drop or add sections as the study needs. Keep the notice word for word, counts with their base, verbatim quotes with their references, the evidence against and the limits, and Go deeper. -->
+<div class="pp-page">
+
+  <header class="pp-head">
+    <p class="pp-eyebrow">Review study</p>
+    <h1>The question the round asked</h1>
+    <p class="pp-notice">${NOTICE}</p>
+    <dl class="pp-verdict">
+      <div><dt>The answer</dt><dd>One sentence.</dd></div>
+      <div><dt>How sure</dt><dd><span class="pp-sure low">Low:</span> the reason in a few words.</dd></div>
+      <div><dt>Do next</dt><dd>The one action to take.</dd></div>
+    </dl>
+    <dl class="pp-meta">
+      <div><dt>Runs</dt><dd>N of M finished</dd></div>
+      <div><dt>Personas</dt><dd>N, each on M models</dd></div>
+      <div><dt>Concepts</dt><dd>N</dd></div>
+      <div><dt>Used</dt><dd>$0.00 where reported</dd></div>
+    </dl>
+    <nav class="pp-toc"></nav>
+  </header>
+
+  <section class="pp-section">
+    <h2 data-toc="Short version">The short version</h2>
+    <!-- A pp-concept card per concept, which sets the page's colour key (A is s1), then up to three takeaways (pp-take) with their counts and base. -->
+  </section>
+
+  <section class="pp-section">
+    <div id="panel"></div>
+    <!-- PP.panel fills this fold: who was on the panel, what every panellist was told, which model did which job. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Which won">Which concept won</h2>
+    <!-- The leaderboard with its spread (PP.dotplot), and first choices (PP.donut), from quant.json. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Why">Why it won</h2>
+    <!-- The factors that made the difference, with the concepts by factor heat table (pp-heat) in a fold. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="For whom">For whom</h2>
+    <!-- The ICP signal: scores by segment, and who it suits (pp-tier: ideal, strong, not yet, out of scope). -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Across models">Does it hold across models</h2>
+    <!-- Whether the result follows the model, with every run's first choice (the first choice matrix) in a fold. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="In their words">In their words</h2>
+    <!-- Verbatim quotes, each with persona, model and run, in the series colour of its concept. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="What to change">What to change</h2>
+    <!-- What the panel asked for (the asks tracker), what regressed since the last round, and the fixes in order. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Before you act">Before you act on it</h2>
+    <!-- The decisions only the user can make (pp-callout decision), claims the concepts invented, and the limits (pp-callout limit). -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Go deeper">Go deeper</h2>
+    <p class="pp-lede">This page is the skim. The study's markdown files are the full record, at these paths in the study folder.</p>
+    <dl class="pp-files">
+      <dt>analysis/SYNTHESIS.md</dt><dd>The full written findings, with every caveat.</dd>
+      <dt>analysis/quant.md</dt><dd>Every table behind this page: the leaderboard, factors, models, segments and fit.</dd>
+      <dt>analysis/qual-1.md</dt><dd>The analyst's reading of the reviews.</dd>
+      <dt>panel/personas/</dt><dd>Each run's own review: scores, ranking, notes and any follow-up answers.</dd>
+      <dt>analysis/usage.md</dt><dd>Tokens, time and cost by role and by run.</dd>
+    </dl>
+  </section>
+
+  <footer class="pp-foot">
+    <p>What was used, the date, and which model and harness did each job.</p>
+  </footer>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="kit.js"></script>
+<script>
+/* The page reads no file: paste the cut of analysis/quant.json, study.json and runs.json it needs here as constants.
+   kit.html, "PP.panel from the study files", maps study.json and runs.json to PP.panel. */
+</script>

@@ -16,7 +16,7 @@ The text is `NOTICE` in `scripts/panel_lib.py`. Copy it, never paraphrase it: `a
 | An interview study's `analysis/quant.md`, `analysis/checks.md` and `analysis/quote-check.md` | `analyze.py`, `check_runs.py` and `interview.py <study> quotes`, each under the report's title. A review or a usability study's `quant.md` and `checks.md` get it from `archive.py` alone |
 | Every markdown file of an archived round | `archive.py`, where the line is missing |
 | The end-of-study message to the user | The lead |
-| The visual summary page, under its title | The lead |
+| The visual summary page, under its title | The lead. `report_kit.py <study> init` writes it into the starting page, and `bundle` refuses a page without it |
 | The study card README, each file in `findings/` and the product repo's findings README | The lead (`references/archive.md`) |
 
 The line is there so that nothing read on its own is taken for research with real people.
@@ -56,8 +56,6 @@ Rules for the report:
 - **Open every screenshot you cite** before you send the report. A stuck point from `quant.md` alone is a script's guess from page addresses.
 - **A test account's name is the test's.** Where a screen greets a name that is not the persona's, the name came from the provision script: never report it as a finding about the product.
 - **Never quote a secret.** Identifiers of test accounts may appear. Show no screenshot from a run whose panellist was given a secret to type.
-
-On a visual summary page, replace the leaderboard, matrix and answer sections below with: completion by task as paired bars (claimed, checked), the stuck points with their screenshots, where runs stopped, and a persona x model grid of each task's outcome. `analysis/quant.json` has `completion`, `steps`, `stopped` and `stuck_points`.
 
 ## Reporting debrief findings
 
@@ -108,24 +106,10 @@ Unproven: that the problem exists outside this panel, that this segment puts it 
 Used: 1.9 million tokens, $1.62 at list price where reported. Quote check: passed.
 ```
 
-On a visual summary page, replace the leaderboard, matrix and answer sections below with: the themes as rows with the three groups, unprompted, incident and effort, the coverage of each topic, model agreement by persona, the quotes, and two or three annotated exchanges. `analysis/quant.json` has `themes`, `coverage`, `model_agreement`, `critique` and `quotes`.
-
 ## Visual summary page
 
-When the session can publish a page, a one-page visual summary is the best way to share a panel. Sections that worked in the Sept 2026 study:
+Every study ends with one, built from the report kit and sent with the end-of-study message: `references/report-page.md`. The notice and the rules above hold on it as in any report. Beyond the kit's recipes (`assets/report-kit/kit.html`, Recipes):
 
-1. Header: question, the synthetic panel notice directly under the title, run and review counts, personas, models.
-2. Three headline takeaways.
-3. Leaderboard as a dot plot (truncated axes are fine for dots, not bars), coloured by concept type, with the gap marked.
-4. Reviewer quotes, each with persona role, model, and one line of context.
-5. Per-run matrix: persona x model rows, concept columns, the run's first choice filled.
-6. Factor heat table: concepts x factors, leader outlined.
-7. Round-over-round dumbbell: previous winners vs current, per factor.
-8. Find-the-answer bars (Found / Partly per question), from the "Find the answer" table.
-9. Lines not believed (with counts) and lines to keep, from "Lines that recur".
-10. Asks tracker across rounds with status pills (solved, partly, missing, regressed).
-11. ICP tiers: ideal, strong, not yet, gatekeepers, out of scope, each with personas, fit, why, and a quote.
-12. Recommendation and decisions.
-13. Method and caveats, including "simulated buyers" and model-skew notes.
-
-`analysis/quant.json` holds the data for most of these (leaderboard, factors, per-model levels, persona agreement, fit, and `answers`, `lines`, `replicates` and `variants` when their tables were written). An archived example is `report/index.html` in the TomoBroker research repo's `customer-research/2026-09-25-homepage-concepts/`.
+- **Review, where their tables were written:** the find-the-answer verdicts (found and partly, per question) and the lines not believed and the lines to keep, each with its count.
+- **A follow-up round:** each factor beside the last round's winner, and the asks tracker since that round.
+- **Axes:** a dot plot's axis may start where the scores do, never a bar chart's.

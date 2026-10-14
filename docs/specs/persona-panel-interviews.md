@@ -3061,6 +3061,17 @@ documents, 42.
     debrief is held by the lead of a review or usability study, who would
     otherwise load the 67 KB on interview studies, as the lead of an
     interview study would the 41 KB on debriefs.
+43. **Every study ends with a visual summary page built from an HTML
+    report kit,** added at the user's request after the documents pass. The
+    kit is in `assets/report-kit/`: a stylesheet, a helper script and a
+    documentation page with every part, a recipe per study type and the
+    mapping from the study files, beside three finished example pages.
+    `scripts/report_kit.py` starts a study's page in `<study>/report/` from
+    the skeleton of its type and bundles it into one standalone file, and
+    `archive.py` keeps `report/` with the round. Codex reviewed the kit, and
+    two fresh agents built pages from it. Reason: the markdown files stay the
+    full record, and the user wanted a skimmable starting point that prints
+    and can be passed on.
 
 ## Edge cases
 

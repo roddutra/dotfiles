@@ -5,7 +5,11 @@ Kept: study.json, key.md, runs.json, prompts/, analysis/ (usage.md and runs.csv 
 panel/_panel-instructions.md, panel/personas/ and, when the study has them, study-brief.md (what
 was agreed with the user is part of the record) and followups.json (the questions behind the
 "## Follow-up <n>" sections of the persona files, which check_runs.py reads) and interviews/ (the
-turn logs and full transcripts of an interview study, below). Dropped: the site
+turn logs and full transcripts of an interview study, below) and report/ (the visual summary
+page, report_kit.py: index.html, kit.css, kit.js, standalone.html and whatever the lead put
+beside them. The page carries the notice itself, so an HTML file is copied byte for byte; in a
+usability study it is scanned for secrets with every other kept file, and a screenshot inside it
+cannot be). Dropped: the site
 copies, in panel/sites or <study>/sites (the archive keeps the concepts once, separately),
 panel/materials (regenerate with capture.py), panel/scratch, logs/ (raw harness output, which
 contains everything a panellist read and wrote), .launch.lock, which every study has and which
@@ -194,6 +198,7 @@ KEEP = {  # study path -> archive path
     "panel/_panel-instructions.md": "panel-instructions.md",
     "panel/personas": "personas",
     pl.INTERVIEWS: pl.INTERVIEWS,  # the turn logs and the full transcripts: the same path, so an archived round reads
+    "report": "report",  # the visual summary page and its kit (report_kit.py), as the lead left them
 }
 IGNORED = ("__pycache__", ".DS_Store")  # the names left out of a folder, whatever is under them
 SCALE = 50     # per cent of its size a step's screenshot is brought down to, as snapshot.py does a concept's page

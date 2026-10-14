@@ -808,8 +808,14 @@ class PersonaPanelTest(unittest.TestCase):
         (self.sd / "panel/personas/drafts/__pycache__").mkdir(parents=True)
         (self.sd / "panel/personas/drafts/__pycache__/notes.pyc").write_bytes(b"x")
         (self.sd / "prompts/unused").mkdir()
+        # The visual summary page travels whole, its HTML as it is: the page carries the notice itself.
+        (self.sd / "report").mkdir()
+        page = {"report/index.html": b"<h1>Round 1</h1>\n", "report/kit.css": b"body {}\n"}
+        for name, content in page.items():
+            (self.sd / name).write_bytes(content)
         dest = Path(self.tmp.name) / "archive/customer-research/2026-09-25-t/panel/round-1"
         run("archive.py", self.sd, "--dest", dest)
+        self.assertEqual({name: (dest / name).read_bytes() for name in page}, page)
         self.assertIn("What was agreed.", (dest / "study-brief.md").read_text())
         self.assertTrue((dest / "personas").is_dir())
         self.assertTrue((dest / "panel-instructions.md").exists())
@@ -855,6 +861,47 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertEqual(again, {name: content for name, content in first.items() if name != "study-brief.md"})
         self.assertIn(gone.relative_to(self.sd).as_posix(), again)
         self.assertEqual(empty(), stuck)
+
+    def test_report_page_starts_from_its_type_and_bundles_into_one_file_that_needs_no_kit_beside_it(self):
+        import panel_lib as pl
+        kit = pl.ASSETS / "report-kit"
+        usability = {"type": "usability", "runner": "claude", "concepts": None, "find_the_answer": None,
+                     "target": {"base_url": "http://app.localhost:8080"},
+                     "tasks": [{"id": "T1", "goal": "See what it costs."}]}
+        studies = {"review": self.sd, "usability": self.study("usability", **usability),
+                   "interview": self.study("interviews", **self.interview())}
+        for kind, sd in studies.items():
+            with self.subTest(kind):
+                if sd != self.sd:
+                    run("init_study.py", sd)
+                run("report_kit.py", sd, "init")
+                page = (sd / "report/index.html").read_text()
+                self.assertIn(f'<p class="pp-notice">{pl.NOTICE}</p>', page)
+                self.assertIn(f'<p class="pp-eyebrow">{kind.capitalize()} study</p>', page)
+                said = run("report_kit.py", sd, "bundle").stdout
+                standalone = (sd / "report/standalone.html").read_text()
+                self.assertIn(str(sd / "report/standalone.html"), said)
+                self.assertTrue(standalone.lower().startswith("<!doctype html>"))
+                self.assertIn(pl.NOTICE, standalone)
+                # Both kit files inlined whole, so the page opens with nothing beside it.
+                for name in ("kit.css", "kit.js"):
+                    self.assertIn((kit / name).read_text().rstrip(), standalone)
+                self.assertIsNone(re.search(r"""(?:href|src)\s*=\s*["'](?:\./)?kit\.(?:css|js)""", standalone, re.I))
+        # Inlined, a closing script tag in kit.js would end the script there.
+        self.assertNotIn("</script", (kit / "kit.js").read_text().lower())
+        # A kit file the lead restyled is kept unless --force, and the page is never overwritten.
+        report = self.sd / "report"
+        (report / "kit.css").write_text("/* the project's own */\n")
+        (report / "index.html").write_text("<h1>Mine</h1>\n")
+        r = run("report_kit.py", self.sd, "init", check=False)
+        self.assertEqual((r.returncode, "--force" in r.stderr), (1, True), r.stderr)
+        self.assertEqual((report / "kit.css").read_text(), "/* the project's own */\n")
+        run("report_kit.py", self.sd, "init", "--force")
+        self.assertEqual(((report / "kit.css").read_bytes(), (report / "index.html").read_text()),
+                         ((kit / "kit.css").read_bytes(), "<h1>Mine</h1>\n"))
+        # A page that lost the notice is not bundled.
+        r = run("report_kit.py", self.sd, "bundle", check=False)
+        self.assertEqual((r.returncode, "synthetic panel notice" in r.stderr), (1, True), r.stderr)
 
     def test_archive_reads_nothing_through_a_link_or_a_special_file_and_one_that_fails_leaves_no_part_of_itself(self):
         self.fill_all()
