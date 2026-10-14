@@ -1,0 +1,88 @@
+<title>${STUDY}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<link rel="stylesheet" href="kit.css">
+<!-- A starting point from report_kit.py init. Every part, its markup and the helpers are in the skill's assets/report-kit/kit.html; a finished page of this type is example-usability.html beside it. Restyle, reorder, drop or add sections as the study needs. Keep the notice word for word, counts with their base, verbatim quotes with their references, the evidence against and the limits, and Go deeper. Show no screenshot from a run whose panellist was given a secret to type. -->
+<div class="pp-page">
+
+  <header class="pp-head">
+    <p class="pp-eyebrow">Usability study</p>
+    <h1>The task the runs attempted</h1>
+    <p class="pp-notice">${NOTICE}</p>
+    <dl class="pp-verdict">
+      <div><dt>The answer</dt><dd>One sentence.</dd></div>
+      <div><dt>How sure</dt><dd><span class="pp-sure low">Low:</span> the reason in a few words.</dd></div>
+      <div><dt>Do next</dt><dd>The one action to take.</dd></div>
+    </dl>
+    <dl class="pp-meta">
+      <div><dt>Runs</dt><dd>N of M finished</dd></div>
+      <div><dt>Personas</dt><dd>N, each on M models</dd></div>
+      <div><dt>Tasks</dt><dd>N, N with a success check</dd></div>
+      <div><dt>Used</dt><dd>$0.00 where reported</dd></div>
+    </dl>
+    <nav class="pp-toc"></nav>
+  </header>
+
+  <section class="pp-section">
+    <h2 data-toc="What blocked them">What blocked the runs</h2>
+    <!-- The worst stuck points (pp-take), each with how many runs hit it, then both standing cautions in a limit callout. -->
+  </section>
+
+  <section class="pp-section">
+    <div id="panel"></div>
+    <!-- PP.panel fills this fold: who took part, what every run was told, which model did which job. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Claimed and checked">Claimed against checked</h2>
+    <!-- The task matrix: what each run claimed beside what the success check found, with na for a task that has no check. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Stuck points">Where they got stuck</h2>
+    <!-- A pp-stuck card per stuck point: the screen, the runs that hit it, their words, the screenshot (pp-zoom), and the references note. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="The path">Where the runs went</h2>
+    <!-- The route strip (pp-routes), one strip a run, then one run's step by step (pp-steps) in a fold. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Debrief">What the debrief added</h2>
+    <!-- Only if runs were debriefed: each answer tied to the step it explains, said as asked, in a fold. Drop this section otherwise. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="What to change">What to change</h2>
+    <!-- The fixes in order (pp-list ranked), each tied to its stuck point or mismatch. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="How far to trust it">How far to trust this</h2>
+    <!-- What was not measured: runs incomplete or stopped at a limit, tasks without a check, and what to test with real people. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Go deeper">Go deeper</h2>
+    <p class="pp-lede">This page is the skim. The study's markdown files are the full record, at these paths in the study folder.</p>
+    <dl class="pp-files">
+      <dt>analysis/SYNTHESIS.md</dt><dd>The full written findings, with every citation and caveat.</dd>
+      <dt>analysis/quant.md</dt><dd>The counts: completion as claimed and as checked, steps taken, where runs stopped.</dd>
+      <dt>analysis/qual-1.md</dt><dd>The analyst's reading of the step logs and screenshots.</dd>
+      <dt>panel/evidence/&lt;run id&gt;/</dt><dd>Each run's step log and the screenshots of its steps.</dd>
+      <dt>panel/personas/</dt><dd>Each run's own feedback, scores and notes.</dd>
+      <dt>analysis/checks.md</dt><dd>The run checks.</dd>
+      <dt>analysis/usage.md</dt><dd>Tokens, time and cost by role and by run.</dd>
+    </dl>
+  </section>
+
+  <footer class="pp-foot">
+    <p>What was used, the date, and which model and harness did each job.</p>
+  </footer>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="kit.js"></script>
+<script>
+/* The page reads no file: paste the cut of analysis/quant.json, study.json and runs.json it needs here as constants.
+   kit.html, "PP.panel from the study files", maps study.json and runs.json to PP.panel. */
+</script>

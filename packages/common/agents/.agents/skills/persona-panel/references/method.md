@@ -29,6 +29,7 @@ Each harness's own default system prompt also stays in a panellist's context. Th
 - Default on the `claude` runner: `["opus", "fable"]` for follow-ups; add sonnet (and haiku only with its model notes) for a wide first round where model skew itself is a question.
 - A model entry without `model` uses the harness's default, which depends on the account. Name the model when rounds must compare.
 - A model reached through the `pi` runner, on a local or OpenAI-compatible endpoint above all, is a new model every time: in the pilot, check that it quotes text that appears only in a screenshot, since a model wrongly listed as reading images reviews without them and says nothing. Expect to need `model_notes` (`references/runners.md`, `pi`).
+- **An interview study has a floor, by tier.** Both sides need a mid-tier model or larger, never a vendor's smallest and fastest tier, and the interviewer the strongest model available. No model is named as the floor, because models change, and the launcher holds it by behaviour: a participant whose first reply is not its situation card fails its interview there (`references/interviews.md`, Models). The advice above on a vendor's smallest model is for review panels.
 - Capabilities differ between runners. Every runner of the skill can browse, each with gaps of its own, which the plan lists. If a runner that cannot browse is ever in the panel, set `"browse": false` so every panellist works from the same materials (see the switches lesson under Capture).
 
 ## What agent panellists add (October 2026 trial)
@@ -90,7 +91,7 @@ Both are set in `study.json` before scaffolding, and both add runs: a study has 
 
 ## Limits and the plan
 
-Every run has two limits, and they cover all its attempts: the first, the retry and every resume. A usability run has a third, a step limit for each task (`references/usability.md`).
+Every run has two limits, and they cover all its attempts: the first, the retry and every resume. A usability run has a third, a step limit for each task (`references/usability.md`). An interview has limits for each of its two sides, one for a single turn, and caps in exchanges (`references/interviews.md`, `study.json`).
 
 | Limit | Enforced by | Default |
 |---|---|---|
@@ -98,14 +99,16 @@ Every run has two limits, and they cover all its attempts: the first, the retry 
 | `budget_usd` | The harness, on runners with a budget cap. Elsewhere only the time limit bounds a run | $2 per run, $5 for the synthesis pool, $0.50 per follow-up question |
 
 - **Set limits from the materials.** A 14-concept run took about 7 minutes in Sept 2026. Raise one slow model entry with `limits.overrides` instead of raising everyone.
-- **The synthesis pool is separate.** It is divided equally among the analysts and the writer, each share a cap, and panellist runs never spend it.
+- **The synthesis pool is separate.** It is divided equally among the analysts and the writer (and, in an interview study, the critics and the themes job), each share a cap, and panellist runs never spend it. A job that is run again spends from the same share, and the plan shows what it has used and has left.
 - **Follow-up questions are separate too, and outside the ceiling.** Each run asked has `limits.followup` for each question, apart from its run limits. `plan` and `status` say how many were asked.
+- **So are debriefs.** Each of the two sides of a debrief has `limits.debrief` over all its turns, 10 minutes and $2.00 by default, and `plan` and `status` say what the debriefs on record have used.
 - **Read `launch.py plan` before anything starts, and again after the pilot.** It works before scaffolding and capture too, and says what is missing. `run`, `pilot` and `resume` start no panellist run while a concept has nothing captured or is short of a page, state or item: they name the concept, what it lacks and `capture.py`.
 - **The estimate is a forecast.** Before any run has finished it is a token figure only (about 20k tokens of context per concept page, times what a run opens: each web page, each page of a PDF and each supplied image counts as one), with no dollar figure, because the skill keeps no price tables. After a pilot it is the mean of what each model entry's finished runs reported, times the runs to go. A pilot is one run per model entry, so treat it as rough.
 - **A run whose reported usage is known to be short counts for the time only.** That is a finished run with a process that was stopped before reporting, or whose usage came in one total with a follow-up's. The plan says how many it left out of the mean tokens and cost, so a run measures the same whether or not it was asked a follow-up.
 - **Billed tokens are several times the context figure.** Every turn re-reads the context, mostly from cache: one ten-command run in discovery reported 182,000 input tokens, 167,000 of them cached. Expect the pilot's figure to be well above the pre-pilot one.
-- **The ceiling is a maximum only when every run and job has an enforced cap.** Otherwise it is labelled an estimate and the uncapped runs are left out of it.
-- **Read the ceiling's caveats.** The plan never calls the figure guaranteed without them. A cap checked after each turn (the `claude` runner) can be overshot by one turn. A process stopped at its time limit, or by `stop`, can end before it reports what it spent: `status` and `analysis/usage.md` show "not reported (process was stopped)", and until its session is resumed and reports its total, the attempt that resumes it can be given more budget than is left.
+- **The ceiling is a maximum only when every run and job has an enforced cap.** Otherwise it is labelled an estimate and the uncapped runs are left out of it. The synthesis pool is in the figure whole all the same: a job on a runner without a cap has its share counted, nothing enforces it, and the plan names the job.
+- **No setting holds a study to a total in dollars.** Each cap is one run's, one side's or one job's, and on a runner without a budget cap (`codex`, `pi`) only the time limit bounds a run. `codex` reports tokens and no cost, and the skill keeps no price tables, so what its runs cost is not capped beforehand, not known afterwards, and not something to work out from the tokens. When the user sets a dollar limit, tell them before anything starts: limits that add up to less than it are a plan and no guarantee, and the total reported afterwards will leave out what the `codex` runs cost. A guaranteed maximum needs every run and job on a runner with a cap, and still carries the caveats below.
+- **Read the ceiling's caveats.** The plan never calls the figure guaranteed without them. A cap checked after each turn (the `claude` runner) can be overshot by one turn: a real writer job used $0.36 of a $0.30 share. A process stopped at its time limit, or by `stop`, can end before it reports what it spent: `status` and `analysis/usage.md` show "not reported (process was stopped)", and until its session is resumed and reports its total, the attempt that resumes it can be given more budget than is left.
 - **Dollar figures are list-price equivalents** under a subscription login: how much allowance is used, not what is paid.
 - **Confirm three things with the user from the plan:** the estimate and ceiling, which provider receives the materials, and each runner's gaps (no budget cap, what it could not switch off, what browsing opens). The plan also names any environment variable that can change who is billed.
 - **Browsing gives each run in flight a browser of its own,** about 330 MiB, which the launcher starts before the run and stops after it (`references/runners.md`, Browser sessions). The plan gives the total for the concurrency in force, and says what the session refuses: a panellist can click, type and take screenshots, and cannot run scripts or read page source, cookies or storage. On a small machine lower `runners.<name>.concurrency`. Set `"browse": false` when the captured materials are enough: a Codex run that may browse has network access in its shell.
@@ -123,7 +126,7 @@ Measured in the Sept 2026 study (Claude models, native mode):
 
 - Images dominate: roughly 20k tokens per concept page reviewed. Above ~8 single-page concepts, split the panel (each persona reviews a subset in balanced blocks) or drop haiku.
 - Check the user's usage headroom before a large panel. A session usage limit cut off 10 of 18 runs mid-review in round 2, and they resumed cleanly. The launcher now marks such runs `blocked`, stops new launches on that runner only, and `resume` continues them once the limit lifts.
-- `analysis/usage.md` is the record of what was used: per run, per role, per model key and in total, rewritten after every process that ends. What follow-up questions used is under the role "follow-up" and in no run's own row. It says "not reported" where a harness gave no figure (the `codex` runner reports tokens only), and "not reported (process was stopped)" where the launcher stopped a process before it reported: that usage is unknown, not zero. Give the user the total when reporting, with what is missing from it.
+- `analysis/usage.md` is the record of what was used: per run, per role, per model key and in total, rewritten after every process that ends. What follow-up questions used is under the role "follow-up" and in no run's own row. It says "not reported" where a harness gave no figure (the `codex` runner reports tokens only), and "not reported (process was stopped)" where the launcher stopped a process before it reported: that usage is unknown, not zero. Give the user the total when reporting, with what is missing from it: a total such as "$1.6063 (3 not reported)" is a subtotal, never the study's cost.
 - "unallocated" in `analysis/usage.md` and `status` is one total that a follow-up reported for itself and for a process of its run that had been stopped before reporting. Nothing can split it: it is in the total, under the role "unallocated", and in neither the run's row nor the follow-up's.
 
 ## Running
@@ -159,7 +162,7 @@ Native mode has its own running notes in `references/runners.md`.
 | `blocked` | The harness reported a usage limit, rate limit or capacity refusal | `resume` once it takes requests again | "Incomplete runs" only; analysts wait unless `--allow-incomplete` |
 | `failed` | The process ended with nothing written | `run` | "Incomplete runs" only |
 
-- **The persona file decides `done`**, never the exit code.
+- **The persona file decides `done`**, never the exit code. In an interview study the turn log does, and an interview's states are read from it: `references/interviews.md`, States.
 - **A section without its score row is not scored,** so its run stays `partial`. `resume` names the section and asks for the score table to be added to it, with nothing else changed.
 - **Incomplete runs stay out of the headline tables** because a run that stopped early scored only the first concepts in its review order, and concepts are compared within a run. Their Overall scores appear in the "Incomplete runs" table of `quant.md` and nowhere else.
 - **Report "N of M runs complete"** with the results. A persona left with one complete model has no model agreement, so its preference is one model's taste.
@@ -213,6 +216,15 @@ What is enforced, on a study that runs through runners:
 - **Asking again** is a new `ask` with the same question file. It becomes the next follow-up, with the next number.
 - **`ask` exits 0** when every run asked has its section, and 1 otherwise.
 - **`check_runs.py` notes** a follow-up section that `followups.json` does not record as an answer, and a recorded answer whose section is missing. Neither blocks.
+
+## Debrief interviews
+
+`interview.py <study> debrief --runs <ids>|all` has an interviewer agent question finished runs of a review or usability study, each in the session it worked in, about what it did, saw and expected. `references/debriefs.md` covers it: the `debrief` block of `study.json`, the cost, the command, who is refused, what it writes and how much to trust it.
+
+- **A follow-up or a debrief.** A follow-up puts one wording to every run, so the answers compare, and each lands in the persona file. A debrief is a conversation that follows each answer up, so it goes deeper with one run and compares nothing across runs.
+- **After the runs, before the analysts.** The usual order is: the runs, `check_runs.py`, the scores and `analyze.py`, then any debriefs and follow-up questions, then `launch.py <study> run --role analyst`. The analysts' and the writer's briefs name the transcripts only of debriefs held before those jobs start.
+- **Nothing of the run changes.** Its state, scores and persona file are as they were, so the tables of `quant.md` are the same before and after. The answers are product feedback and qualitative evidence only, cited as given in a debrief, in answer to a question.
+- **Not on `pi`, and not in native mode.** Debrief before `purge-sessions`.
 
 ## Capture lessons
 
@@ -275,9 +287,21 @@ A study with one concept answers "how does this land, and for whom", not "which 
 
 ## Usability studies
 
-`"type": "usability"` is the other kind of study: panellists attempt tasks in a running local build through a browser, and the analysis reports completion and stuck points instead of a leaderboard. `references/usability.md` covers it: when to use one, designing tasks and success checks, test accounts, the protocol, running, reading the results, safety and how much to trust them.
+`"type": "usability"` is a second kind of study: panellists attempt tasks in a running local build through a browser, and the analysis reports completion and stuck points instead of a leaderboard. `references/usability.md` covers it: when to use one, designing tasks and success checks, test accounts, the protocol, running, reading the results, safety and how much to trust them.
 
-What carries over from this document: the model advice, limits and the plan, piloting, run states and follow-up questions. What does not: labels, review order, capture, concept kinds, rankings and answer tallies.
+What carries over from this document: the model advice, limits and the plan, piloting, run states, follow-up questions and debriefs. What does not: labels, review order, capture, concept kinds, rankings and answer tallies.
+
+## Interview studies
+
+`"type": "interview"` is the third kind of study, and the one that comes first: it asks what problems these people have, which matter to them and how they cope now, where a review asks which concept they prefer and a usability study whether they can finish a task. An interviewer agent holds a discovery interview with each persona, the launcher carries every turn between the two sessions, and the analysis reports problem themes by who raised them and how well each is evidenced, with a critique of the interviewer's questions and no scores. `references/interviews.md` covers it: when to run one, framing the round and writing the guide, models, the protocol, running, checking, reading a transcript, the analysis, reporting and how much to trust the result.
+
+In this document's terms:
+
+- **The bias controls change shape.** There are no labels and no review order. Hypotheses are kept from the participant by four layers: the interviewer is never given them, a gate holds back any question with a `leak_terms` entry, the interviewer brief forbids pitching and leading, and the critique marks the questions that did so anyway. Neither side has a tool, so isolation rests on that and not on a folder.
+- **Cold rounds still hold.** An interviewer learns nothing from one interview to the next within a round, so interviews run side by side and a difference between two models is never the interviewer's doing. The guide is revised between rounds, in a new study directory.
+- **What carries over from this document:** runners, at least two models for each persona, limits and the plan, piloting, the launcher's handling of kills and usage limits, replicates and variants, and the study brief.
+- **What does not:** capture, concept kinds, labels, review order, scores, rankings, answer tallies, the text-only pass, native mode and follow-up questions. A question about the user's own product is put in a debrief of a review or usability run (`references/debriefs.md`).
+- **A count there is of simulated participants,** never a frequency, and the output is hypotheses and a rehearsed guide for interviews with real people.
 
 ## Designing concepts for a panel
 

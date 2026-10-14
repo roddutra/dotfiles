@@ -6,16 +6,19 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 
 | Key | Meaning |
 |---|---|
-| `type` | Default `"review"`. `"usability"` is a task-based study of a running product, with keys of its own (Usability and browsing, below) |
+| `type` | Default `"review"`. `"usability"` is a task-based study of a running product, and `"interview"` a round of discovery interviews, each with keys of its own (Usability and browsing, and Interviews, below) |
 | `runner` | The default runner for every model entry and synthesis job that names none |
 | `models` | Model entries. A bare string is that model on the study's `runner`, and is its own key. An object is `{"key", "runner", "model", "effort"}` |
 | `replicates` | Default 1. Above 1, each run is repeated as `<pid>-<key>-r<n>`. Analysis counts replicates as separate runs and adds "Replicate spread" (`references/method.md`, Replicates and variants) |
-| `limits.run` | `{"minutes", "budget_usd"}` for each panellist run, over all its attempts. Default 15 minutes and $2. In a usability study the default minutes come from the tasks: 30 seconds for each step they permit, plus 5 minutes |
-| `limits.synthesis` | `minutes` for each analyst and writer job, `budget_usd` as one pool split equally among them. Default 30 minutes and $5 |
+| `limits.run` | `{"minutes", "budget_usd"}` for each panellist run, over all its attempts. Default 15 minutes and $2. In a usability study the default minutes come from the tasks: 30 seconds for each step they permit, plus 5 minutes. In an interview study it is each participant's allowance over its whole interview, 15 minutes and $0.50 by default |
+| `limits.synthesis` | `minutes` for each analyst and writer job, `budget_usd` as one pool split equally among them. Default 30 minutes and $5. An interview study's critics and themes job share it too |
+| `limits.interviewer`, `limits.turn` | Interview only: each interviewer's allowance over its whole interview (default 15 minutes and $1), and the minutes one turn of either side may take (default 3) |
 | `limits.followup` | `{"minutes", "budget_usd"}` for each run asked a follow-up question, for each question, apart from its run limits and outside the plan's ceiling. Default 5 minutes and $0.50 |
+| `limits.debrief` | `{"minutes", "budget_usd"}` for each of the two sides of a debrief, over all its turns, apart from the run's limits and outside the plan's ceiling. Default 10 minutes and $2.00. One turn has 3 minutes: `limits.turn` is an interview study's key |
+| `debrief` | Review and usability only: the guide of the debriefs, `interviewer` (a model entry, no default), `goals`, `topics` and `turns` (Interviews, below) |
 | `limits.overrides` | Run limits for one model entry, keyed by model key |
 | `runners.<name>.concurrency` | Runs to keep going at once on that runner |
-| `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory; the study brief is refused) |
+| `synthesis` | `analysts` (1 or 2), `analyst` and `writer` (model entries, no default), `decision_maker` (who the synthesis is for), `context_files` (extra files for the jobs, relative to the study directory; the study brief is refused). An interview study adds `critic`, a model entry with no default, and gives `context_files` to the writer alone |
 | `browse` | Whether panellists may open pages with `agent-browser`, on runners that can. Default true for a study of sites. With a `url` concept it is off unless set to true, and a study of `files` concepts alone never browses (Concepts, below). A usability study always browses, and refuses `false` |
 | `materials` | Default `"full"`. `"text"` is a text-only pass: page text only, no design factors, no browser (`references/method.md`, Text-only pass) |
 | `concepts` | Each is `{"id", "path"}` for a folder with `index.html`, or has a `kind` (Concepts, below) |
@@ -26,7 +29,7 @@ A runner is the skill's adapter for one coding agent's headless CLI. `launch.py`
 Model entry rules:
 
 - `key` is letters and digits only and unique within a study, ignoring case. It names persona files, run ids (`<pid>-<key>`), `limits.overrides` and the model column in the analysis. A model name with other characters needs a key.
-- Without `model`, the run uses the harness's own default, which depends on the account. Name the model when the study must be reproducible. The `pi` runner refuses an entry without one.
+- Without `model`, the run uses the harness's own default, which depends on the account. The plan prints `default` for it, and neither the plan, `status` nor `analysis/usage.md` says which model that is. Name the model when the study must be reproducible, or when its tier matters, as on both sides of an interview. The `pi` runner refuses an entry without one.
 - `effort` must be one of the runner's levels. `plan` and `run` refuse any other value, because the CLIs themselves only warn or fail at the first model call.
 - A study where no entry has a runner is in native mode (below). Mixing the two is refused.
 - `type` is a key of the study, not of a model entry.
@@ -43,10 +46,43 @@ A usability study (`"type": "usability"`) has these keys in place of `concepts`.
 | `accounts` | `{"provision" or "map", "teardown", "reset", "signin"}`: a test account for each run. `signin` is `"session"` (the default: the browser starts signed in from a saved state) or `"panellist"` (the panellist is given the secrets to type) |
 | `sequential` | Default false. True runs one panellist at a time across all runners, with `accounts.reset` between runs |
 
-- **A study is one type or the other.** A usability study refuses the keys only a review has (`concepts`, `labels`, `find_the_answer`, `artefact` and the like), `"materials": "text"`, `"browse": false`, every `capture` key but `desktop`, and native mode. A review refuses `target`, `tasks`, `accounts` and `sequential`.
+- **A study is one type.** A usability study refuses the keys only a review has (`concepts`, `labels`, `find_the_answer`, `artefact` and the like), `"materials": "text"`, `"browse": false`, every `capture` key but `desktop`, and native mode. A review refuses `target`, `tasks`, `accounts` and `sequential`. Both refuse `interview`.
 - **Every run of a usability study browses,** so every model entry needs a runner with a browser. `plan` names one that has none as a problem, and no run starts on it.
 - **Any run that may browse** (a usability run, or a review run with `browse` on) gets a browser session the launcher starts and stops ([Browser sessions](#browser-sessions)), and needs the `agent-browser` CLI on PATH: `plan` names its absence as a problem, and `run`, `pilot` and `resume` refuse.
 - **A usability study's commands** (`success_check` and the `accounts` commands) are run without a shell, from the study directory, with the run id as the last argument. Whether a command's file exists is checked by `init_study.py`, by `plan` and at every start, not when `study.json` is loaded.
+
+## Interviews
+
+An interview study (`"type": "interview"`) has a guide in place of `concepts` or `tasks`. `references/interviews.md` explains every key, and `assets/study.interview.example.json` is a complete study.
+
+| Key | Meaning |
+|---|---|
+| `interview` | The guide: `about`, `interviewer` (a model entry, no default), `goals`, `topics`, `turns` (default 30 exchanges) and `situation_card` (default true) |
+| `limits.run`, `limits.interviewer`, `limits.turn` | What each participant and each interviewer may use over a whole interview, and the minutes of one turn |
+| `synthesis.critic` | The model entry of the jobs that critique the interviewer's questions |
+
+- **What an interview asks of a runner** is what every run asks, many times over: one launch for each side, then a resume with one message for every later turn, each a process of its own under a watchdog, with a final reply and usage. An interview of 30 exchanges is about 60 processes. Nothing is browsed, and no file is read or written.
+- **The `interview` capability** says a runner is verified for that. `claude` and `codex` declare it. A capability a runner does not declare reads as false, so `pi` is refused with no change to its module: "pi is not verified for interviews, and an interview is carried turn by turn through its runner. Put the model entry on a runner that is (claude, codex)". The plan lists it under "Problems" for the model key or for `interviewer`, and `run` refuses for the same reason. So is a runner that cannot resume a session: every turn after a side's first is one.
+- **The `no_tools` capability** says a runner can start a process with no tool. Both sides of an interview are started that way on a runner that declares it, on every launch and every resume, with no exception for a model. The runner's `no_tools_note` says what that leaves, and the plan prints it under "Tools".
+  - **`claude`:** no tool of any kind. A side reads, writes and runs nothing.
+  - **`codex`:** no shell, no file or image reading and no network. The CLI has no single switch, so the runner passes eight more, for the shell, image viewing, goals, sleep, the browser, computer use and sub-agents, on top of the three switches every Codex run has ([`codex`](#codex), below). That is as few tools as the CLI allows and not none: a patch tool is still listed, which can write files in the process's own folder (not exercised), where there is nothing, and a clock, three tools that read MCP resources, a tool to wait, tools that ask the user for input and sub-agent tools with the same set stay. Asked to run a command or read a file in its folder, such a session could not (verified on codex-cli 0.162.1).
+  - **A runner without it** would keep the file tools a review run has, with only its sandbox and its instructions holding a side to its folder, and the plan says so. No runner that is verified for interviews is in that position.
+- **No tools means no access, not no talk of tools.** Asked to read a file, a session with no tools on a vendor's smallest model wrote a made-up tool call and an invented result as plain text (one probe).
+- **At most as many interviews are carried at once as the interviewer's runner runs processes at once** (`runners.<name>.concurrency`), and each turn still waits for a slot on its own side's runner. Six interviews at once on `claude` and four on `codex`, and twice those, met no rate limit, usage limit or capacity refusal on 13 October 2026.
+- **A runner whose harness turns requests away** stops every interview with a side on it. When that is the interviewer's runner, every interview of the study stops, since all share it.
+- **Both runners keep their harness's default system prompt** for an interview too: eight interviews, half of them with it replaced, showed no difference that mattered.
+- **The jobs of the synthesis** (analysts, critics, the themes job and the writer) are ordinary jobs: they keep their file tools and work in the study directory.
+
+**Debriefs.** `interview.py <study> debrief` holds an interview with a finished run of a review or usability study, through the same turn loop (`references/debriefs.md`). By runner:
+
+- **`pi` is refused,** for a run and for the interviewer, since it does not declare `interview`. Nothing is recorded. The plan names it under "Debriefs" as "Cannot be debriefed: ... Its runs are reviewed as before, and none of them can be debriefed", which changes neither its exit code nor `run`. The runs of the study's other model entries can be debriefed.
+- **Native mode is refused:** "this study is in native mode, and a debrief cannot be held in one: the launcher carries every turn between the interviewer and a run's session, each through a runner".
+- **The interviewer is started with no tools,** in an empty folder of its own, as an interview's is.
+- **The run's side is its own session, resumed in `panel/` with the tools a run has when it does not browse,** whatever the study: no browser session is started for a turn, and a usability run's test account is gone.
+  - **`claude`:** `Read`, `Write`, `Edit`, `Glob` and `Grep`, confined to `panel/`, and no shell. A turn can create or overwrite a file there, and delete or rename none.
+  - **`codex`:** its sandboxed shell with no network, writing to `panel/` and `/tmp`. A turn can write, delete and rename there.
+- **The launcher puts back what a turn changed** of the run's own persona file and, for a usability run, of its evidence folder, and guards nothing else under `panel/`.
+- **On `codex`, which has no budget cap, the time of `limits.debrief` is what bounds a side.**
 
 ## Concepts
 
@@ -79,6 +115,8 @@ From each runner's `capabilities()`. `launch.py plan` prints the gaps that apply
 | Provider that receives the materials | Anthropic | OpenAI | The provider each model id names, as configured in Pi |
 | Opens images by path | yes | yes | per model, checked at the plan step |
 | Browser (`agent-browser`), through a session the launcher starts | yes | yes | yes |
+| Verified for interviews (`interview`) | yes | yes | no: refused at the plan step |
+| Starts a process with no tools (`no_tools`), for a side of an interview | yes: none at all | yes: as few as the CLI allows (Interviews, above) | no |
 | Budget cap | yes, checked after each turn | no | no |
 | Effort levels | low, medium, high, xhigh, max | low, medium, high, xhigh, max | off, minimal, low, medium, high, xhigh, max |
 | Resume | yes | yes | yes |
@@ -114,13 +152,15 @@ The plan lists the browsing gaps only for a study whose panellists can browse on
 
 ### `codex`
 
-- **No budget cap.** The time limit is what bounds a run, and a follow-up question. The plan leaves these runs out of the ceiling and labels it an estimate.
+- **No budget cap.** The time limit is what bounds a run, a follow-up question and a side of a debrief. The plan leaves these runs out of the ceiling and labels it an estimate.
 - **No cost or duration.** `analysis/usage.md` shows tokens and "not reported" for the rest, and the plan judges these runs by time.
 - **Browsing turns the sandbox's network on.** A browser started inside the sandbox dies with each shell call, so the session runs outside it and the run reaches it through a socket, which the sandbox allows only with network access on. That is all or nothing: the run's shell can then reach the internet and the pages under review directly. The temporary directories become read-only for such a run, so it cannot start a browser of its own there.
 - **Models.** Without `model`, the run uses the first model of the account's list. An unknown model fails at the first model call. Only the low and medium effort levels were run in discovery.
 - **Session id.** Known once the process prints its first line, before any model call. A run killed earlier has no session, and `resume` starts it afresh only when it wrote nothing.
 - **Usage after a kill.** Read from the session file, best effort. It can miss the request that was in flight.
 - **Sessions.** `purge-sessions` deletes them with the CLI's own delete command.
+- **Connected apps, web search and image generation are off,** for every run and job of every study type, since 13 October 2026. Until then a Codex session had the tools of every app connected to the signed-in ChatGPT account, web search and image generation, whatever the runner's other options said: the session's own tool list held 293 tools, about 280 of them one for each action of a connected app, and a panellist could have searched the web for the product under review. The runner now passes `--disable apps`, `-c web_search="disabled"` and `--disable image_generation`, and the tool list shows none of the three (verified on codex-cli 0.162.1). A study run on `codex` before that date may hold answers that drew on the first two: `leak_terms` and `check_runs.py` are what would show it.
+- **What a session still has besides its shell** (verified on codex-cli 0.162.1): a script tool whose runtime reaches no file, network or process of its own, and inside it a patch tool that writes files in the working directory, a clock, three tools that read MCP resources, an image viewer and goal tools. Beside it, a tool to wait, tools that ask the user for input, and the sub-agent tools, which the switch for them did not remove.
 
 Not switched off for its runs:
 
@@ -129,6 +169,7 @@ Not switched off for its runs:
 - A run inside a git repository adds a trust entry for that repository to the user's Codex `config.toml`. Keep the study outside a git repository to avoid it.
 - The working directory path, the shell, the date and the timezone are in the model's context.
 - Sub-agent tools and their instructions stay available.
+- A script tool stays available, with the patch tool, the clock and the MCP resource tools inside it, and so do the tools to wait and to ask the user for input (above). No switch was found that removes them cleanly.
 - Commands run in a login shell that sources the user's shell profile. A profile that sets an `AGENT_BROWSER_*` variable would give it back to a browsing run's commands, and the session would restart blank (inferred, not run).
 - With browsing on, what every runner leaves open ([Browser sessions](#browser-sessions)), and the network: the run's shell can reach the internet, the pages under review without the browser and its policy, and any Unix socket the user can.
 - With browsing on, `agent-browser` commands that never reach a session are not refused. One lists the names of the user's own browser profiles.
@@ -216,12 +257,14 @@ Left open on every runner, and printed by the plan:
 
 The launcher enforces, on every runner:
 
-- the working directory: `panel/` for a panellist, the study directory for an analyst or the writer
+- the working directory: `panel/` for a panellist, the study directory for an analyst or the writer, and in an interview study an empty folder of its own for each side
+- in an interview study, the cap of an interview in exchanges, what reaches each side (the words under `SAY` and nothing else for the participant), and the leak gate on every question before it is delivered
 - the time limit: SIGTERM to the CLI's process group, `--grace` seconds (default 10) to finish the current write, then SIGKILL
 - the prompt: the file in `prompts/` on stdin, with nothing added
 - one launcher per study
 - what a follow-up question may change: the persona file is copied before the question, and anything but one appended `## Follow-up <n>` section is rejected and the file put back. Until the launcher has settled it, every script reads the copy for scores and progress
-- the synthetic panel notice in an analyst's or the writer's saved output: added under the title when the job left it out
+- what a turn of a debrief may change, which is nothing: the run's persona file, and a usability run's evidence folder, are copied before each turn, and a file that differs afterwards is put back. Until the turn is settled, every script reads the persona file from the copy
+- the synthetic panel notice in an analyst's or the writer's saved output: added when the job left it out, under the `# ` title the file opens with, or at the very top when it opens with anything else
 - with browsing on, the browser session of each attempt, and what it refuses ([Browser sessions](#browser-sessions))
 - in a usability study, each task's step limit, as the backstop to the panellist's own count and only for the steps its step log shows (a run that logs none is bounded by its time limit), and each run's test account: provisioned before its first attempt and torn down when the run is done, limited or failed
 
@@ -242,7 +285,10 @@ The harness enforces what it has a switch for:
 | Git status and recent commit messages | excluded | none seen in context | none seen in context |
 | Reading files | working directory only | whole disk | working directory only, by the guard |
 | Writing files | working directory only | working directory and `/tmp`, or the working directory alone when the study browses | working directory only, by the guard |
+| Connected apps, web search, image generation | none: no MCP server loads, and no such tool exists | switched off (`--disable apps`, `web_search="disabled"`, `--disable image_generation`) | none: no MCP server loads, and no such tool exists |
 | Shell commands | none, or the panellist's `agent-browser` commands when the study browses | any, in a sandbox with no network, or with all of it when the study browses | none, or one `agent-browser` command at a time when the study browses, by the guard |
+| A side of an interview, and the interviewer of a debrief | no tool at all | no shell, no file or image reading, no network (Interviews, above) | refused |
+| A finished run's turn of a debrief | the file tools in `panel/`, no shell, no browser | its shell in `panel/` and `/tmp`, no network, no browser | refused |
 | Something not allowed | denied at once, nothing waits for approval | fails at once, nothing waits for approval | refused at once, nothing waits for approval |
 
 These stay instructions in the run prompt, so keep `leak_terms` and `check_runs.py`:
@@ -253,7 +299,7 @@ These stay instructions in the run prompt, so keep `leak_terms` and `check_runs.
 - Ignore background in your context: the account email, the working directory path, Codex's global instruction file, and Pi's coding-assistant prompt.
 - In a usability study: decide from the screenshot, stay on the product, and never reveal a secret on screen (`references/usability.md`, Safety).
 
-Analyst and writer jobs work in the study directory and never browse. They can read `key.md`, `study.json` and anything else there.
+Analyst and writer jobs work in the study directory and never browse. They can read `key.md`, `study.json` and anything else there. So can the critics and the themes job of an interview study: what keeps an analyst there from the guide, and the writer from a transcript, is its brief.
 
 ## System prompt
 
@@ -271,8 +317,8 @@ Add one module, `scripts/runners/<name>.py`. The registry lists the package's mo
 
 | Function | Contract |
 |---|---|
-| `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps` |
-| `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. `run["browse"]` says whether the run may browse, and `run["browser_env"]` is then what its environment needs to reach its session. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
+| `capabilities()` | A dict: `images_by_path`, `image_attach`, `browser`, `budget_cap`, `budget_cap_note`, `effort_levels`, `resume`, `purge`, `usage` (`tokens`, `cost`, `duration`), `default_concurrency`, `provider`, `billing_env`, `isolation_gaps`, `browse_gaps`. Three more only on a runner that has them: `interview`, `no_tools` and `no_tools_note` |
+| `launch_command(run, prompt, workdir, limits)` | Returns `{"argv", "stdin", "env", "session_id"}`. `run["browse"]` says whether the run may browse, and `run["browser_env"]` is then what its environment needs to reach its session. `run["tools"]` is `"files"` (the default) or `"none"`, for a side of an interview, which only a runner with `no_tools` is given. The prompt is delivered verbatim. `env` is the child's whole environment, or None for unchanged. `session_id` is set when the runner can choose the id before the process starts |
 | `resume_command(run, session_id, message, workdir, limits)` | The same shape. Repeats every launch setting: no harness tried so far inherits the tools on resume, and most inherit nothing |
 | `parse_result(stdout, stderr, exit_code, session_id=None)` | Returns `{"session_id", "reply", "usage", "outcome", "reset_at", "message", "session_lost", "session_saved", "cannot_run"}`, with `outcome` one of `ok`, `usage_limit`, `budget`, `error`. Never raises on missing or cut-off output. `ok` means the harness finished its turn; the persona file decides whether the run is done. The `session_id` argument is the one the command was built with, for a harness whose output does not name its session |
 | `check()` | `{"ok", "message"}`: installed, signed in, and the options the runner passes still parse, with no model call. Asking can make a harness refresh its own login, which the runner must never read or relay |
@@ -288,6 +334,8 @@ Rules for a runner:
 - Keep a run's output small. Where the harness's event stream is large, read the facts from its session record instead.
 - State in `budget_cap_note` how far a run can pass an enforced cap, as a clause that starts "the budget cap". Leave it empty when the cap is exact or there is none. The plan prints it as a caveat to the ceiling.
 - `image_attach` says what the harness can do. No runner attaches images yet, and nothing reads it.
+- Declare `interview` only once a launch and many resumes of one session have been run on the real CLI, with a message on each. A runner that does not declare it is refused for both sides of an interview, with no edit.
+- Declare `no_tools` only when a process started with `"tools": "none"` has been shown to read no file and run no command, on launch and on resume. Raise `ValueError` for `"none"` with `"browse"`: a browser is a tool. Say in `no_tools_note` whether "no tools" is literally none on the harness and what stays where it is not, as a sentence or two with no subject.
 - Map a refusal that will pass (a usage limit, a rate limit, no capacity) to `usage_limit`, and put the harness's own words in `message`: the launcher prints them as the reason.
 - Set `session_lost` when the CLI refuses a resume because the session is gone. The launcher then starts the run afresh if it wrote nothing, and otherwise leaves it to the lead. Without it, such a resume reads as a CLI that could not be started, and closes the runner for the command.
 - In `shell_check()`, test with `unwritable()` the directory where the harness keeps its sessions, and anything more the CLI needs to run at all, such as a sandbox of its own. Test the folder the sessions go in, not only a configuration directory above it: the `codex` runner tests both, because either can be the one that cannot be written. Refuse only on what is known to stop a run: a test that cannot be made, or that fails in a way nothing has explained, passes.
@@ -327,6 +375,8 @@ The lead starts each run with its own subagent tool and tracks it with `runs.py`
 
 What it lacks:
 
+- No interview study: the launcher carries every turn between the two sessions, so one is refused when `study.json` is loaded.
+- No debrief, for the same reason: `interview.py <study> debrief` refuses a native study.
 - No limits: nothing stops a run by time or budget.
 - No usage record, and no estimate from a pilot.
 - No isolation beyond the run prompt. Subagents inherit the lead's project instructions, and internal terms leaked into reviews in the Sept 2026 study.
@@ -359,7 +409,7 @@ The synthesis briefs are filled by hand:
 
 - Run `extract_answers.py` and `analyze.py` first. Step 6 of the analyst brief reads their tables, and falls back to counting by hand without them.
 - Split the persona files by persona, all models of a persona to one analyst, between one or two analysts.
-- Give each analyst `assets/qual-brief.md` with every `<PLACEHOLDER>` replaced. Delete the line of a placeholder that has nothing to say (`<EXTRA_CONTEXT_FILES>`, `<INCOMPLETE_RUNS>`, `<FOLLOWUPS>`).
+- Give each analyst `assets/qual-brief.md` with every `<PLACEHOLDER>` replaced. Delete the line of a placeholder that has nothing to say (`<EXTRA_CONTEXT_FILES>`, `<INCOMPLETE_RUNS>`, `<FOLLOWUPS>`). Always delete the `<DEBRIEFS>` line: a native study holds no debrief.
 - Replace `<NOTICE>` with the synthetic panel notice, word for word (`references/communicating.md`). Never delete its line.
 - When follow-up questions were asked, replace `<FOLLOWUPS>` with the text of `assets/qual-brief-followups.md` or `assets/synthesis-brief-followups.md`, and its `<QUESTIONS>` with one line per question from `followup.py <study> list`: the number, the runs asked and the question. An analyst gets only the questions asked of its own personas. When none was asked, delete the `<FOLLOWUPS>` line.
 - Then give one writer `assets/synthesis-brief.md`, filled the same way.
@@ -368,7 +418,7 @@ The synthesis briefs are filled by hand:
 - A count goes in with its noun, so the sentence agrees: `<PERSONAS>` "1 persona" or "12 personas", `<MODELS>` "2 models (opus, sonnet)", `<RUNS>` "24 runs" or "24 runs, 22 of them complete", `<OWN_PERSONAS>` "persona **P01**" or "personas **P01 to P06**", `<FILES>` "12 files".
 - For a study with one concept, replace `<ONE_CONCEPT_NOTE>` with the text of `assets/qual-brief-one.md` or `assets/synthesis-brief-one.md`. Otherwise delete its line.
 - For concepts of kind `url` or `files`, replace `<KINDS_NOTE>` with the text of `assets/brief-kinds-url.md` and `assets/brief-kinds-files.md`, each with `<CONCEPTS>` as "Concept B was" or "Concepts B and D were". When the concepts differ in form (a PDF beside a captured page or a screenshot), add `assets/brief-kinds-mixed.md` with `<CONCEPTS>` as "A is a live URL and B is PDF files" and `<EXPOSED>` as "Visual design and Mobile are the factors most exposed". Otherwise delete its line.
-- A harness may block a subagent from writing a file that looks like a report. Ask for the document as the reply and save it with `extract_agent_reply.py`, which adds the notice under the title when the reply lacks it.
+- A harness may block a subagent from writing a file that looks like a report. Ask for the document as the reply and save it with `extract_agent_reply.py`, which adds the notice when the reply lacks it: under its `# ` title, or at the very top when it opens with anything else.
 - Check that a file a subagent wrote itself has the notice under its title. Nothing else adds it in native mode until `archive.py`.
 
 Follow-up questions are sent by hand too:
@@ -428,7 +478,7 @@ The CLI's own output for every attempt is in `logs/<run id>.<attempt>.out` and `
 
 ### A lead on Codex
 
-- **Inside the sandbox** (`workspace-write`, with the study in the workspace): `status`, `check_runs.py` and a first `plan`. `plan` there answers for the sandbox, so it refuses the runners and exits with 1. That is expected, and it is not the plan to confirm: it never says `ready`.
+- **Inside the sandbox** (`workspace-write`, with the study in the workspace): `status`, `check_runs.py`, in an interview study `extract_notes.py`, `analyze.py` and `interview.py <study> quotes`, and a first `plan`. `plan` there answers for the sandbox, so it refuses the runners and exits with 1. That is expected, and it is not the plan to confirm: it never says `ready`.
 - **Outside the sandbox, `plan` first.** After a `plan` that refuses for the shell, ask for approval to run `launch.py <study> plan` outside the sandbox too, and give the reason: it calls no model, starts nothing, and only there answers for the shell the runs will start from. Go on when that plan shows every runner as `ready`. Without it, a lead started four runs having seen only a plan that refused.
 - **Confirm that plan with the user, and say in the session that they agreed.** The approval of `run` may be decided by an automatic reviewer, itself a model. It refused the run while nothing in the session said the user had agreed to the materials going to the providers, and allowed the same run once the session said so.
 - **Outside the sandbox, then `launch.py <study> run`.** Ask for approval to run that one command outside the sandbox, and give the reason: the CLIs it starts need the network, their own configuration directories and, for `codex`, a sandbox of their own.
@@ -458,7 +508,7 @@ Not tested:
 - a command of a usability study left on the other side of `codex sandbox`, and `archive.py` there while a launcher starts outside it: both were checked under `bwrap` only, as above
 - an interactive Codex session, where the same request goes to the user as an approval prompt
 - full access mode: with no model, the `codex` CLI could build its sandbox under it, and no run was made
-- `pilot`, `resume`, `followup.py ask`, `purge-sessions --yes` and the analyst and writer jobs from a Codex lead. Each starts a CLI or writes to a harness's own folders as `run` does, so expect them to need the same approval
+- `pilot`, `resume`, `followup.py ask`, `purge-sessions --yes` and the analyst and writer jobs from a Codex lead, through an approval. Each starts a CLI or writes to a harness's own folders as `run` does, so expect them to need the same approval. The other way out was run on 14 October 2026: a lead in `workspace-write`, with no approval to ask for, gave the user each launcher command to run from a terminal (`plan`, `pilot`, `plan` again, `run` and the four job roles of an interview study), read what each printed, and finished a four-interview study and its analysis
 - macOS, where Codex's sandbox is a different one, and the `pi` runner in any sandbox: its test of the shell is inferred
 
 With no way to run a command outside the sandbox and no terminal, native mode is the fallback ([Native mode](#native-mode)). The lead can always read `launch.py <study> status`, `runs.json` and the persona files.

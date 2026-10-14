@@ -57,6 +57,36 @@ blocks as a run's does; the accounts whose secrets cannot be looked for, because
 down before the fingerprint record had heard of them; and the secrets that are too short to
 look for.
 
+An interview study has no run file. Each interview is checked from its turn log,
+interviews/<run id>.jsonl (panel_lib.py, "The turn log"), by interview.problems(), which
+interview.py documents under "The checks":
+  - blocking: no end record, which is an interview that is not finished or was never held, with
+    the state it reads as and how far it got; a turn log of the wrong form, such as turns that
+    do not alternate or that skip a number, or a record that lacks a field every launcher
+    writes or holds another kind of value there than one writes, after which nothing else of
+    that log is checked (panel_lib.turn_problems). Such a record is set aside where the log is
+    read (panel_lib.read_turns), so it is named here and stops nothing; and a leak term in a
+    question that was delivered
+  - notes, none of which blocks: topics never opened, exchanges past a topic's cap, a capped
+    interview that ended with no close, a question whose words open another topic than the one
+    its interviewer labelled it with, a leak term in the card or an answer, an answer that
+    speaks of being an AI, a model or a persona, a question with more than two question marks,
+    a median answer of more than 120 words, a reply of the interviewer that was sent back, a
+    turn that left no reply, and a turn log whose last write was never finished
+Under the table: how many interviews have a turn log, of the ones the study plans; what the
+lead does about each kind of blocking row (interview.advice()): the command that goes on with
+an unfinished interview, where one that never started is said to be that, and "status" is
+named for why an interview stopped only when one has; for a leak term in a delivered question,
+which cannot be undone, how to discard the interview or keep it and report the leak; and how
+many turn logs under logs/ were not checked. A fresh start or a new scaffold moves a log there,
+as the lead does to discard an interview, and it is then no interview of the study. With no
+row to show, the table is left out and one sentence says that nothing blocks and nothing was
+noted.
+
+An interview reads running only while a launcher has the study, which the study lock says
+(panel_lib.carried()): one that a killed launcher left reads as its log reads, partial with a
+turn on record, and the lines under the table name the command that goes on with it.
+
 A run whose latest follow-up question is not settled yet is checked as it stood before the
 question (panel_lib.read_persona): a line under the table names each such run. Check again once a
 launcher has settled it.
@@ -64,7 +94,7 @@ launcher has settled it.
 Exit code 1 when any run has a blocking problem (missing, duplicate, unscored, unknown, changed
 by another run, holding a secret value, with a file that could not be scanned, or with a
 persona file that cannot be read as its own), or an analysis file holds a secret value or could
-not be scanned.
+not be scanned. In an interview study, when any interview has a blocking problem.
 
 The table is printed, and written to analysis/checks.md. Where the system refuses the file (a
 sandboxed shell tool, a study directory that is not yours to write), the table is printed all
@@ -85,6 +115,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import accounts  # noqa: E402
+import interview  # noqa: E402
+import launch  # noqa: E402
 import panel_lib as pl  # noqa: E402
 
 PHASE_FIELDS = {"intent": ("sees", "expects", "action"), "result": ("happened", "screenshot")}
@@ -287,11 +319,60 @@ def scan_study(cfg: dict) -> tuple[dict, dict, list[str], int]:
     return known, identifiers(cfg, records), lines + pl.secret_gaps(known, records), leaks + unscanned
 
 
+def check_interviews(cfg: dict) -> tuple[list[str], int]:
+    """The checks of an interview study (module docstring): the lines of the table and what
+    stands under it, and how many interviews have a blocking problem. Every interview the study
+    has is checked, one that was never started too, each from its turn log in interviews/. The
+    report carries the synthetic panel notice (pl.NOTICE) under its title, as every report of an
+    interview study does where it is written: the file is then the same in the study, in an
+    archive of it, and when this script runs again inside the archive."""
+    sd = cfg["_dir"]
+    entries = pl.read_runs(sd) if (sd / "runs.json").exists() else pl.planned_runs(cfg)
+    entries = {e["run"]: e for e in entries if e["role"] == "panellist"}
+    rows, found = [], []
+    records = pl.run_records(sd, cfg, bool(launch.Lock.holder(sd)))  # carried only while a launcher has the study
+    for r in records:
+        blocking, notes = interview.problems(cfg, entries[r["run"]], r["turns"], r["state"])
+        found.append((r["run"], r["state"], blocking))
+        if blocking or notes:
+            rows.append(f"| {r['run']} | {'; '.join(blocking) or '-'} | {'; '.join(notes) or '-'} |")
+    bad = sum(bool(blocking) for _, _, blocking in found)
+    expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
+    held = sum(pl.turn_log(sd, r["run"]).exists() for r in records)
+    lines = ["# Run checks", "", pl.NOTICE, "",
+             *(["| Run | Blocking | Notes |", "|---|---|---|", *rows, ""] if rows else [])]
+    lines += [f"{pl.plural(held, 'interview')} with a turn log, of {expected} expected; {bad} with blocking "
+              "problems." + ("" if rows else " Nothing blocks, and nothing was noted of any interview.")]
+    lines += interview.advice(cfg, found)
+    aside = len([*sd.glob("logs/*.jsonl"), *sd.glob("logs/interviews-*/*.jsonl"),  # nothing else there is one
+                 *sd.glob("logs/interviews-*/logs/*.jsonl")])
+    if aside:
+        lines.append(f"Not checked: {pl.plural(aside, 'turn log')} under logs/, set aside by a fresh start, a new "
+                     f"scaffold or the lead. {pl.agree(aside, 'It is', 'They are')} no interview of this study.")
+    return lines, bad
+
+
+def report(sd: Path, lines: list[str], failed: bool):
+    """Print the checks, write them to analysis/checks.md, and exit with 1 when failed. The
+    table is printed first: a study directory that cannot be written still gets its checks."""
+    print("\n".join(lines), flush=True)
+    kept = sd / "analysis" / "checks.md"
+    try:
+        kept.parent.mkdir(exist_ok=True)
+        kept.write_text("\n".join(lines) + "\n")
+    except OSError as err:
+        print(pl.not_written(kept, err), file=sys.stderr)
+    sys.exit(1 if failed else 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
     cfg = pl.load_study(ap.parse_args().study_dir)
     sd = cfg["_dir"]
+    if cfg["type"] == "interview":  # no run file: every interview is checked from its turn log
+        lines, bad = check_interviews(cfg)
+        report(sd, lines, bool(bad))
     runs = pl.load_runs(sd, cfg)
     changes = pl.read_modifications(sd)["changes"]
     followups = pl.read_followups(sd)
@@ -322,14 +403,7 @@ def main():
     expected = len(cfg["personas"]) * len(pl.model_keys(cfg)) * cfg["replicates"]
     lines += ["", f"{pl.plural(len(runs), 'run file')} of {expected} expected; {bad} with blocking problems."]
     lines += found + pl.unsettled_lines(runs)
-    print("\n".join(lines), flush=True)
-    kept = sd / "analysis" / "checks.md"
-    try:  # after the table: a study directory that cannot be written still gets its checks
-        kept.parent.mkdir(exist_ok=True)
-        kept.write_text("\n".join(lines) + "\n")
-    except OSError as err:
-        print(pl.not_written(kept, err), file=sys.stderr)
-    sys.exit(1 if bad or leaks else 0)
+    report(sd, lines, bool(bad or leaks))
 
 
 if __name__ == "__main__":

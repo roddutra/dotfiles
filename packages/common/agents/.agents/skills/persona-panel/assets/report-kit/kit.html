@@ -1,0 +1,589 @@
+<title>Panel Report Kit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<link rel="stylesheet" href="kit.css">
+<style>
+  /* Page-local: the gallery's own frame. Not part of the kit. */
+  .k-demo { border: 1px solid var(--pp-line); border-radius: var(--pp-radius); background: var(--pp-bg); min-width: 0; }
+  .k-demo > header { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding: 12px 16px; border-bottom: 1px solid var(--pp-line); background: var(--pp-surface); border-radius: var(--pp-radius) var(--pp-radius) 0 0; }
+  .k-demo > header code { font-family: var(--pp-font-code); font-size: 0.86rem; font-weight: 500; color: var(--pp-accent); }
+  .k-demo > header span { font-size: 0.88rem; color: var(--pp-ink-2); }
+  .k-demo > .k-stage { padding: 20px 16px; display: grid; gap: 16px; min-width: 0; }
+  .k-demo > details { border-top: 1px solid var(--pp-line); background: var(--pp-surface); border-radius: 0 0 var(--pp-radius) var(--pp-radius); }
+  .k-demo > details > summary { cursor: pointer; padding: 9px 16px; font-size: 0.82rem; color: var(--pp-ink-2); display: flex; justify-content: space-between; gap: 12px; }
+  .k-demo > details > pre, .k-demo > pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-family: var(--pp-font-code); font-size: 0.78rem; line-height: 1.5; border-top: 1px solid var(--pp-line); max-height: 360px; }
+  .k-copy { font: inherit; font-size: 0.78rem; padding: 3px 10px; border: 1px solid var(--pp-line-2); border-radius: 4px; background: var(--pp-surface); color: var(--pp-ink); cursor: pointer; }
+  .k-stack { display: grid; gap: 20px; }
+  .k-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  .k-sw { display: grid; gap: 6px; font-size: 0.78rem; }
+  .k-sw i { height: 44px; border-radius: 4px; border: 1px solid var(--pp-line-2); background: var(--c); }
+  .k-sw code { font-family: var(--pp-font-code); color: var(--pp-ink-2); }
+  .k-type { display: grid; gap: 14px; }
+  .k-type > div { display: grid; grid-template-columns: minmax(7rem, 9rem) 1fr; gap: 6px 20px; align-items: baseline; padding-bottom: 14px; border-bottom: 1px solid var(--pp-line); }
+  .k-type small { font-size: 0.78rem; color: var(--pp-ink-3); }
+  .k-tag { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--pp-ink-3); border: 1px dashed var(--pp-line-2); border-radius: 3px; padding: 1px 6px; }
+  .k-shot { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--pp-ink-3); font-size: 0.8rem; background: repeating-linear-gradient(135deg, var(--pp-line) 0 1.5px, transparent 1.5px 8px); }
+  .k-code { font-family: var(--pp-font-code); font-size: 0.86em; }
+  @media (max-width: 560px) { .k-type > div { grid-template-columns: 1fr; } }
+</style>
+
+<div class="pp-page">
+
+  <header class="pp-head">
+    <p class="pp-eyebrow">persona-panel · report kit</p>
+    <h1>Panel Report Kit</h1>
+    <p class="pp-question">A head start on the visual summary of a simulated panel: one stylesheet, one helper script and the parts below. It is a baseline to build on and to change, not a template to fill in.</p>
+    <nav class="pp-toc"></nav>
+  </header>
+
+  <section class="pp-section" id="rules">
+    <h2 data-toc="How to use it">A starting point, not a rulebook</h2>
+    <p class="pp-lede">The kit exists so that a good report takes minutes. Use what helps, change what does not fit the project, and build new parts where the kit has none.</p>
+    <div class="pp-grid two">
+      <div class="pp-callout decision">
+        <strong>Yours to change</strong>
+        <ul>
+          <li>Colour, type and spacing. Where the project has a design system or brand guidelines, they win: replace the BRAND tokens, or restyle any part outright.</li>
+          <li>Which sections appear, and in what order. The recipes below are a usual shape, not a required one.</li>
+          <li>Which chart tells the story. Pick the form the data needs, or draw one the kit does not have.</li>
+          <li>Any component. Extend it, replace it, drop it, or write a new one for what this study found.</li>
+        </ul>
+      </div>
+      <div class="pp-callout limit">
+        <strong>Keep these, whatever the design</strong>
+        <ul>
+          <li>The synthetic panel notice, word for word, directly under the title.</li>
+          <li>Counts of simulated participants with their base: "3 of 8". Never "most customers".</li>
+          <li>Quotations verbatim, each with its run and its question number or step.</li>
+          <li>Evidence against, and the limits, shown as plainly as the findings.</li>
+          <li>A "Go deeper" pointer to the markdown files, which stay the full record.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="pp-callout">
+      <strong>Using a project's own design system</strong>
+      <p>Light touch: replace the BRAND block at the top of kit.css with the project's fonts, surfaces, ink and accent, and keep the rest. Full: drop kit.css and keep kit.js and the page structure (<span class="k-code">pp-page</span>, <span class="k-code">pp-head</span> with the notice, <span class="k-code">pp-section</span> with an h2). Then two things need doing by hand. Define the <span class="k-code">--pp-*</span> custom properties in the project's stylesheet, mapped to its own values, because the charts read their colours and fonts from them. And style the classes the helpers write: <span class="k-code">pp-table</span>, <span class="k-code">pp-units</span> and <span class="k-code">pp-u</span> (r, n, b), <span class="k-code">pp-evid</span>, <span class="k-code">pp-mark</span> and <span class="k-code">pp-marks</span>, <span class="k-code">pp-bars</span>, <span class="k-code">pp-dotplot</span>, <span class="k-code">pp-chart</span> and <span class="k-code">pp-canvas</span>, <span class="k-code">pp-fold</span>, <span class="k-code">pp-stats</span>, <span class="k-code">pp-persona</span>, <span class="k-code">pp-legend</span>, <span class="k-code">pp-chip</span>, <span class="k-code">pp-callout</span>, <span class="k-code">pp-sr</span>, <span class="k-code">pp-tip</span>, <span class="k-code">pp-theme</span>, <span class="k-code">pp-toc</span> and <span class="k-code">pp-lightbox</span>.</p>
+    </div>
+    <h3>What makes a page easy to take in</h3>
+    <ol class="pp-take">
+      <li><strong>The verdict first.</strong><span>Under the notice: the answer, how sure, and what to do next, in three short cells. Then up to three takeaways. A reader who stops there should still leave with the right picture.</span></li>
+      <li><strong>One idea to a chart, and the title says it.</strong><span>"Concept A was first choice in 41 of 72 runs" beats "First choices". A chart nobody has to decode is worth five that need a legend studied.</span></li>
+      <li><strong>Plain words.</strong><span>No signal codes, no "exchange", no run ids in a headline. References such as <span class="pp-ref">P02-b, 6</span> sit beside the quote or the evidence, and the page explains them once.</span></li>
+      <li><strong>Detail on demand.</strong><span>Personas, model lists, the numbers behind a chart, timelines and long tables go in a fold. The page stays short and nothing is lost.</span></li>
+      <li><strong>Colour only where it means something.</strong><span>One colour, one meaning on a page (Tokens, below). The rest is ink on white, which also prints well.</span></li>
+    </ol>
+    <article class="k-demo">
+      <header><code>page skeleton</code><span>What every report page starts from. <span class="k-code">report_kit.py &lt;study&gt; init</span> writes one into the study's report/ folder, with the usual sections of its type, and kit.css and kit.js beside it.</span></header>
+      <pre id="skeleton">&lt;title&gt;Short Study Name&lt;/title&gt;
+&lt;link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Serif:ital,wght@0,400;1,400&amp;display=swap"&gt;
+&lt;link rel="stylesheet" href="kit.css"&gt;
+&lt;div class="pp-page"&gt;
+  &lt;header class="pp-head"&gt;
+    &lt;p class="pp-eyebrow"&gt;Interview study&lt;/p&gt;
+    &lt;h1&gt;The question the round asked&lt;/h1&gt;
+    &lt;p class="pp-notice"&gt;Synthetic panel: the feedback in this study was generated by AI personas, not by real people. It is not user research.&lt;/p&gt;
+    &lt;dl class="pp-verdict"&gt;
+      &lt;div&gt;&lt;dt&gt;The answer&lt;/dt&gt;&lt;dd&gt;One sentence.&lt;/dd&gt;&lt;/div&gt;
+      &lt;div&gt;&lt;dt&gt;How sure&lt;/dt&gt;&lt;dd&gt;&lt;span class="pp-sure low"&gt;Low:&lt;/span&gt; the reason in a few words.&lt;/dd&gt;&lt;/div&gt;
+      &lt;div&gt;&lt;dt&gt;Do next&lt;/dt&gt;&lt;dd&gt;The one action to take.&lt;/dd&gt;&lt;/div&gt;
+    &lt;/dl&gt;
+    &lt;dl class="pp-meta"&gt;&lt;div&gt;&lt;dt&gt;Interviews&lt;/dt&gt;&lt;dd&gt;4 of 4 finished&lt;/dd&gt;&lt;/div&gt;&lt;/dl&gt;
+    &lt;nav class="pp-toc"&gt;&lt;/nav&gt;
+  &lt;/header&gt;
+  &lt;section class="pp-section"&gt;&lt;h2&gt;The short version&lt;/h2&gt; ... &lt;/section&gt;
+  &lt;section class="pp-section"&gt;&lt;h2&gt;Go deeper&lt;/h2&gt; ... &lt;/section&gt;
+  &lt;footer class="pp-foot"&gt;&lt;p&gt;What was used.&lt;/p&gt;&lt;/footer&gt;
+&lt;/div&gt;
+&lt;script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"&gt;&lt;/script&gt; &lt;!-- only if the page draws charts --&gt;
+&lt;script src="kit.js"&gt;&lt;/script&gt;</pre>
+      <details open><summary>Copy this to start a page <button class="k-copy" data-copy="#skeleton">Copy</button></summary></details>
+    </article>
+  </section>
+
+  <section class="pp-section" id="tokens">
+    <h2 data-toc="Tokens">Tokens</h2>
+    <p class="pp-lede">Two blocks at the top of kit.css. BRAND is yours to replace. CHART AND MEANING is a validated set: if you change it, run the palette validator again for both themes.</p>
+    <div class="pp-callout"><strong>Colour means something: one colour, one meaning on a page</strong><ul>
+      <li><b>Series colours</b> (s1 to s6) mean identity: who or what. On an interview page, s1 is "raised it, evidence for" and s3 "said it is not a problem, evidence against". On a review page they are the concepts, A, B, C in that order, wherever a concept appears: cards, charts, dots, quotes. On a usability page, the runs, only if they need telling apart. One page never gives a series colour two meanings, so a review page has no "for" and "against" colours.</li>
+      <li><b>Status colours</b> (good, warn, crit) are for states only: a good move, a caution or limit, a blocker or a flag. Each comes with a shape and a word.</li>
+      <li><b>Neutral greys</b> (n1 to n4) are for composition and for counts that carry no meaning: who was on the panel, runs by model, counts by kind. The helpers default to them: PP.panel's charts, PP.bars, and PP.columns with one series.</li>
+      <li><b>Indigo</b> is structure: ranks, eyebrows, links, decisions. Everything else is ink on white. If a colour is not doing one of these jobs, take it out.</li>
+    </ul></div>
+    <h3>Brand: surfaces, ink, accent</h3>
+    <div class="k-swatches">
+      <div class="k-sw" style="--c: var(--pp-bg)"><i></i>Page<code>--pp-bg</code></div>
+      <div class="k-sw" style="--c: var(--pp-surface)"><i></i>Surface<code>--pp-surface</code></div>
+      <div class="k-sw" style="--c: var(--pp-sunk)"><i></i>Sunk<code>--pp-sunk</code></div>
+      <div class="k-sw" style="--c: var(--pp-ink)"><i></i>Ink<code>--pp-ink</code></div>
+      <div class="k-sw" style="--c: var(--pp-ink-2)"><i></i>Secondary ink<code>--pp-ink-2</code></div>
+      <div class="k-sw" style="--c: var(--pp-ink-3)"><i></i>Muted ink<code>--pp-ink-3</code></div>
+      <div class="k-sw" style="--c: var(--pp-line-2)"><i></i>Rule<code>--pp-line-2</code></div>
+      <div class="k-sw" style="--c: var(--pp-accent)"><i></i>Accent<code>--pp-accent</code></div>
+    </div>
+    <h3>Series: identity, in this fixed order</h3>
+    <div class="k-swatches">
+      <div class="k-sw" style="--c: var(--pp-s1)"><i></i>s1: for, or concept A<code>--pp-s1</code></div>
+      <div class="k-sw" style="--c: var(--pp-s2)"><i></i>s2: concept B<code>--pp-s2</code></div>
+      <div class="k-sw" style="--c: var(--pp-s3)"><i></i>s3: against, or concept C<code>--pp-s3</code></div>
+      <div class="k-sw" style="--c: var(--pp-s4)"><i></i>s4<code>--pp-s4</code></div>
+      <div class="k-sw" style="--c: var(--pp-s5)"><i></i>s5<code>--pp-s5</code></div>
+      <div class="k-sw" style="--c: var(--pp-s6)"><i></i>s6<code>--pp-s6</code></div>
+    </div>
+    <h3>Neutral, status and the one-hue scale</h3>
+    <div class="k-swatches">
+      <div class="k-sw" style="--c: var(--pp-n1)"><i></i>Neutral 1<code>--pp-n1</code></div>
+      <div class="k-sw" style="--c: var(--pp-n2)"><i></i>Neutral 2<code>--pp-n2</code></div>
+      <div class="k-sw" style="--c: var(--pp-n3)"><i></i>Neutral 3<code>--pp-n3</code></div>
+      <div class="k-sw" style="--c: var(--pp-n4)"><i></i>Neutral 4<code>--pp-n4</code></div>
+      <div class="k-sw" style="--c: var(--pp-good)"><i></i>Good<code>--pp-good</code></div>
+      <div class="k-sw" style="--c: var(--pp-warn)"><i></i>Warning<code>--pp-warn</code></div>
+      <div class="k-sw" style="--c: var(--pp-serious)"><i></i>Serious<code>--pp-serious</code></div>
+      <div class="k-sw" style="--c: var(--pp-crit)"><i></i>Critical<code>--pp-crit</code></div>
+      <div class="k-sw" style="--c: var(--pp-good-wash)"><i></i>Good wash<code>--pp-good-wash</code></div>
+      <div class="k-sw" style="--c: var(--pp-warn-wash)"><i></i>Caution wash<code>--pp-warn-wash</code></div>
+      <div class="k-sw" style="--c: var(--pp-crit-wash)"><i></i>Blocker wash<code>--pp-crit-wash</code></div>
+      <div class="k-sw" style="--c: var(--pp-seq-1)"><i></i>Scale, low<code>--pp-seq-1</code></div>
+      <div class="k-sw" style="--c: var(--pp-seq-3)"><i></i>Scale, middle<code>--pp-seq-3</code></div>
+      <div class="k-sw" style="--c: var(--pp-seq-5)"><i></i>Scale, high<code>--pp-seq-5</code></div>
+    </div>
+    <p class="pp-caption">Status colours never stand alone: each pill pairs its colour with a shape and a word, so a pill can sit on a page whose series colours mean concepts.</p>
+    <h3>Text on the heat scale</h3>
+    <div class="pp-scroll"><table class="pp-table pp-heat"><thead><tr><th scope="col">Step</th><th scope="col" class="c">Light theme</th><th scope="col" class="n">Contrast</th><th scope="col" class="c">Dark theme</th><th scope="col" class="n">Contrast</th></tr></thead><tbody>
+      <tr><th scope="row">h1, lowest</th><td class="h h1">Text</td><td class="n">14.0 : 1</td><td class="c">#0d366b, white ink</td><td class="n">12.0 : 1</td></tr>
+      <tr><th scope="row">h2</th><td class="h h2">Text</td><td class="n">8.8 : 1</td><td class="c">#1c5cab, white ink</td><td class="n">6.6 : 1</td></tr>
+      <tr><th scope="row">h3</th><td class="h h3">Text</td><td class="n">5.1 : 1</td><td class="c">#3987e5, dark ink</td><td class="n">5.1 : 1</td></tr>
+      <tr><th scope="row">h4</th><td class="h h4">Text</td><td class="n">6.6 : 1</td><td class="c">#86b6ef, dark ink</td><td class="n">8.8 : 1</td></tr>
+      <tr><th scope="row">h5, highest</th><td class="h h5 lead">Text</td><td class="n">12.0 : 1</td><td class="c">#cde2fb, dark ink</td><td class="n">14.0 : 1</td></tr>
+    </tbody></table></div>
+    <p class="pp-caption">Every step's ink is at least 4.5:1 on its fill (WCAG AA for body text) in both themes. In dark the scale runs from the page outwards, so pair a heat table with a swatch key rather than writing "darker is higher".</p>
+    <h3>Type: three voices</h3>
+    <div class="k-type">
+      <div><small>--pp-font-ui<br>headings, labels, data</small><span style="font-size:1.4rem;font-weight:600">Chasing payment looked handled, not painful.</span></div>
+      <div><small>--pp-font-voice<br>anything a person said or asked</small><span style="font-family:var(--pp-font-voice);font-size:1.15rem">"I sent a polite text, then a second one, and they paid up."</span></div>
+      <div><small>--pp-font-code<br>run ids and references</small><span class="pp-ref" style="font-size:0.95rem">P02-b, 6 · analysis/quant.md</span></div>
+    </div>
+  </section>
+
+  <section class="pp-section" id="every">
+    <h2 data-toc="Every report">Parts for every report</h2>
+    <p class="pp-lede">Open "HTML" under any part for its markup. <span class="k-tag">Example data</span> throughout: the figures and people below are placeholders.</p>
+    <div class="k-stack">
+
+      <article class="k-demo"><header><code>pp-notice</code><span>Required. A paragraph of its own under the title. Add <b>specimen</b> for a second notice on a page whose data is invented.</span></header><div class="k-stage">
+        <p class="pp-notice">Synthetic panel: the feedback in this study was generated by AI personas, not by real people. It is not user research.</p>
+        <p class="pp-notice specimen"><b>Specimen</b> Every number, name and quote below is made up to show the layout. No study was run.</p>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-verdict</code> <code>pp-sure</code><span>Right under the notice: the answer in one sentence, how sure (low, medium or high, with the reason in a few words, never a number), and the one thing to do next.</span></header><div class="k-stage">
+        <dl class="pp-verdict">
+          <div><dt>The answer</dt><dd>Chasing late payment looked handled, not painful. The sharper friction was paperwork.</dd></div>
+          <div><dt>How sure</dt><dd><span class="pp-sure low">Low:</span> 4 simulated interviews, invented histories, one model carried the payment signal.</dd></div>
+          <div><dt>Do next</dt><dd>Run the revised guide with real tradies, starting with whether today's routine is good enough.</dd></div>
+        </dl>
+        <div style="display:flex;flex-wrap:wrap;gap:18px"><span class="pp-sure low">Low</span><span class="pp-sure medium">Medium</span><span class="pp-sure high">High</span></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-toc</code><span>On this page. Put an empty <span class="k-code">&lt;nav class="pp-toc"&gt;&lt;/nav&gt;</span> at the end of the header and kit.js fills it with a link to each section's h2. An h2's <b>data-toc</b> gives shorter link text. Hidden on paper. The header of this page has one.</span></header><div class="k-stage">
+        <p class="pp-muted">&lt;h2 data-toc="Themes"&gt;Themes, strongest evidence first&lt;/h2&gt;</p>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-meta</code><span>The study at a glance: five or six facts, no more.</span></header><div class="k-stage">
+        <dl class="pp-meta"><div><dt>Runs</dt><dd>12 of 12 finished</dd></div><div><dt>Personas</dt><dd>6, each on 2 models</dd></div><div><dt>Concepts</dt><dd>3</dd></div><div><dt>Used</dt><dd>$4.10 where reported</dd></div></dl>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-take</code><span>Up to three takeaways, strongest first. Numbered because they are ranked.</span></header><div class="k-stage">
+        <ol class="pp-take"><li><strong>One sentence a reader could repeat.</strong><span>The count with its base and the caveat that matters most, in a line or two.</span></li><li><strong>The second strongest thing.</strong><span>Say what kind of evidence stands behind it.</span></li></ol>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-callout</code><span>Three kinds: <b>limit</b> for what not to conclude, plain for a caution, <b>decision</b> for what only the user can decide.</span></header><div class="k-stage">
+        <div class="pp-grid">
+          <div class="pp-callout limit"><strong>What this cannot tell you</strong><ul><li>How common anything is.</li><li>Whether anyone would pay.</li></ul></div>
+          <div class="pp-callout"><strong>Rests on a flagged question</strong><p>One note came from a question the critic flagged <span class="pp-ref">P01-a, 9</span>.</p></div>
+          <div class="pp-callout decision"><strong>Yours to decide</strong><p>Whether the pricing page may name a competitor.</p></div>
+        </div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-quote</code><span>Verbatim words with who, which model and where. Add <b>counter</b> for evidence against, <b>plain</b> for words that are neither (a usability log), or a <b>pp-s</b> class for the series it belongs to.</span></header><div class="k-stage">
+        <div class="pp-grid two">
+          <figure class="pp-quote"><blockquote>"I do it in a batch on Friday and grumble about it."</blockquote><figcaption>Alex, electrician <span class="pp-chip model">model-a</span> <span class="pp-ref">P01-a, 11</span></figcaption></figure>
+          <figure class="pp-quote counter"><blockquote>"It hasn't been a regular issue."</blockquote><figcaption>Sam, plumber <span class="pp-chip model">model-b</span> <span class="pp-ref">P02-b, 9</span></figcaption></figure>
+          <figure class="pp-quote plain"><blockquote>A red box says something went wrong. It does not say which detail.</blockquote><figcaption><span class="pp-chip model">P01-a</span> <span class="pp-ref">T1 step 7, step log</span></figcaption></figure>
+          <figure class="pp-quote pp-s2"><blockquote>"The story page is the only one that talks about the person getting the shifts."</blockquote><figcaption>Jun, barista <span class="pp-chip model">model-a</span> <span class="pp-chip"><span class="pp-sw pp-s2"></span>chose B</span></figcaption></figure>
+        </div>
+      </div></article>
+
+      <article class="k-demo"><header><code>references note</code><span>Once a page, near the first reference: what a run id means and what its number points to, and that the markdown holds the full text.</span></header><div class="k-stage">
+        <details class="pp-fold plain"><summary>How to read the references</summary><div class="body"><p class="pp-small"><span class="pp-ref">P02-b, 6</span> is persona P02 played by model-b, and 6 is the sixth question and answer of that interview. The full transcript is <span class="pp-ref">interviews/P02-b.md</span>.</p></div></details>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-persona</code><span>Who was on the panel. The hatched avatar marks an invented person: never use a photo or a drawn face.</span></header><div class="k-stage">
+        <div class="pp-grid"><article class="pp-persona"><span class="pp-avatar">P01</span><strong>Alex Morgan</strong><p>Electrician working alone. Twelve years in the trade.</p><div class="pp-chips"><span class="pp-chip">Solo owner-operator</span><span class="pp-chip model">model-a</span><span class="pp-chip model">model-b</span></div></article></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-pill</code> <code>pp-chip</code> <code>pp-sw</code><span>Pills carry a state with a shape and a word. Chips name a segment or a model. A swatch keys a series (with a <b>pp-s</b> class) or a heat step (<b>h1</b> to <b>h5</b>), always beside a word.</span></header><div class="k-stage">
+        <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="pp-pill solved">Solved</span><span class="pp-pill partly">Partly</span><span class="pp-pill missing">Missing</span><span class="pp-pill regressed">Regressed</span><span class="pp-pill good">Good: anchored</span><span class="pp-pill flag">Flag: leading</span><span class="pp-pill missed">Missed: payer</span><span class="pp-chip">Segment name</span><span class="pp-chip model">model-a</span></div>
+        <ul class="pp-legend"><li><span class="pp-sw pp-s1"></span>Concept A</li><li><span class="pp-sw pp-s2"></span>Concept B</li><li><span class="pp-sw pp-s3"></span>Concept C</li><li class="scale"><span class="pp-num">Lower</span><span class="pp-sw h1"></span><span class="pp-sw h2"></span><span class="pp-sw h3"></span><span class="pp-sw h4"></span><span class="pp-sw h5"></span><span class="pp-num">higher</span></li></ul>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-bars</code><span>Counts by kind. One measure, the number always printed, neutral grey by default. Built by <code>PP.bars</code>; pass <b>tone</b> (good, warn, crit) when the count is of a state, and <b>wrap</b> for long labels.</span></header><div class="k-stage">
+        <div class="pp-grid two"><div class="pp-plot"><div id="d-bars"></div></div><div class="pp-plot"><div id="d-bars2"></div></div></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-list</code><span>Plain list, <b>open</b> for what remains unproven (an unticked box), or <b>ranked</b> for fixes in order.</span></header><div class="k-stage">
+        <div class="pp-grid two">
+          <ul class="pp-list open"><li>That the problem exists outside this panel.</li><li>That anyone would pay. Nobody was asked.</li></ul>
+          <ol class="pp-list ranked"><li><b>Make "Confirm" the main button.</b> Stuck point 1.</li><li><b>Name the wrong field.</b> Stuck point 2.</li></ol>
+        </div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-files</code><span>Required in some form. The last section of every page: the markdown files and what each holds.</span></header><div class="k-stage">
+        <dl class="pp-files"><dt>analysis/SYNTHESIS.md</dt><dd>The full written findings, with every caveat.</dd><dt>analysis/quant.md</dt><dd>Every tally behind the charts on this page.</dd></dl>
+      </div></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="charts">
+    <h2 data-toc="Charts">Charts</h2>
+    <p class="pp-lede">For a large panel, a chart carries what a table cannot. Drawn with Chart.js through helpers that take colours and type from the tokens, redraw on a theme change, once the web fonts arrive, and in light colours for paper. Every chart keeps its numbers in a fold underneath. <span class="k-tag">Example data</span></p>
+    <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">The question</th><th scope="col">Use</th><th scope="col">Keep in mind</th></tr></thead><tbody>
+      <tr><th scope="row">How does one whole split?</th><td>Donut, or pie</td><td>Five parts at most, total in the middle. For more parts use bars.</td></tr>
+      <tr><th scope="row">How does a split differ between groups?</th><td>Stacked bars</td><td>Same order and colours in every bar. Lying down when the labels are long.</td></tr>
+      <tr><th scope="row">Which is bigger?</th><td>Bars, side by side</td><td>Start the axis at zero. Three series at most beside each other.</td></tr>
+      <tr><th scope="row">What shape does each option have across the same measures?</th><td>Radar</td><td>Five to eight measures, three shapes at most. For exact values add the heat table.</td></tr>
+      <tr><th scope="row">How spread out are the scores?</th><td>Dot plot</td><td>When a small gap between means hides a large overlap.</td></tr>
+      <tr><th scope="row">A handful of people, one by one</th><td>Squares, not a chart</td><td>Up to about 12 participants, each one visible.</td></tr>
+    </tbody></table></div>
+    <p class="pp-caption">Every chart helper takes <b>title</b>, <b>note</b>, <b>height</b> (in pixels, for the drawing area), <b>unit</b> (the first column of its numbers table), and a <b>tone</b> on each part or series, or a <b>palette</b> ("neutral", or a list of tones such as ["s1", "s3"]).</p>
+    <div class="k-stack">
+      <article class="k-demo"><header><code>PP.donut</code> <code>PP.pie</code><span>The parts of one whole. Parts without a tone take the series order: give them tones, or palette "neutral", where they are not identities.</span></header><div class="k-stage" data-code><div class="pp-grid two"><div id="c-donut"></div><div id="c-pie"></div></div></div>
+<script type="text/plain" data-for="c-donut">PP.donut(document.getElementById("c-donut"), {
+  title: "Concept A was first choice in 41 of 72 runs",
+  parts: [{ label: "Concept A", n: 41 }, { label: "Concept B", n: 22 }, { label: "Concept C", n: 9 }],
+  centre: { value: 72, label: "runs" }, unit: "Concept"
+});
+PP.pie(document.getElementById("c-pie"), {
+  title: "A third of the notes describe a problem",
+  parts: [{ label: "A problem or a workaround", n: 64, tone: "for" }, { label: "Said it is not a problem", n: 41, tone: "against" }, { label: "Background", n: 87, tone: "quiet" }],
+  unit: "Kind of note"
+});</script></article>
+
+      <article class="k-demo"><header><code>PP.stack</code><span>Stacked bars: the same split, compared across themes or groups. The tone <b>both</b> is the striped mix of for and against. Each segment's value is printed where it fits.</span></header><div class="k-stage" data-code><div id="c-stack"></div></div>
+<script type="text/plain" data-for="c-stack">PP.stack(document.getElementById("c-stack"), {
+  title: "Chasing the lender is the only theme most participants raised",
+  note: "24 simulated participants: 8 personas on 3 models.",
+  labels: ["Chasing the lender", "Re-keying client details", "Collecting documents", "Explaining fees", "Compliance checks"],
+  series: [
+    { label: "Raised it", values: [15, 9, 4, 6, 3], tone: "for" },
+    { label: "Both", values: [4, 5, 3, 2, 2], tone: "both" },
+    { label: "Said it is not a problem", values: [2, 4, 13, 7, 9], tone: "against" },
+    { label: "No note", values: [3, 6, 4, 9, 10], tone: "quiet" }
+  ], max: 24, axisLabel: "simulated participants", unit: "Theme"
+});</script></article>
+
+      <article class="k-demo"><header><code>PP.columns</code><span>Bars side by side, stacked upright with <b>stacked</b>, or lying down with <b>horizontal</b>. Each value is printed on the chart; <b>values: false</b> leaves them off. <b>min</b> and <b>max</b> fix the value axis, <b>ticks</b> is merged into its ticks (for example {stepSize: 1}), and a label may be an array of two lines.</span></header><div class="k-stage" data-code><div class="pp-grid two"><div id="c-cols"></div><div id="c-cols2"></div></div><div class="pp-grid two"><div id="c-cols3"></div></div></div>
+<script type="text/plain" data-for="c-cols">PP.columns(document.getElementById("c-cols"), {
+  title: "Concept B wins only with small teams",
+  labels: ["Solo", ["Small", "team"], ["Office", "manager"]],
+  series: [{ label: "Concept A", values: [8.1, 7.2, 7.6] }, { label: "Concept B", values: [6.9, 7.9, 7.0] }, { label: "Concept C", values: [6.0, 6.3, 6.1] }],
+  max: 10, axisLabel: "mean score, 1 to 10", unit: "Segment"
+});
+PP.columns(document.getElementById("c-cols2"), {
+  title: "First choice by segment", stacked: true,
+  labels: ["Solo", "Small team", "Office manager"],
+  series: [{ label: "Concept A", values: [19, 9, 13] }, { label: "Concept B", values: [6, 12, 4] }, { label: "Concept C", values: [2, 3, 4] }],
+  axisLabel: "runs", unit: "Segment"
+});
+PP.columns(document.getElementById("c-cols3"), {
+  title: "A against the best of the others", horizontal: true, height: 220,
+  labels: ["Clarity", "Trust", "Fit", "Visual design"],
+  series: [{ label: "A minus the best other", values: [1.4, -0.3, 0.6, -1.7], tone: "s1" }],
+  min: -2, max: 2, ticks: { stepSize: 1 }, axisLabel: "points", unit: "Factor"
+});</script></article>
+
+      <article class="k-demo"><header><code>PP.radar</code><span>The profile of a few options over the same measures. Read the shape, then check the numbers.</span></header><div class="k-stage" data-code><div id="c-radar" style="max-width:560px"></div></div>
+<script type="text/plain" data-for="c-radar">PP.radar(document.getElementById("c-radar"), {
+  title: "A leads on clarity and fit, B on trust and looks",
+  axes: ["Clarity", "Trust", "Fit", "Value", "Visual design", "Next step"],
+  series: [{ label: "Concept A", values: [8.4, 7.6, 7.9, 7.1, 6.1, 7.8] }, { label: "Concept B", values: [7.0, 8.2, 7.1, 6.8, 7.8, 6.4] }, { label: "Concept C", values: [6.2, 5.4, 6.0, 6.6, 6.9, 5.8] }],
+  min: 4, max: 9
+});</script></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="panel">
+    <h2 data-toc="Panel and folds">The panel, and things that fold away</h2>
+    <p class="pp-lede">Readers ask "who was this?" early and then stop caring. Give them the answer in a fold: closed it is one line, open it is everything.</p>
+    <div class="k-stack">
+      <article class="k-demo"><header><code>PP.panel</code><span>Stat tiles, runs by model and personas by segment in neutral greys, every run of every pairing with its state, what every participant was also told, persona cards that open to the background the model was given, and every model with its exact id and its jobs.</span></header><div class="k-stage" data-code><div id="c-panel"></div></div>
+<script type="text/plain" data-for="c-panel">const people = [
+  ["P01", "Dana Whitlock", "Mortgage broker working alone", "Solo"], ["P02", "Kiri Tane", "Mortgage broker working alone", "Solo"],
+  ["P03", "Rahul Mehta", "Broker in a team of four", "Small team"], ["P04", "Jo Callaghan", "Broker in a team of six", "Small team"],
+  ["P05", "Mei Tanaka", "Broker and practice owner", "Small team"], ["P06", "Tom Abbey", "Office manager for a brokerage", "Office manager"]
+].map(([id, name, role, segment]) => ({ id, name, role, segment, trait: "Example persona", bio: ["Twelve years in the job, the last five in this role.", "Uses a spreadsheet and the lender portals, and distrusts new tools until a colleague vouches for one."] }));
+const models = [
+  { key: "model-a", model: "vendor-model-a-2026", runner: "harness-one" },
+  { key: "model-b", runner: "harness-two", effort: "medium" },
+  { key: "model-d", model: "vendor-model-d-2026", runner: "harness-one", role: "other", job: "two analysts and the writer" }
+];
+const runs = [];
+people.forEach((p) => ["model-a", "model-b"].forEach((m) => [1, 2].forEach((replicate) => runs.push({
+  persona: p.id, model: m, replicate,
+  state: p.id === "P06" && m === "model-b" && replicate === 2 ? "limited" : p.id === "P04" && m === "model-a" && replicate === 1 ? "failed" : "done"
+}))));
+PP.panel(document.getElementById("c-panel"), {
+  title: "Who was on the panel", unit: "run", open: true, personas: people, models, runs,
+  told: ["You work in Australia: the customers and the money are Australian."]
+});</script></article>
+
+      <article class="k-demo"><header><code>PP.panel from the study files</code><span>The helper's input is not study.json or runs.json as they are: segments are ids, runs.json calls the harness <b>runner</b>, keeps the study's alias in <b>key</b> and the exact model in <b>model</b> (empty for the configured default), and lists every job, not only the personas'. This is the whole mapping.</span></header>
+<pre id="map-panel">/* study = study.json, runs = runs.json, quant = analysis/quant.json, as the lead read them. */
+const ROLE = { panellist: "plays the personas", interviewer: "interviewer", analyst: "analyst", critic: "critic of the questions", themes: "groups the notes into themes", writer: "writer" };
+
+/* Personas: study.json gives a segment id; the panel shows its name. */
+const personas = study.personas.map((p) => ({
+  id: p.id, name: p.name, role: p.role, trait: p.personality, bio: p.bio,
+  segment: study.segments[p.segment] || p.segment,
+}));
+
+/* Models: one row for each runner, exact model and effort that did any job. Where it played personas,
+   its study alias (run.key) names the column of the matrix; an empty model is the harness's configured default. */
+const byModel = new Map();
+runs.forEach((r) => {
+  const id = [r.runner, r.model || "", r.effort || ""].join("/");
+  if (!byModel.has(id)) byModel.set(id, { runner: r.runner, model: r.model, effort: r.effort, key: null, jobs: new Set() });
+  const m = byModel.get(id);
+  m.jobs.add(ROLE[r.role] || r.role);
+  if (r.role === "panellist") m.key = r.key;
+});
+const models = Array.from(byModel.values()).map((m) => ({
+  key: m.key || m.model || m.runner, model: m.model, effort: m.effort, runner: m.runner,
+  role: m.key ? "participant" : "other", job: Array.from(m.jobs).join(", "),
+}));
+
+/* Runs: the persona jobs only, with the alias as their model. A review or usability run carries its own state;
+   an interview finished when quant.json lists it under runs.interviewed. */
+const finished = new Set((quant.runs &amp;&amp; quant.runs.interviewed) || []);
+const panelRuns = runs.filter((r) => r.role === "panellist").map((r) => ({
+  persona: r.persona, model: r.key, replicate: r.replicate,
+  state: r.state || (finished.has(r.run) ? "done" : "incomplete"),
+}));
+
+PP.panel(document.getElementById("panel"), {
+  title: "Who was on the panel", unit: "interview", personas, models, runs: panelRuns, told: study.context_notes,
+});</pre>
+      <details open><summary>Copy the mapping <button class="k-copy" data-copy="#map-panel">Copy</button></summary></details>
+      </article>
+
+      <article class="k-demo"><header><code>pp-fold</code><span>Any section the reader opens on demand. Add <b>plain</b> for a light one under a chart. Every fold prints open.</span></header><div class="k-stage">
+        <details class="pp-fold"><summary>All 12 themes <span class="count">4 shown above, 8 more here</span></summary><div class="body"><p class="pp-muted">A long table, the full list of quotes, the method, a timeline: anything a skimming reader does not need.</p></div></details>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-stats</code><span>The size of the study in three or four numbers. Only when the numbers are the point.</span></header><div class="k-stage">
+        <dl class="pp-stats"><div class="pp-stat"><dt>personas</dt><dd>8</dd></div><div class="pp-stat"><dt>models playing them</dt><dd>3</dd></div><div class="pp-stat"><dt>runs</dt><dd>24</dd></div><div class="pp-stat"><dt>concepts</dt><dd>3</dd></div></dl>
+      </div></article>
+
+      <article class="k-demo"><header><code>tr.group</code> <code>pp-block</code><span>A group row is a sub-heading inside a table body, such as a segment above its personas. A block keeps a heading and its figure together inside a section.</span></header><div class="k-stage">
+        <div class="pp-block"><h3>Mean score by persona</h3>
+        <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Persona</th><th scope="col" class="n">A</th><th scope="col" class="n">B</th></tr></thead><tbody>
+          <tr class="group"><th colspan="3" scope="colgroup">Solo</th></tr>
+          <tr><th scope="row">Dana Whitlock</th><td class="n">7.9</td><td class="n">6.8</td></tr>
+          <tr class="group"><th colspan="3" scope="colgroup">Small team</th></tr>
+          <tr><th scope="row">Rahul Mehta</th><td class="n">7.1</td><td class="n">7.6</td></tr>
+        </tbody></table></div></div>
+      </div></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="interview">
+    <h2 data-toc="Interview">Interview study</h2>
+    <div class="k-stack">
+
+      <article class="k-demo"><header><code>pp-units</code> <code>pp-split</code><span>The three groups that never overlap. Squares for a panel up to about 12, the split bar beyond that. Always with the numbers beside them.</span></header><div class="k-stage">
+        <ul class="pp-legend"><li><span class="pp-u r"></span>Raised it</li><li><span class="pp-u n"></span>Said it is not a problem</li><li><span class="pp-u b"></span>Both</li><li><span class="pp-u"></span>No note</li></ul>
+        <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Theme</th><th scope="col">Participants</th><th scope="col" class="n">Raised</th><th scope="col" class="n">Not a problem</th><th scope="col" class="n">Both</th></tr></thead><tbody>
+          <tr><th scope="row">Small panel, squares</th><td><span class="pp-units"><span class="pp-u r" data-tip="P01-a: raised it" tabindex="0"></span><span class="pp-u b" data-tip="P01-b: both" tabindex="0"></span><span class="pp-u n" data-tip="P02-a: said it is not a problem" tabindex="0"></span><span class="pp-u" data-tip="P02-b: no note under this theme" tabindex="0"></span></span></td><td class="n">1</td><td class="n">1</td><td class="n">1</td></tr>
+          <tr><th scope="row">Large panel, split bar</th><td><span class="pp-split" data-tip="14 raised it, 9 said it is not a problem, 5 both, 12 no note"><i class="r" style="--n: 14"></i><i class="n" style="--n: 9"></i><i class="b" style="--n: 5"></i><i style="--n: 12"></i></span></td><td class="n">14</td><td class="n">9</td><td class="n">5</td></tr>
+        </tbody></table></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>PP.themes</code><span>The themes table: squares, the three counts, what the notes were, and the evidence. The evidence counts the Raised and Both participants from their notes other than "not a problem", so say so beside the table. <b>group</b> splits themes that told of trouble from background.</span></header><div class="k-stage" data-code><div class="pp-scroll" id="c-themes"></div></div>
+<script type="text/plain" data-for="c-themes">/* Each theme is cut from quant.json "themes". kinds is derived: count the theme's raising_notes by their
+   signal in quant.json "quotes", PAIN and WORKAROUND as a problem or workaround, the rest as background. */
+const runs = ["P01-a", "P01-b", "P02-a", "P02-b"];
+const g = (list) => ({ n: list.length, runs: list });
+PP.themes(document.getElementById("c-themes"), [
+  { name: "Chasing the lender", raised: g(["P01-a", "P02-b"]), not_a_problem: g([]), both: g(["P01-b"]), unprompted: { n: 2 }, incident: { n: 2 }, effort: { workaround: { n: 2 } }, flagged: { n: 0, of: 4 }, kinds: { problem: 3, background: 1 } },
+  { name: "Payment follow-up", raised: g([]), not_a_problem: g(["P02-a"]), both: g(["P01-a", "P02-b"]), unprompted: { n: 1 }, incident: { n: 1 }, effort: {}, flagged: { n: 1, of: 3 }, kinds: { problem: 1, background: 2 } },
+  { name: "Handing records to the accountant", raised: g(runs), not_a_problem: g([]), both: g([]), unprompted: { n: 0 }, incident: { n: 0 }, effort: { paid: { n: 4 } }, flagged: { n: 0, of: 4 }, kinds: { problem: 0, background: 4 } }
+], runs, { group: (t) => (t.kinds.problem ? "Told of trouble" : "Background only") });</script></article>
+
+      <article class="k-demo"><header><code>pp-goal</code><span>One per learning goal: what was heard, and what was heard against it, side by side.</span></header><div class="k-stage">
+        <article class="pp-goal"><header><span class="tag">Goal 1</span><h3>Does this problem earn their attention?</h3></header><div class="sides"><div><h4>Heard</h4><p>Two or three plain sentences of what supports it.</p></div><div><h4>Heard against</h4><p>The same room for what cuts the other way.</p></div></div></article>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-exchange</code><span>A question that teaches: a good move, or a flagged one with a better question beside it.</span></header><div class="k-stage">
+        <div class="pp-grid two">
+          <article class="pp-exchange"><div class="who"><span class="pp-pill good">Good: anchored</span><span class="pp-ref">P01-a, 10</span></div><p class="q">"Take me through last Friday's admin evening, from when you sat down."</p><p class="a">"I grabbed the pile of receipts out of the ute first."</p><p class="note">Turned a general complaint into one evening.</p></article>
+          <article class="pp-exchange"><div class="who"><span class="pp-pill flag">Flag: leading</span><span class="pp-ref">P02-b, 12</span></div><p class="q">"How were the accounts being done before you set that up?"</p><p class="better"><b>Better</b><i>How did the business first come to use it?</i></p></article>
+        </div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-guide</code><span>The revised guide for interviews with real people. Numbered: it is the order to ask in.</span></header><div class="k-stage">
+        <ol class="pp-guide"><li><span class="ask">Walk me through the last job you invoiced for.</span><span class="how">Follow what happened next. Do not assume it was paid late.</span></li><li><span class="ask">When did a day last go differently from how it was booked?</span></li></ol>
+      </div></article>
+
+      <article class="k-demo"><header><code>model agreement</code><span>Which findings came from one model alone. Built by <code>PP.agreement</code>; rows told on one model are tinted.</span></header><div class="k-stage">
+        <div class="pp-scroll" id="d-agree"></div>
+      </div></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="review">
+    <h2 data-toc="Review">Review study</h2>
+    <div class="k-stack">
+
+      <article class="k-demo"><header><code>pp-concept</code><span>One scorecard per concept, with its series class. It sets the page's colour key: concept A is s1 wherever it appears.</span></header><div class="k-stage">
+        <div class="pp-grid">
+          <article class="pp-concept pp-s1"><span class="tag"><span class="pp-sw pp-s1"></span>Concept A</span><strong>Plain and direct</strong><p>Says what it does and what it costs on the first screen.</p><dl><div><dt>runs chose it first</dt><dd>41<small> of 72</small></dd></div><div><dt>mean score</dt><dd>7.8<small> of 10</small></dd></div></dl></article>
+          <article class="pp-concept pp-s2"><span class="tag"><span class="pp-sw pp-s2"></span>Concept B</span><strong>Story led</strong><p>Follows one manager through a Friday.</p><dl><div><dt>runs chose it first</dt><dd>22<small> of 72</small></dd></div><div><dt>mean score</dt><dd>7.4<small> of 10</small></dd></div></dl></article>
+        </div>
+      </div></article>
+
+      <article class="k-demo"><header><code>PP.dotplot</code><span>The leaderboard. Small dots are single runs, the large dot is the mean, all on one scale. A row's <b>tone</b> colours its mean; <b>dense</b> for more than about 30 dots a row; <b>numbers</b> is "summary" (the default) or "all" for every value in the fold.</span></header><div class="k-stage" data-code><div id="c-dots"></div></div>
+<script type="text/plain" data-for="c-dots">PP.dotplot(document.getElementById("c-dots"), [
+  { label: "A, plain and direct", sub: "12 runs", tone: "s1", mean: 7.8, values: [6.9, 7.2, 7.5, 7.6, 7.8, 7.9, 8.0, 8.1, 8.2, 8.3, 8.4, 7.7].map((v, i) => ({ v, who: "run " + (i + 1) })) },
+  { label: "B, story led", sub: "12 runs", tone: "s2", mean: 7.4, values: [6.1, 6.8, 7.0, 7.2, 7.4, 7.5, 7.6, 7.8, 8.0, 8.1, 8.3, 7.0].map((v, i) => ({ v, who: "run " + (i + 1) })) },
+  { label: "C, feature grid", sub: "12 runs", tone: "s3", mean: 6.1, values: [5.0, 5.4, 5.8, 6.0, 6.1, 6.2, 6.3, 6.5, 6.6, 6.9, 5.6, 6.8].map((v, i) => ({ v, who: "run " + (i + 1) })) }
+], { min: 4, max: 9, ticks: [4, 5, 6, 7, 8, 9], title: "A leads, but the runs overlap", note: "Show the spread, not only the mean: a 0.4 gap means little when the runs overlap this much." });</script></article>
+
+      <article class="k-demo"><header><code>pp-heat</code><span>Concepts by factor. One hue from low to high, the number in every cell, the leader ringed, a swatch key above.</span></header><div class="k-stage">
+        <ul class="pp-legend"><li class="scale"><span class="pp-num">Lower</span><span class="pp-sw h1"></span><span class="pp-sw h2"></span><span class="pp-sw h3"></span><span class="pp-sw h4"></span><span class="pp-sw h5"></span><span class="pp-num">higher</span></li><li>Ringed: the highest in its column</li></ul>
+        <div class="pp-scroll"><table class="pp-table pp-heat"><thead><tr><th scope="col">Concept</th><th scope="col" class="c">Clarity</th><th scope="col" class="c">Trust</th><th scope="col" class="c">Fit</th><th scope="col" class="c">Visual</th></tr></thead><tbody>
+          <tr><th scope="row"><span class="pp-sw pp-s1"></span>A, plain and direct</th><td class="h h5 lead">8.4</td><td class="h h4">7.6</td><td class="h h4 lead">7.9</td><td class="h h2">6.1</td></tr>
+          <tr><th scope="row"><span class="pp-sw pp-s2"></span>B, story led</th><td class="h h3">7.0</td><td class="h h5 lead">8.2</td><td class="h h3">7.1</td><td class="h h4 lead">7.8</td></tr>
+          <tr><th scope="row"><span class="pp-sw pp-s3"></span>C, feature grid</th><td class="h h2">6.2</td><td class="h h1">5.4</td><td class="h h2">6.0</td><td class="h h3">6.9</td></tr>
+        </tbody></table></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>first choice matrix</code><span>Each run's first choice: persona and model down the side, concepts across. The mark takes the concept's series class.</span></header><div class="k-stage">
+        <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Run</th><th scope="col" class="c">A</th><th scope="col" class="c">B</th><th scope="col" class="c">C</th></tr></thead><tbody>
+          <tr><th scope="row">Broker, solo <span class="pp-chip model">model-a</span></th><td class="c"><span class="pp-mark first pp-s1"></span><span class="pp-sr">first choice</span></td><td class="c"></td><td class="c"></td></tr>
+          <tr><th scope="row">Broker, solo <span class="pp-chip model">model-b</span></th><td class="c"></td><td class="c"><span class="pp-mark first pp-s2"></span><span class="pp-sr">first choice</span></td><td class="c"></td></tr>
+          <tr><th scope="row">Office manager <span class="pp-chip model">model-a</span></th><td class="c"><span class="pp-mark first pp-s1"></span><span class="pp-sr">first choice</span></td><td class="c"></td><td class="c"></td></tr>
+        </tbody></table></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-tier</code><span>Who it suits: ideal, strong, not yet, out of scope. Each with the personas and one line of why.</span></header><div class="k-stage">
+        <div><div class="pp-tier"><span class="name">Ideal</span><span class="who"><span class="pp-chip">Broker, solo</span><span class="pp-chip">Broker, small team</span></span><p>Scored fit highest on every model and asked for nothing that is missing.</p></div><div class="pp-tier"><span class="name">Not yet</span><span class="who"><span class="pp-chip">Office manager</span></span><p>Wanted an approval step the concept does not show.</p></div></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>asks tracker</code><span>What the panel asked for, and where each ask stands since the last round.</span></header><div class="k-stage">
+        <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Ask</th><th scope="col">Raised by</th><th scope="col">Now</th></tr></thead><tbody>
+          <tr><th scope="row">Show the price before sign-up</th><td>5 of 12 runs</td><td><span class="pp-pill solved">Solved</span></td></tr>
+          <tr><th scope="row">Say who holds the data</th><td>4 of 12 runs</td><td><span class="pp-pill partly">Partly</span></td></tr>
+          <tr><th scope="row">A worked example</th><td>3 of 12 runs</td><td><span class="pp-pill regressed">Regressed</span></td></tr>
+        </tbody></table></div>
+      </div></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="usability">
+    <h2 data-toc="Usability">Usability study</h2>
+    <div class="k-stack">
+
+      <article class="k-demo"><header><code>task matrix</code><span>Task by run. What the run claimed beside what the lead checked: the gap between them is the finding. <b>na</b> marks "not checked", which never reads as a no.</span></header><div class="k-stage">
+        <ul class="pp-legend"><li><span class="pp-mark yes"></span>Completed</li><li><span class="pp-mark part"></span>Partly</li><li><span class="pp-mark no"></span>Not completed</li><li><span class="pp-mark na"></span>Not checked</li></ul>
+        <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Run</th><th scope="col" class="c">Claimed</th><th scope="col" class="c">Checked</th><th scope="col">Stopped at</th></tr></thead><tbody>
+          <tr><th scope="row">Renter, first booking <span class="pp-chip model">model-a</span></th><td class="c"><span class="pp-mark yes"></span><span class="pp-sr">completed</span></td><td class="c"><span class="pp-mark yes"></span><span class="pp-sr">completed</span></td><td>Finished at step 10</td></tr>
+          <tr><th scope="row">Renter, first booking <span class="pp-chip model">model-b</span></th><td class="c"><span class="pp-mark yes"></span><span class="pp-sr">completed</span></td><td class="c"><span class="pp-mark na"></span><span class="pp-sr">not checked</span></td><td>Step 9, no check for this task</td></tr>
+        </tbody></table></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-stuck wide</code> <code>pp-fig</code> <code>pp-zoom</code><span>One card per stuck point: where, what happened, how many runs, their words, and the screenshot beside the words on a wide screen. A <b>pp-zoom</b> button holding an image opens it full size (kit.js), with its <b>data-ref</b> under it.</span></header><div class="k-stage">
+        <article class="pp-stuck wide"><figure class="pp-fig"><button type="button" class="pp-zoom" data-ref="P01-b, T1 step 8, T1-8.png" aria-label="Enlarge the screenshot of the booking form"><img class="k-placeholder" alt="Booking form with a red error banner that names no field." src="" width="690" height="388"></button><figcaption><span class="pp-ref">P01-b, T1 step 8, T1-8.png</span></figcaption></figure>
+          <div class="body"><span class="where">2 · Booking form · /book</span><strong>The error did not say which field was wrong</strong><p class="hit"><span class="pp-units"><span class="pp-u" tabindex="0" data-tip="P01-a: no error"></span><span class="pp-u on" tabindex="0" data-tip="P01-b: error at step 8"></span></span> 1 of 2 runs, step 8</p><p>The run changed the date by guesswork and got through.</p><figure class="pp-quote plain"><blockquote>A red message said something went wrong.</blockquote><figcaption><span class="pp-chip model">P01-b</span><span class="pp-ref">T1 step 8, step log</span></figcaption></figure></div></article>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-routes</code> <code>pp-strip</code><span>Where runs went: one cell for each step the task allows, one strip a run. Mark the stuck steps, the end, and the steps not used.</span></header><div class="k-stage">
+        <div class="pp-plot"><div class="pp-routes">
+          <span class="pp-chip model">P01-a</span><ol class="pp-strip" aria-label="P01-a used 6 of 10 steps: stuck at step 4, booked at step 6"><li data-tip="Step 1">1</li><li data-tip="Step 2">2</li><li data-tip="Step 3">3</li><li class="stuck" data-tip="Step 4: the error">4</li><li data-tip="Step 5">5</li><li class="done" data-tip="Step 6: booked">6</li><li class="spare">7</li><li class="spare">8</li><li class="spare">9</li><li class="spare">10</li></ol><span class="pp-small pp-num">6 of 10 steps</span>
+          <span class="pp-chip model">P01-b</span><ol class="pp-strip" aria-label="P01-b used 10 of 10 steps and ran out"><li>1</li><li>2</li><li>3</li><li class="stuck">4</li><li class="stuck">5</li><li>6</li><li>7</li><li>8</li><li>9</li><li>10</li></ol><span class="pp-small pp-num">ran out at 10</span>
+        </div>
+        <ul class="pp-legend"><li><span class="pp-key stuck"></span> hit a stuck point</li><li><span class="pp-key done"></span> task done</li><li><span class="pp-key"></span> ordinary step</li><li><span class="pp-key spare"></span> step not used</li></ul></div>
+      </div></article>
+
+      <article class="k-demo"><header><code>pp-steps</code><span>The path one run took, best in a fold. Everything after the action sits in the content column. <b>range</b> merges quiet steps (data-n="2-3"); mark the stuck step and the end; two or three screenshots, not all of them.</span></header><div class="k-stage">
+        <ol class="pp-steps"><li data-n="1"><span class="act">Filled in the form and pressed Book</span><p class="say">"That should be everything it asked for."</p></li><li data-n="2-3" class="range"><span class="act">Typed her name and email</span></li><li data-n="4" class="stuck"><span class="act">Red box: "Something went wrong, please check your details."</span><p class="say">"It doesn't say which detail."</p><span class="ref"><span class="pp-ref">T1-4.png</span></span></li><li data-n="6" class="done"><span class="act">Booking confirmed, reference shown</span></li></ol>
+      </div></article>
+    </div>
+  </section>
+
+  <section class="pp-section" id="recipes">
+    <h2 data-toc="Recipes">Recipes</h2>
+    <p class="pp-lede">The sections each kind of report usually needs, in order. Drop any the study has nothing for; add your own where the kit has no part.</p>
+    <div class="pp-grid">
+      <div class="pp-callout"><strong>Interview</strong><ul><li>Header, notice, verdict, meta, contents</li><li>The short version, and what it cannot tell you</li><li>The panel, folded</li><li>What each learning goal heard</li><li>Themes with the three groups, and how to read them</li><li>In their words, for and against, with the references note</li><li>Lean on less: one model, flagged questions</li><li>How the interviewer did</li><li>The guide for real interviews</li><li>Still unproven</li><li>Go deeper</li></ul></div>
+      <div class="pp-callout"><strong>Review</strong><ul><li>Header, notice, verdict, meta, contents</li><li>The short version, with a card per concept</li><li>The panel, folded</li><li>Leaderboard with its spread</li><li>Why it won, the heat table folded</li><li>For whom, and who it suits</li><li>Across models, every run folded</li><li>Quotes with persona and model</li><li>Asks, and what regressed</li><li>Decisions and limits, go deeper</li></ul></div>
+      <div class="pp-callout"><strong>Usability</strong><ul><li>Header, notice, verdict, meta, contents</li><li>What blocked people, with both standing cautions</li><li>The panel, folded</li><li>Task matrix, claimed against checked</li><li>Stuck points with screenshots, and the references note</li><li>The route strip; the step-by-step folded</li><li>What a debrief added, folded</li><li>What to change</li><li>Limits, go deeper</li></ul></div>
+    </div>
+  </section>
+
+  <section class="pp-section" id="helpers">
+    <h2 data-toc="Helpers">Helpers in kit.js</h2>
+    <p class="pp-lede">Each takes a small shape you derive from the study files, not a file as it stands, and writes kit markup. Hand-written markup works just as well.</p>
+    <div class="pp-scroll"><table class="pp-table"><thead><tr><th scope="col">Call</th><th scope="col">Give it</th><th scope="col">You get</th></tr></thead><tbody>
+      <tr><th scope="row"><span class="pp-ref">PP.themes(el, themes, runs, opts)</span></th><td>Each theme from quant.json "themes", with its raised, not_a_problem and both runs, unprompted, incident, effort and flagged; optionally kinds, counted from its raising_notes and their signals in quant.json "quotes". runs is quant.json runs.interviewed. opts: group, labels.</td><td>The themes table: squares, the three counts, what the notes were, the evidence</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.agreement(el, rows, models, names, people)</span></th><td>quant.json "model_agreement", the model keys, theme names by id, persona names by id</td><td>The persona by theme table, one-model rows tinted</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.units(runs, groupOf, labels)</span></th><td>Run ids in a fixed order, a function giving each a class, and the words for each class (the interview groups by default)</td><td>One square per participant, with tooltips and screen-reader text</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.bars(el, rows, opts)</span></th><td>[{label, n}] you count, such as critique marks by kind from quant.json "critique"; max, unit, tone, wrap</td><td>A bar list with printed values</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.dotplot(el, rows, opts)</span></th><td>One row per concept: its mean and each run's score, {v, who}; min, max, ticks, title, note, tone, dense, numbers</td><td>Scores on one scale with their spread, a description and a numbers fold</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.donut(el, o)</span>, <span class="pp-ref">PP.pie</span></th><td>parts: [{label, n, tone}] you count, a title, the total for the centre</td><td>The parts of one whole, with the numbers in a fold</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.columns(el, o)</span>, <span class="pp-ref">PP.stack</span></th><td>labels, series: [{label, values, tone}], and stacked, horizontal, min, max, ticks, values, height</td><td>Bars side by side or stacked, upright or lying down, each value printed</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.radar(el, o)</span></th><td>axes, series: [{label, values}], min and max</td><td>Profiles of up to three options over the same measures</td></tr>
+      <tr><th scope="row"><span class="pp-ref">PP.panel(el, o)</span></th><td>personas, models and runs mapped from study.json and runs.json (the mapping above), and what every participant was told</td><td>The whole "who was on the panel" fold</td></tr>
+      <tr><th scope="row"><span class="pp-ref">data-tip="..."</span></th><td>Any element</td><td>A tooltip on hover and on keyboard focus</td></tr>
+      <tr><th scope="row"><span class="pp-ref">nav.pp-toc</span>, <span class="pp-ref">button.pp-zoom</span></th><td>An empty nav; a button holding an image</td><td>The contents row; the screenshot full size</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <footer class="pp-foot">
+    <p>Part of the persona-panel skill, in assets/report-kit/ with three finished pages beside it: example-interview.html, example-usability.html and example-review-specimen.html. scripts/report_kit.py starts a study's page and bundles it into one file. Baseline type is IBM Plex; chart colours follow a validated colour-blind-safe set. Light is the default whatever the system setting; the button at the top switches to dark, and paper is always light, charts included.</p>
+  </footer>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="kit.js"></script>
+<script>
+PP.bars(document.getElementById("d-bars"), [{ label: "Anchored to an event", n: 8 }, { label: "Asked what was spent", n: 7 }, { label: "Asked the consequence", n: 5 }, { label: "Leading", n: 1 }], { unit: "marks", tone: "good" });
+PP.bars(document.getElementById("d-bars2"), [{ label: "Show a filled-in roster on the first screen", n: 27 }, { label: "Price on the first screen", n: 24 }, { label: "Say who can see my hours", n: 18 }], { max: 72, unit: "of 72 runs", wrap: true });
+PP.agreement(document.getElementById("d-agree"), [
+  { persona: "P01", theme: "TH1", agree: true, models: { "model-a": { n: 1 }, "model-b": { n: 1 } } },
+  { persona: "P01", theme: "TH2", agree: false, models: { "model-a": { n: 1 }, "model-b": { n: 0 } } },
+  { persona: "P02", theme: "TH1", agree: false, models: { "model-a": { n: 0 }, "model-b": { n: 1 } } }
+], ["model-a", "model-b"], { TH1: "Friday receipt pile", TH2: "Payment follow-up" }, { P01: "Alex, electrician", P02: "Sam, plumber" });
+/* A demo drawn by a helper shows the call that drew it: the same text is run and displayed. */
+document.querySelectorAll('script[type="text/plain"][data-for]').forEach((src, i) => {
+  const code = src.textContent.trim();
+  new Function(code)();
+  const d = document.createElement("details"), s = document.createElement("summary"), pre = document.createElement("pre"), b = document.createElement("button");
+  pre.id = "code-" + i; pre.textContent = code;
+  b.className = "k-copy"; b.type = "button"; b.dataset.copy = "#code-" + i; b.textContent = "Copy";
+  s.append("The call", b); d.append(s, pre); src.parentElement.querySelector(".k-stage").after(d);
+});
+/* Every other demo shows its own markup: no second copy to drift out of date. */
+document.querySelectorAll(".k-demo > .k-stage:not([data-code])").forEach((stage, i) => {
+  const d = document.createElement("details"), s = document.createElement("summary"), pre = document.createElement("pre"), b = document.createElement("button");
+  pre.id = "snip-" + i;
+  pre.textContent = stage.innerHTML.replace(/\n\s*\n/g, "\n").replace(/^\n+|\s+$/g, "").replace(/^ {8}/gm, "");
+  b.className = "k-copy"; b.type = "button"; b.dataset.copy = "#snip-" + i; b.textContent = "Copy";
+  s.append("HTML", b); d.append(s, pre); stage.after(d);
+});
+/* The screenshot demo needs an image: draw a placeholder from the tokens, after the snippet above was taken. */
+document.querySelectorAll("img.k-placeholder").forEach((img) => {
+  const c = document.createElement("canvas"), x = c.getContext("2d"), t = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  c.width = 690; c.height = 388;
+  x.fillStyle = t("--pp-surface"); x.fillRect(0, 0, 690, 388);
+  x.fillStyle = t("--pp-crit-wash"); x.fillRect(24, 24, 642, 40);
+  x.fillStyle = t("--pp-sunk"); [100, 170, 240].forEach((y) => x.fillRect(24, y, 642, 40));
+  x.fillStyle = t("--pp-ink-3"); x.font = "20px " + t("--pp-font-ui"); x.fillText("Screenshot placeholder", 24, 330);
+  img.src = c.toDataURL();
+});
+</script>

@@ -11,6 +11,7 @@ You are a qualitative research analyst for a simulated usability study.
 <PERSONA_FILES>
 <INCOMPLETE_RUNS>
 <FOLLOWUPS>
+<DEBRIEFS>
 
 ## How to read a step log
 - Each step has an `intent` entry, written before the panellist acted (`sees`, `expects`, `action`), and a `result` entry, written after (`happened`, `url`, `screenshot`).

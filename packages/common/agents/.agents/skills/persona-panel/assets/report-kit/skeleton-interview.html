@@ -1,0 +1,95 @@
+<title>${STUDY}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<link rel="stylesheet" href="kit.css">
+<!-- A starting point from report_kit.py init. Every part, its markup and the helpers are in the skill's assets/report-kit/kit.html; a finished page of this type is example-interview.html beside it. Restyle, reorder, drop or add sections as the study needs. Keep the notice word for word, counts with their base, verbatim quotes with their references, the evidence against and the limits, and Go deeper. -->
+<div class="pp-page">
+
+  <header class="pp-head">
+    <p class="pp-eyebrow">Interview study</p>
+    <h1>The question the round asked</h1>
+    <p class="pp-notice">${NOTICE}</p>
+    <dl class="pp-verdict">
+      <div><dt>The answer</dt><dd>One sentence.</dd></div>
+      <div><dt>How sure</dt><dd><span class="pp-sure low">Low:</span> the reason in a few words.</dd></div>
+      <div><dt>Do next</dt><dd>The one action to take.</dd></div>
+    </dl>
+    <dl class="pp-meta">
+      <div><dt>Interviews</dt><dd>N of M finished</dd></div>
+      <div><dt>Personas</dt><dd>N, each on M models</dd></div>
+      <div><dt>Guide</dt><dd>N goals, N topics</dd></div>
+      <div><dt>Coded</dt><dd>N notes in N themes</dd></div>
+      <div><dt>Quotes</dt><dd>N of N verified</dd></div>
+      <div><dt>Used</dt><dd>$0.00 where reported</dd></div>
+    </dl>
+    <nav class="pp-toc"></nav>
+  </header>
+
+  <section class="pp-section">
+    <h2 data-toc="Short version">The short version</h2>
+    <!-- Up to three takeaways (pp-take), strongest first, each with its count and base, then a limit callout: what this cannot tell you. -->
+  </section>
+
+  <section class="pp-section">
+    <div id="panel"></div>
+    <!-- PP.panel fills this fold: who was on the panel, what every participant was told, which model did which job. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Learning goals">What each learning goal heard</h2>
+    <!-- One pp-goal per goal: what was heard, and what was heard against it, side by side. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Themes">Themes, strongest evidence first</h2>
+    <!-- PP.themes from quant.json "themes": the three groups, unprompted, incident and effort, with a line on how to read them. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="In their words">In their words</h2>
+    <!-- Verbatim quotes the quote check found, for (pp-quote) and against (pp-quote counter), each with its run and exchange, and the references note. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Lean on less">Lean on these less</h2>
+    <!-- Findings that rest on one model alone (PP.agreement) or on a question the critique flagged. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="The interviewer">How the interviewer did</h2>
+    <!-- The critique's marks by kind (PP.bars), then two or three pp-exchange cards, each flagged question with a better one beside it. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Real interviews">For the real interviews</h2>
+    <!-- The revised guide (pp-guide) and the next three learning goals, the uncomfortable one among them. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Unproven">Still unproven</h2>
+    <!-- A pp-list open: that the problem exists outside this panel, that this segment puts it first, nothing on a solution or on paying. -->
+  </section>
+
+  <section class="pp-section">
+    <h2 data-toc="Go deeper">Go deeper</h2>
+    <p class="pp-lede">This page is the skim. The study's markdown files are the full record, at these paths in the study folder.</p>
+    <dl class="pp-files">
+      <dt>analysis/SYNTHESIS.md</dt><dd>The full written findings, with every caveat.</dd>
+      <dt>analysis/quant.md</dt><dd>Every tally behind this page: themes by segment, model and persona, topic coverage, critique counts.</dd>
+      <dt>analysis/themes.md</dt><dd>Each theme with the notes it groups.</dd>
+      <dt>analysis/critique-1.md</dt><dd>Every mark on the interviewer's questions.</dd>
+      <dt>interviews/&lt;run id&gt;.md</dt><dd>The transcripts, each with the participant's situation card.</dd>
+      <dt>analysis/quote-check.md</dt><dd>Every quotation of the synthesis, checked against the transcripts.</dd>
+      <dt>analysis/usage.md</dt><dd>Tokens, time and cost by role and by run.</dd>
+    </dl>
+  </section>
+
+  <footer class="pp-foot">
+    <p>What was used, the date, and which model and harness did each job.</p>
+  </footer>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="kit.js"></script>
+<script>
+/* The page reads no file: paste the cut of analysis/quant.json, study.json and runs.json it needs here as constants.
+   kit.html, "PP.panel from the study files", maps study.json and runs.json to PP.panel. */
+</script>

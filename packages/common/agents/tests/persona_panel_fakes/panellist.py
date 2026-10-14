@@ -12,9 +12,13 @@ Switched on by $FAKE_PANEL, a directory the test owns:
 
 The run is the one whose persona file the prompt names (.../personas/<pid>-<slug>--<key>.md is
 run <pid>-<key>). A prompt with a "## Produce `<file>`" or "## Output: `<file>`" heading is a
-job's brief instead: .../analysis/qual-<n>.md is the job analyst-<n> and .../analysis/SYNTHESIS.md
-the job writer, and that file is what the job writes. A resume message names no file, so a
-resumed process finds its run by its session id, which the fake recorded at launch. A resume of
+job's brief instead: .../analysis/qual-<n>.md is the job analyst-<n>, .../analysis/SYNTHESIS.md
+the job writer and, in an interview study, .../analysis/critique-<n>.md the job critic-<n> and
+.../analysis/themes.md the job themes, and that file is what the job writes. A resume message names no file, so a
+resumed process finds its run by its session id, which the fake recorded at launch. That is how
+a turn of a debrief reaches a finished run too: a run the plan leaves out answers one with
+"Answer <k>." and writes nothing, k being the number in a "Question <k>?" or else how many
+processes it has had. A resume of
 a session it has no record of ends as the real CLI ends one: its own message on stderr, nothing
 on stdout, exit code 1. A test loses a session by deleting sessions/<session id>.json.
 
@@ -23,6 +27,8 @@ Steps, in the order given:
     write:<n>       append the next n concept sections, scored, in the file's review order
     write:all       append every concept section still missing, then the final sections.
                     For a job, any write step writes its whole output file
+    text:<words>    a job: write its output file with the words as what it found, in place of
+                    the usual line: a synthesis with a quotation in it
     steps:<n>       usability: how many steps each task attempted from here on takes (default 2)
     act:<n>         usability: take n steps of the next task and write no section for it: a
                     task that was under way when the run was cut off
@@ -52,6 +58,8 @@ Steps, in the order given:
                     rewrote its file and lost the end of it
     reply           end with DOCUMENT as the final reply, in place of the recorded one: what a
                     job that could not write its file returns
+    say:<text>      end with the text as the final reply and write nothing: what a finished run
+                    answers a question of its debrief with. "say:" alone is an empty reply
     wait:<gate>     block until the test creates go/<gate>
     starts:<n>      block until n runs have started in all (two runs holding here overlap for sure)
     stubborn        from now on, SIGTERM does not end the process: it appends one more section
@@ -99,19 +107,31 @@ from pathlib import Path
 
 PATIENCE = 30  # seconds a blocked step waits before giving up, so a broken test leaves no process behind
 PERSONA_FILE = re.compile(r"(\S+/personas/([^/\s-]+)-[^/\s]*--([^/\s]+)\.md)")
-JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(?:qual-(\d+)|SYNTHESIS)\.md)`", re.M)
+JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(qual|critique|themes|SYNTHESIS)(?:-(\d+))?\.md)`",
+                        re.M)
+JOBS = {"qual": "analyst", "critique": "critic", "themes": "themes", "SYNTHESIS": "writer"}  # a job, by its file
+DEBRIEF = re.compile(r"\binterviewer\b")  # a message to a finished run that speaks of one is a turn of its debrief
+NUMBERED = re.compile(r"Question (\d+)\?")
 DOCUMENT = "I could not write the file, so here is the document.\n\n# Findings\n\n- From the reply.\n```"
 
 
 def log(**event):
+    """Add one event to $FAKE_CLI_LOG, as a line, in a single write to a descriptor opened for
+    append: a line with a whole prompt in it is longer than a buffer, and written in parts it
+    could be cut through by the line of a process that logs at the same moment."""
     if os.environ.get("FAKE_CLI_LOG"):
-        with open(os.environ["FAKE_CLI_LOG"], "a") as f:
-            f.write(json.dumps(event) + "\n")
+        fd = os.open(os.environ["FAKE_CLI_LOG"], os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, (json.dumps(event) + "\n").encode())
+        finally:
+            os.close(fd)
 
 
 def events():
+    """The events logged so far. What follows the last line break is a line still being written:
+    it is left for the next look."""
     path = os.environ.get("FAKE_CLI_LOG")
-    lines = Path(path).read_text().splitlines() if path and Path(path).exists() else []
+    lines = Path(path).read_text().split("\n")[:-1] if path and Path(path).exists() else []
     return [e for e in map(json.loads, lines) if "event" in e]
 
 
@@ -214,6 +234,43 @@ def block(until, what):
         time.sleep(0.01)
 
 
+def process_step(verb, arg, home, run, cut_off, end):
+    """Carry out a step that is about the process and not about what it writes: wait, starts,
+    deaf, spawn, hang, end, exit and fail, as the module docstring has them. False for any other
+    step. home is $FAKE_PANEL, run what the events are logged under, cut_off the lines of the
+    recorded run that was cut off, and end(mode) what prints a recorded run and exits. talker.py
+    plays these steps through here too, so a step means the same on both sides of an interview."""
+    if verb == "wait":
+        log(event="waiting", run=run, gate=arg)
+        block((home / "go" / arg).exists, f"gate {arg}")
+    elif verb == "starts":
+        block(lambda: sum(e["event"] == "start" for e in events()) >= int(arg), f"{arg} runs to start")
+    elif verb == "deaf":
+        signal.signal(signal.SIGTERM, lambda *_: log(event="term", run=run))
+    elif verb == "spawn":  # the last argument does nothing: it marks the process as this test's
+        left = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(600)", str(home)], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=lambda: signal.signal(signal.SIGTERM, signal.SIG_IGN))
+        log(event="spawn", run=run, pid=left.pid)
+    elif verb == "hang":
+        sys.stdout.write("".join(cut_off[1:]))
+        sys.stdout.flush()
+        time.sleep(600)
+    elif verb == "end":
+        end(arg)
+    elif verb == "exit":
+        log(event="end", run=run, pid=os.getpid(), code=int(arg))
+        sys.exit(int(arg))
+    elif verb == "fail":
+        sys.stderr.write(arg + "\n")
+        log(event="end", run=run, pid=os.getpid(), code=1)
+        sys.exit(1)
+    else:
+        return False
+    return True
+
+
 def play(cli, session, resumed, prompt, recording, modes, lost):
     """Play the run or job this process was started for, and exit. Returns without doing
     anything when no plan is in force or the prompt belongs to no run this fake knows.
@@ -234,7 +291,7 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
     if resumed:
         run, file = json.loads(known.read_text())
     elif job:
-        run, file = (f"analyst-{job.group(2)}" if job.group(2) else "writer"), job.group(1)
+        run, file = JOBS[job.group(2)] + (f"-{job.group(3)}" if job.group(3) else ""), job.group(1)
     elif named:
         run, file = f"{named.group(2)}-{named.group(3)}", named.group(1)
     else:
@@ -246,7 +303,9 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
     attempt = len(counter.read_text()) if counter.exists() else 0
     counter.write_text("x" * (attempt + 1))
     plan = json.loads((home / "plan.json").read_text()) if (home / "plan.json").exists() else {}
-    steps = (plan.get(run) or [["write:all"]])
+    asked = NUMBERED.search(prompt)
+    spoken = [[f"say:Answer {asked.group(1) if asked else attempt}."]] if resumed and DEBRIEF.search(prompt) else None
+    steps = (plan.get(run) or spoken or [["write:all"]])
     steps, file = steps[min(attempt, len(steps) - 1)], Path(file)
 
     lent = file.parents[1] / "scratch" / run / "account.json"
@@ -275,6 +334,8 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
         verb, _, arg = step.partition(":")
         if verb == "write":
             write(file, arg)
+        elif verb == "text":
+            file.write_text(f"# Findings\n\n{arg}\n")
         elif verb == "final":
             write(file, "final")
         elif verb == "steps":
@@ -318,34 +379,10 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
             file.write_text(whole[:whole.rindex("### Concept ")])
         elif verb == "reply":
             said.append(DOCUMENT)
-        elif verb == "wait":
-            log(event="waiting", run=run, gate=arg)
-            block((home / "go" / arg).exists, f"gate {arg}")
-        elif verb == "starts":
-            block(lambda: sum(e["event"] == "start" for e in events()) >= int(arg), f"{arg} runs to start")
+        elif verb == "say":
+            said.append(arg)
         elif verb == "stubborn":
             signal.signal(signal.SIGTERM, on_term)
-        elif verb == "deaf":
-            signal.signal(signal.SIGTERM, lambda *_: log(event="term", run=run))
-        elif verb == "spawn":  # the last argument does nothing: it marks the process as this test's
-            left = subprocess.Popen(
-                [sys.executable, "-c", "import time; time.sleep(600)", str(home)], stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                preexec_fn=lambda: signal.signal(signal.SIGTERM, signal.SIG_IGN))
-            log(event="spawn", run=run, pid=left.pid)
-        elif verb == "hang":
-            sys.stdout.write("".join(cut_off[1:]))
-            sys.stdout.flush()
-            time.sleep(600)
-        elif verb == "end":
-            end(arg)
-        elif verb == "exit":
-            log(event="end", run=run, pid=os.getpid(), code=int(arg))
-            sys.exit(int(arg))
-        elif verb == "fail":
-            sys.stderr.write(arg + "\n")
-            log(event="end", run=run, pid=os.getpid(), code=1)
-            sys.exit(1)
-        else:
+        elif not process_step(verb, arg, home, run, cut_off, end):
             raise SystemExit(f"fake CLI: unknown step {step!r}")
     end("ok")

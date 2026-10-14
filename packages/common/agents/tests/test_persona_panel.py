@@ -25,6 +25,7 @@ FACTORS = 11
 
 sys.path[:0] = [str(SCRIPTS), str(Path(__file__).resolve().parent)]
 import persona_panel_fakes as fakes  # noqa: E402
+import interview  # noqa: E402
 import run_watchdog  # noqa: E402
 import runners  # noqa: E402
 
@@ -119,6 +120,16 @@ class PersonaPanelTest(unittest.TestCase):
         (sd / "study.json").write_text(json.dumps({k: v for k, v in {**self.cfg, **overrides}.items()
                                                    if v is not None}))
         return sd
+
+    def interview(self, guide=None, **more):
+        """The overrides that make the base config an interview study, which has a guide and no concepts:
+        for self.study(). guide changes keys of the guide."""
+        held = {"about": "how a cafe is run from day to day", "interviewer": {"model": "opus"},
+                "goals": [{"id": "G1", "learn": "What takes most of the week, and what was done about it"}],
+                "topics": [{"id": "T1", "area": "the working week", "goals": ["G1"],
+                            "opener": "What took most of your time at work last week?"}], **(guide or {})}
+        return {"type": "interview", "runner": "claude", "product": None, "concepts": None,
+                "find_the_answer": None, "interview": held, **more}
 
     def labels_for(self, cid):
         for line in self.key.splitlines():
@@ -231,6 +242,34 @@ class PersonaPanelTest(unittest.TestCase):
         self.sd.joinpath("followups.json").write_text("[]\n")
         run("init_study.py", self.sd, "--force")
         self.assertFalse(self.sd.joinpath("followups.json").exists())
+        # A turn log is the only record of an interview. One alone is guarded, and --force starts every
+        # interview again by moving the logs and transcripts aside, never by deleting them or leaving them.
+        sd = self.study("interviews", **self.interview())
+        run("init_study.py", sd)
+        # What belongs to the interviews held goes with them: the files their processes left, which the new
+        # interviews would otherwise number their attempts into, and the two reports written from them.
+        held = {"interviews/P01-opus.jsonl": '{"t": "start"}\n', "interviews/P01-opus.md": "The transcript.\n",
+                "analysis/transcripts/P01-opus.md": "The analysts' copy.\n",
+                "logs/P01-opus.2.in": "A question.\n", "logs/interviewer-P01-opus.3.out": "A reply.\n",
+                "logs/P01-opus.interview-1.jsonl": '{"t": "start"}\n',
+                "analysis/usage.md": "What they used.\n", "analysis/checks.md": "What was checked.\n"}
+        kept = {"logs/notes.txt": "The lead's own.\n"}  # named for no entry of runs.json: not the scaffold's to move
+        for path, text in {**held, **kept}.items():
+            sd.joinpath(path).parent.mkdir(exist_ok=True)
+            sd.joinpath(path).write_text(text)
+        scaffolded = sd.joinpath("runs.json").read_text()
+        sd.joinpath("runs.json").unlink()
+        r = run("init_study.py", sd, check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--force", r.stderr)
+        self.assertFalse(sd.joinpath("runs.json").exists())
+        sd.joinpath("runs.json").write_text(scaffolded)
+        run("init_study.py", sd, "--force")
+        self.assertEqual(([p for p in held if sd.joinpath(p).exists()], [p for p in kept if sd.joinpath(p).exists()]),
+                         ([], list(kept)))
+        aside, = sd.glob("logs/interviews-*")
+        where = {p: p.replace("interviews/", "").replace("analysis/transcripts/", "transcripts/") for p in held}
+        self.assertEqual({p: aside.joinpath(where[p]).read_text() for p in held}, held)
 
     def test_invalid_model_entries_and_options_are_refused(self):
         dana, sam = self.cfg["personas"]
@@ -240,6 +279,7 @@ class PersonaPanelTest(unittest.TestCase):
             return {"type": "usability", "runner": "claude", "concepts": None, "find_the_answer": None,
                     "target": target, "tasks": [look], **more}
         remote = {"base_url": "https://bank.example.com", "allow_remote": True}
+        topic = self.interview()["interview"]["topics"][0]
         cases = {
             "variant of no persona": ({"personas": [dana, {**sam, "variant_of": "P09"}]}, '"P09" is not a persona id'),
             "variant of itself": ({"personas": [dana, {**sam, "variant_of": "P02"}]}, "names the persona itself"),
@@ -323,6 +363,59 @@ class PersonaPanelTest(unittest.TestCase):
             "a usability study with a phrase for its product and no name": (
                 usability({"base_url": "http://app.localhost:8080"}, product=None, product_phrase="a bank's site"),
                 'a usability study needs "product"'),
+            # An interview study has a guide and nothing of the other two types, and they have none of its guide.
+            "a guide in a review study": (
+                {"interview": self.interview()["interview"]},
+                '"interview" belongs to an interview study, and this is a review study'),
+            "a guide in a usability study": (
+                usability({"base_url": "http://app.localhost:8080"}, interview=self.interview()["interview"]),
+                '"interview" belongs to an interview study, and this is a usability study'),
+            "concepts in an interview study": (
+                self.interview(concepts=self.cfg["concepts"]),
+                '"concepts" belongs to a review study, and this is an interview study'),
+            "tasks in an interview study": (
+                self.interview(tasks=[look]), '"tasks" belongs to a usability study, and this is an interview study'),
+            "factors to score in an interview study": (
+                self.interview(factors=[{"key": "overall", "label": "Overall", "question": "Your verdict."}]),
+                'an interview study has no "factors"'),
+            "a product named in an interview study": (
+                self.interview(product="Acme"), 'an interview study has no "product"'),
+            "an interview study in native mode": (
+                self.interview(runner=None), "an interview study cannot run in native mode"),
+            "a topic whose id is what a reply writes to close": (
+                self.interview({"topics": [{**topic, "id": "Close"}]}), 'the topic id "Close" is taken'),
+            "an interview cap with no room for the opening and the close": (
+                self.interview({"turns": 2}), "interview.turns is 2, but 1 topic needs at least 3"),
+            "a follow-up allowance in an interview study": (
+                self.interview(limits={"followup": {"minutes": 5}}),
+                '"limits" must be an object with any of run, interviewer, turn, synthesis and overrides'),
+            "a transcript as a file for the writer of an interview study": (
+                self.interview(synthesis={"context_files": ["analysis/transcripts/P01-opus.md"]}),
+                '"analysis/transcripts/P01-opus.md" is under analysis/transcripts/, where an interview study keeps'),
+            # A debrief is a review or usability study's, with a guide of its own that names no task by its id.
+            "a debrief in an interview study": (
+                self.interview(debrief=self.interview()["interview"]), 'an interview study has no "debrief"'),
+            "a debrief guide with a key only an interview has": (
+                {"runner": "claude", "debrief": self.interview()["interview"]}, "debrief: unknown keys: about"),
+            "a debrief topic with the id of a task": (
+                usability({"base_url": "http://app.localhost:8080"},
+                          debrief={"interviewer": {"model": "opus"},
+                                   "goals": [{"id": "G1", "learn": "Where it lost them"}],
+                                   "topics": [{**topic, "id": "t1"}]}),
+                'debrief.topics: the topic id "t1" is also a task id'),
+            # What the interviewer would say aloud, and whom the guide leaves out: found when the study is scaffolded.
+            "a leak term in a topic's opener": (
+                self.interview({"topics": [{**topic, "opener": "What do you make of Secret Codename?"}]}),
+                'topic T1: its opener holds the leak term "secret codename"'),
+            "a leak term in a learning goal": (
+                self.interview({"goals": [{"id": "G1", "learn": "Whether the secret codename would sell"}]}),
+                'goal G1: its "learn" holds the leak term "secret codename"'),
+            "a persona whose segment no topic is for": (
+                self.interview({"topics": [{**topic, "segments": ["owner"]}]}),
+                'persona P02 (segment "staff") is left with no topic'),
+            # What the plan would refuse of study.json alone is refused before anything is scaffolded.
+            "two analysts for one persona": ({"personas": [dana], "synthesis": {"analysts": 2}},
+                                             "synthesis.analysts is 2, but the study has 1 persona"),
         }
         for i, (name, (overrides, message)) in enumerate(cases.items()):
             with self.subTest(name):
@@ -715,8 +808,14 @@ class PersonaPanelTest(unittest.TestCase):
         (self.sd / "panel/personas/drafts/__pycache__").mkdir(parents=True)
         (self.sd / "panel/personas/drafts/__pycache__/notes.pyc").write_bytes(b"x")
         (self.sd / "prompts/unused").mkdir()
+        # The visual summary page travels whole, its HTML as it is: the page carries the notice itself.
+        (self.sd / "report").mkdir()
+        page = {"report/index.html": b"<h1>Round 1</h1>\n", "report/kit.css": b"body {}\n"}
+        for name, content in page.items():
+            (self.sd / name).write_bytes(content)
         dest = Path(self.tmp.name) / "archive/customer-research/2026-09-25-t/panel/round-1"
         run("archive.py", self.sd, "--dest", dest)
+        self.assertEqual({name: (dest / name).read_bytes() for name in page}, page)
         self.assertIn("What was agreed.", (dest / "study-brief.md").read_text())
         self.assertTrue((dest / "personas").is_dir())
         self.assertTrue((dest / "panel-instructions.md").exists())
@@ -762,6 +861,47 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertEqual(again, {name: content for name, content in first.items() if name != "study-brief.md"})
         self.assertIn(gone.relative_to(self.sd).as_posix(), again)
         self.assertEqual(empty(), stuck)
+
+    def test_report_page_starts_from_its_type_and_bundles_into_one_file_that_needs_no_kit_beside_it(self):
+        import panel_lib as pl
+        kit = pl.ASSETS / "report-kit"
+        usability = {"type": "usability", "runner": "claude", "concepts": None, "find_the_answer": None,
+                     "target": {"base_url": "http://app.localhost:8080"},
+                     "tasks": [{"id": "T1", "goal": "See what it costs."}]}
+        studies = {"review": self.sd, "usability": self.study("usability", **usability),
+                   "interview": self.study("interviews", **self.interview())}
+        for kind, sd in studies.items():
+            with self.subTest(kind):
+                if sd != self.sd:
+                    run("init_study.py", sd)
+                run("report_kit.py", sd, "init")
+                page = (sd / "report/index.html").read_text()
+                self.assertIn(f'<p class="pp-notice">{pl.NOTICE}</p>', page)
+                self.assertIn(f'<p class="pp-eyebrow">{kind.capitalize()} study</p>', page)
+                said = run("report_kit.py", sd, "bundle").stdout
+                standalone = (sd / "report/standalone.html").read_text()
+                self.assertIn(str(sd / "report/standalone.html"), said)
+                self.assertTrue(standalone.lower().startswith("<!doctype html>"))
+                self.assertIn(pl.NOTICE, standalone)
+                # Both kit files inlined whole, so the page opens with nothing beside it.
+                for name in ("kit.css", "kit.js"):
+                    self.assertIn((kit / name).read_text().rstrip(), standalone)
+                self.assertIsNone(re.search(r"""(?:href|src)\s*=\s*["'](?:\./)?kit\.(?:css|js)""", standalone, re.I))
+        # Inlined, a closing script tag in kit.js would end the script there.
+        self.assertNotIn("</script", (kit / "kit.js").read_text().lower())
+        # A kit file the lead restyled is kept unless --force, and the page is never overwritten.
+        report = self.sd / "report"
+        (report / "kit.css").write_text("/* the project's own */\n")
+        (report / "index.html").write_text("<h1>Mine</h1>\n")
+        r = run("report_kit.py", self.sd, "init", check=False)
+        self.assertEqual((r.returncode, "--force" in r.stderr), (1, True), r.stderr)
+        self.assertEqual((report / "kit.css").read_text(), "/* the project's own */\n")
+        run("report_kit.py", self.sd, "init", "--force")
+        self.assertEqual(((report / "kit.css").read_bytes(), (report / "index.html").read_text()),
+                         ((kit / "kit.css").read_bytes(), "<h1>Mine</h1>\n"))
+        # A page that lost the notice is not bundled.
+        r = run("report_kit.py", self.sd, "bundle", check=False)
+        self.assertEqual((r.returncode, "synthetic panel notice" in r.stderr), (1, True), r.stderr)
 
     def test_archive_reads_nothing_through_a_link_or_a_special_file_and_one_that_fails_leaves_no_part_of_itself(self):
         self.fill_all()
@@ -1034,12 +1174,13 @@ class PersonaPanelTest(unittest.TestCase):
 
     def test_scaffold_refuses_a_copy_of_the_study_brief_inside_the_panel_folder(self):
         brief = "# Study brief\n\n## Hypotheses\n\nThe story concept wins with owners.\n"
-        cases = {"under its own name": ("panel/notes/study-brief.md", "An older draft.\n"),
-                 "under another name with the same content": ("panel/materials/background.md", brief),
-                 "in a concept folder, which is copied into the panel": ("../concepts/01-plain/notes.md", brief)}
-        for i, (name, (path, content)) in enumerate(cases.items()):
+        cases = {"under its own name": ("panel/notes/study-brief.md", "An older draft.\n", {}),
+                 "under another name with the same content": ("panel/materials/background.md", brief, {}),
+                 "in a concept folder, which is copied into the panel": ("../concepts/01-plain/notes.md", brief, {}),
+                 "in the folder an interviewer starts in": ("interviewer/P01-opus/notes.md", brief, self.interview())}
+        for i, (name, (path, content, overrides)) in enumerate(cases.items()):
             with self.subTest(name):
-                sd = self.study(f"brief-{i}")
+                sd = self.study(f"brief-{i}", **overrides)
                 (sd / "study-brief.md").write_text(brief)
                 copy = (sd / path).resolve()
                 copy.parent.mkdir(parents=True, exist_ok=True)
@@ -1282,6 +1423,134 @@ class PersonaPanelTest(unittest.TestCase):
         self.assertNotIn("variants", headline)
         self.assertEqual(self.quant(sd), quant)
 
+    def test_skill_description_is_under_the_1024_characters_a_harness_loads(self):
+        # The limit is the harness's: a skill whose description is longer is not loaded at all.
+        front = SCRIPTS.parent.joinpath("SKILL.md").read_text().split("\n---\n")[0]
+        [line] = [l for l in front.splitlines() if l.startswith("description:")]
+        description = line.removeprefix("description:").strip()
+        if description[:1] == '"':  # a JSON string is a YAML string too, and its quotation marks are not part of it
+            description = json.loads(description)
+        self.assertTrue(description)
+        self.assertLess(len(description), 1024)
+
+
+class InterviewRulesTest(unittest.TestCase):
+    """The rules of an interview that are pure: text in, what a launcher makes of it out."""
+
+    def test_interviewer_reply_is_read_by_one_grammar_and_every_failure_is_named(self):
+        question = {"form": "question", "topic": "T2", "move": "anchor", "why": "A general claim.",
+                    "say": "When did that last happen?", "reason": None}
+        plain = "TOPIC: T2\nMOVE: anchor\nWHY: A general claim.\nSAY:\nWhen did that last happen?"
+        usable = {
+            "a question": (plain, question),
+            "a question outside every topic": (plain.replace("T2", "open"), {**question, "topic": "open"}),
+            "a closing question": (plain.replace("T2", "close"), {**question, "topic": "close"}),
+            # Everything under SAY: is the participant's, whatever it looks like.
+            "words of several lines": (plain + "\n\nMOVE: this is said too.\n", {
+                **question, "say": "When did that last happen?\n\nMOVE: this is said too."}),
+            "a reason that runs on to a second line": (
+                plain.replace("A general claim.", "A general\n  claim."), question),
+            "an end with its closing line": ("END: Both closing questions are answered.\nSAY:\nThanks.", {
+                "form": "end", "topic": None, "move": None, "why": None, "say": "Thanks.",
+                "reason": "Both closing questions are answered."}),
+            "an end with no closing line": ("END: She ended the conversation.", {
+                "form": "end", "topic": None, "move": None, "why": None, "say": None,
+                "reason": "She ended the conversation."}),
+            # The two things forgiven: one code fence around the whole reply, and blank space around it.
+            "a code fence around the reply": (f"```\n{plain}\n```", question),
+            "a code fence with a language word, and blank lines": (f"\n\n```text\n{plain}\n```\n\n", question),
+            "blank space around the reply, to its left too": (
+                "\r\n" + "".join(f"    {line}\r\n" for line in plain.split("\n")) + "  \r\n", question),
+        }
+        for name, (reply, read) in usable.items():
+            with self.subTest(name):
+                self.assertEqual(interview.parse_reply(reply, ["T1", "T2"]), {**read, "problems": []})
+
+        unusable = {
+            # Nothing else is forgiven: each of these is a reply the participant never sees.
+            "a key in another case": (plain.replace("TOPIC:", "Topic:"), [
+                ["format", "text before the first key"], ["missing", "TOPIC"]]),
+            "markdown around a key": (plain.replace("MOVE:", "**MOVE:**"), [
+                ["missing", "MOVE"], ["topic", "T2 **MOVE:** anchor"]]),
+            "words on the SAY: line": (plain.replace("SAY:\n", "SAY: "), [["format", "words on the SAY: line"]]),
+            "text before the first key": ("Here is my next question.\n\n" + plain, [
+                ["format", "text before the first key"]]),
+            "a code fence around a part of the reply": (plain.replace("SAY:\n", "SAY:\n```\n") + "\n```", [
+                ["format", "a code fence inside the reply"]]),
+            "a key twice": (plain.replace("MOVE:", "TOPIC: T1\nMOVE:"), [["format", "TOPIC twice"]]),
+            "an end that is a question too": ("END: Done.\nTOPIC: close\nSAY:\nThanks.", [
+                ["format", "END beside TOPIC"]]),
+            "a field left out": (plain.replace("WHY: A general claim.\n", ""), [["missing", "WHY"]]),
+            "a field with nothing in it": (plain.replace("A general claim.", ""), [["missing", "WHY"]]),
+            "no SAY": ("TOPIC: T2\nMOVE: anchor\nWHY: A general claim.", [["missing", "SAY"]]),
+            "nothing under SAY": ("TOPIC: T2\nMOVE: anchor\nWHY: A general claim.\nSAY:\n  \n", [["say", ""]]),
+            "an end with no reason": ("END:\nSAY:\nThanks.", [["missing", "the reason after END"]]),
+            "a topic that is not in this persona's guide": (plain.replace("T2", "T3"), [["topic", "T3"]]),
+            "a topic id in another case": (plain.replace("T2", "t2"), [["topic", "t2"]]),
+            "a move that is not one of the sixteen": (plain.replace("anchor", "probe"), [["move", "probe"]]),
+            "no reply at all": ("", [["missing", "TOPIC, MOVE, WHY, SAY"]]),
+            # Every problem is found in one pass, so that one repair can name them all.
+            "several problems at once": ("Sure.\nTOPIC: T9\nMOVE: probe\nSAY:\n", [
+                ["format", "text before the first key"], ["missing", "WHY"], ["topic", "T9"], ["move", "probe"],
+                ["say", ""]]),
+        }
+        repairs = interview.notices()
+        for name, (reply, problems) in unusable.items():
+            with self.subTest(name):
+                self.assertEqual(interview.parse_reply(reply, ["T1", "T2"])["problems"], problems)
+                # What a failure is called is the key of the sentence that tells the interviewer of it.
+                self.assertLessEqual({f"repair-{key}" for key, _ in problems}, set(repairs))
+
+    def test_question_counts_for_the_topic_whose_opener_it_holds_whatever_its_label_says(self):
+        openers = {"T1": "What took most of your time last week?", "T2": "Who decides what you \u201cbuy\u201d?",
+                   "T3": "Walk me through the last order."}
+        guide = {"turns": 6, "card": True, "topics": [{"id": t, "area": t, "goals": [], "turns": 8, "opener": o}
+                                                     for t, o in openers.items()]}
+
+        def recorded(label, say, asked=("T1",), answers=1):
+            """The question record made of a reply labelled so, after one question for each topic of asked."""
+            log = [{"t": "start", "at": 0, "v": 1, "kind": "interview", "run": "P01-opus"},
+                   {"t": "card", "at": 0, "side": "participant", "attempt": 1, "text": "A card."}]
+            for n, topic in enumerate(asked, start=1):
+                log.append({"t": "question", "at": 0, "side": "interviewer", "attempt": n, "n": n, "topic": topic,
+                            "move": "open", "why": "W.", "say": "Q?"})
+                log += [{"t": "answer", "at": 0, "side": "participant", "attempt": n + 1, "n": n, "text": "A."}
+                        ] * (n <= answers)
+            [record] = interview.taken(interview.fold(log), guide, "interviewer", 9, {
+                "reply": f"TOPIC: {label}\nMOVE: accept\nWHY: Moving on.\nSAY:\n{say}", "ending": None}, [], 1.0)
+            return record["t"], record.get("topic"), record.get("labelled")
+
+        cases = {
+            # The mistake seen in real interviews: the next topic is opened under the label of the one it leaves.
+            "the next topic's opener under the old label": (("T1", f"Fair enough. {openers['T2']}"), ("T2", "T1")),
+            "the same in other case, spacing and quotation marks": (
+                ("T1", 'Moving on:  who decides\nwhat you "buy"?'), ("T2", "T1")),
+            "an opener under its own label": (("T2", openers["T2"]), ("T2", None)),
+            "an opener under open": (("open", openers["T2"]), ("T2", "open")),
+            "an opener under close, which is then no close": (("close", openers["T3"]), ("T3", "close")),
+            # Only the opener of a topic that no question has carried: T1 was opened by the first question.
+            "the opener of a topic already opened": (("T2", openers["T1"]), ("T2", None)),
+            "no opener, so the label stands": (("T1", "When did that last happen?"), ("T1", None)),
+            "an opener that is not word for word": (("T1", "Who decides what to buy?"), ("T1", None)),
+            # Word for word is as words of its own: an opener whose first or last word is a part of a longer word
+            # of the question is not held.
+            "an opener whose last word begins a longer one": (
+                ("T1", "Walk me through the last ordering mistake?"), ("T1", None)),
+            "an opener whose first word ends a longer one": (
+                ("T1", "On the catwalk me through the last order."), ("T1", None)),
+            # Two unopened topics' openers in one reply: the one its label names, else the first in its words.
+            "two openers, and the label names one": (("T3", f"{openers['T2']} {openers['T3']}"), ("T3", None)),
+            "two openers under another label": (("T1", f"{openers['T3']} {openers['T2']}"), ("T3", "T1")),
+        }
+        for name, (reply, (topic, labelled)) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(recorded(*reply), ("question", topic, labelled))
+        # The gate of the last exchange reads the label, as the interviewer is told to write it: a reply that
+        # is not labelled close is sent back there, and one that is passes, whatever its words open.
+        last = dict(asked=("T1", "T1", "T1", "T1", "T1"), answers=5)
+        self.assertEqual((recorded("T2", openers["T2"], **last), recorded("close", openers["T2"], **last)),
+                         (("rejected", None, None), ("question", "T2", "close")))
+
 
 # The options each runner passes on every launch, written out: they are its contract with the CLI.
 CLAUDE_ISOLATION = ["--safe-mode", "--restricted", "--strict-mcp-config", "--disable-slash-commands",
@@ -1291,7 +1560,14 @@ CLAUDE_FILES = "Read,Write,Edit,Glob,Grep"
 CODEX_OPTIONS = ["exec", "--json", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
                  "-c", "project_doc_max_bytes=0", "-c", "skills.include_instructions=false",
                  "-c", "approval_policy=never", "--disable", "plugins", "--disable", "tool_suggest",
+                 "--disable", "apps", "-c", 'web_search="disabled"', "--disable", "image_generation",
                  "-s", "workspace-write"]
+# With no tools, as each side of an interview runs: Claude Code has a switch for it, and Codex only one for
+# each feature that gives a session a tool to read, run or reach something with.
+CLAUDE_NO_TOOLS = ["--tools", ""]
+CODEX_NO_TOOLS = ["--disable", "shell_tool", "--disable", "unified_exec", "--disable", "view_image",
+                  "--disable", "multi_agent", "--disable", "sleep_tool", "--disable", "browser_use",
+                  "--disable", "computer_use", "--disable", "goals"]
 # With browsing: one allow rule for each agent-browser command a panellist may run, and for Codex a way
 # out of its sandbox to the session's socket, with no temporary directory to start a session of its own in.
 CLAUDE_BROWSER = ",".join(
@@ -1312,6 +1588,7 @@ SESSION = "937a3347-a2b1-41c3-a9d3-8be11344d2a6"
 RUN = {"run": "P01-opusHigh", "model": "opus", "effort": "high", "role": "panellist", "browse": True}
 RUNS = {"pi": {**RUN, "model": PI_MODEL}}  # the same run on a runner whose models are named differently
 BARE = {"run": "analyst-1", "model": None, "effort": None, "role": "analyst"}
+TALKER = {"run": "P01-opus", "model": "opus", "effort": None, "role": "panellist", "tools": "none"}
 LIMITS = {"minutes": 15, "budget_usd": 2.0}
 PROMPT = "--not-an-option\nYou are P01. Read panel/_panel-instructions.md.\n"
 
@@ -1400,6 +1677,12 @@ class RunnerTest(unittest.TestCase):
             ("claude", "default model, no effort, no cap, no browsing", False): (
                 BARE, {"minutes": 30, "budget_usd": None},
                 ["-p", "--session-id", "<new>", *CLAUDE_ISOLATION, *files_only, *CLAUDE_OUTPUT]),
+            ("claude", "no tools", False): (TALKER, LIMITS, [
+                "-p", "--session-id", "<new>", "--model", "opus", "--max-budget-usd", "2",
+                *CLAUDE_ISOLATION, *CLAUDE_NO_TOOLS, *CLAUDE_OUTPUT]),
+            ("claude", "resumed, with no tools again", True): (TALKER, left, [
+                "-p", "--resume", SESSION, "--model", "opus", "--max-budget-usd", "0.75",
+                *CLAUDE_ISOLATION, *CLAUDE_NO_TOOLS, *CLAUDE_OUTPUT]),
             ("codex", "model, effort, browsing", False): (RUN, LIMITS, [
                 *CODEX_OPTIONS, *CODEX_BROWSER, "-C", panel, "-m", "opus", "-c", "model_reasoning_effort=high", "-"]),
             ("codex", "resumed, options before the word resume", True): (RUN, left, [
@@ -1407,6 +1690,10 @@ class RunnerTest(unittest.TestCase):
                 "resume", SESSION, "-"]),
             ("codex", "default model, no effort, no browsing", False): (
                 BARE, LIMITS, [*CODEX_OPTIONS, "-C", panel, "-"]),
+            ("codex", "no tools", False): (TALKER, LIMITS, [
+                *CODEX_OPTIONS, *CODEX_NO_TOOLS, "-C", panel, "-m", "opus", "-"]),
+            ("codex", "resumed, with no tools again", True): (TALKER, left, [
+                *CODEX_OPTIONS, *CODEX_NO_TOOLS, "-C", panel, "-m", "opus", "resume", SESSION, "-"]),
             ("pi", "model, effort, browsing", False): (RUNS["pi"], LIMITS, [
                 "-p", "--mode", "text", "--session-id", "<new>", "--session-dir", pi_sessions,
                 "--provider", "openai-codex", "--model", PI_MODEL, "--thinking", "high",
@@ -1432,6 +1719,9 @@ class RunnerTest(unittest.TestCase):
                     self.assertEqual(command["session_id"], SESSION)
         ids = {runners.get("claude").launch_command(RUN, PROMPT, self.workdir, LIMITS)["session_id"] for _ in range(2)}
         self.assertEqual(len(ids), 2)  # the CLI refuses an id that already has a transcript
+        for name in ("claude", "codex"):  # a browser is a tool: a run is never given one because it asked for both
+            with self.subTest(f"{name}: no tools and browsing"), self.assertRaises(ValueError):
+                runners.get(name).launch_command({**TALKER, "browse": True}, PROMPT, self.workdir, LIMITS)
 
     def test_runner_refuses_an_effort_or_budget_it_cannot_launch(self):
         for name in ("claude", "codex", "pi"):
@@ -1858,8 +2148,7 @@ class LauncherTest(unittest.TestCase):
             except OSError:
                 pass
         # The browser sessions a failed test left: each fake daemon names its socket directory in its command.
-        lines = map(json.loads, self.log.read_text().splitlines() if self.log.exists() else [])
-        used = {x["env"].get("AGENT_BROWSER_SOCKET_DIR") for x in lines if x.get("cli") == "agent-browser"}
+        used = {x["env"].get("AGENT_BROWSER_SOCKET_DIR") for x in self.logged() if x.get("cli") == "agent-browser"}
         for e in self.events("open hung"):  # an `open` that a test left hanging
             try:
                 os.kill(e["pid"], signal.SIGKILL)
@@ -1931,9 +2220,13 @@ class LauncherTest(unittest.TestCase):
     def release(self, gate):
         (self.fake / "go" / gate).touch()
 
+    def logged(self):
+        """Every line the fake CLIs have logged, in order. What follows the last line break is a line a
+        fake is still writing, and is left for the next look."""
+        return [json.loads(line) for line in (self.log.read_text().split("\n")[:-1] if self.log.exists() else [])]
+
     def events(self, kind):
-        lines = self.log.read_text().splitlines() if self.log.exists() else []
-        return [e for e in map(json.loads, lines) if e.get("event") == kind]
+        return [e for e in self.logged() if e.get("event") == kind]
 
     def starts(self, since=0):
         """The processes started for runs, in order, after the first `since` of them."""
@@ -3191,6 +3484,21 @@ class LauncherTest(unittest.TestCase):
         tracked = run("runs.py", self.sd, "status").stdout
         self.assertEqual(("done: 6" in tracked, "analyst" in tracked or "writer" in tracked), (True, False))
         self.assertIn("18 score rows from 6 runs", run("extract_scores.py", self.sd).stdout)
+        # A job is done again by deleting its file and running its role again, and it then spends from the share
+        # its earlier attempts spent from. The plan says what a job with attempts on record has used and has
+        # left, and estimates a job that is to go again from the attempts that finished.
+        self.sd.joinpath("analysis/qual-1.md").unlink()
+        plan = self.plan()
+        again = next(j for j in plan["synthesis"]["jobs"] if j["run"] == "analyst-1")
+        estimate = next(e for e in plan["estimate"]["entries"] if e["entry"] == "analyst")
+        self.assertEqual(([again[k] for k in ("state", "attempts", "finished", "used_usd", "left_usd")],
+                          [estimate[k] for k in ("basis", "measured_runs", "measured_of", "to_go")]),
+                         (["pending", 1, 1, 0.00046504, 1.666201], ["measured", 2, 2, 1]))
+        self.assertIn("$1.6667 cap, $0.0005 used, $1.6662 left  pending", self.launch("plan").stdout)
+        before = len(self.starts())
+        self.launch("run", "--role", "analyst")
+        self.assertEqual([(e["run"], option(e, "--max-budget-usd")) for e in self.starts(before)],
+                         [("analyst-1", "1.666201")])  # what the plan showed as left is what its process may spend
 
     def test_analysts_wait_for_the_panel_unless_allowed_and_are_told_which_runs_did_not_finish(self):
         self.study({"P01-cx": [["write:1"]], "P02-opus": [["end:usage_limit"]]},
@@ -3325,6 +3633,83 @@ if what == "provision":
         log = self.sd / "accounts.log"
         calls = log.read_text().splitlines() if log.exists() else []
         return [c.split()[0] for c in calls if c.endswith(f" {run_id}")] if run_id else calls
+
+    def interview(self, plan=None, personas=1, models=None, guide=None, segments=(), **settings):
+        """Scaffold an interview study and set the plan the fakes follow (persona_panel_fakes/talker.py).
+        Becomes self.sd. One interview for each persona and model entry, P01-opus and P01-cx unless models
+        says otherwise, each with an interviewer on claude, entry interviewer-<run id>. The guide has two
+        topics, T1 and T2, a cap of 6 exchanges and the situation card on, and guide changes keys of it.
+        Planted, for a test to look for where it must not be: ZQGOAL in the goal, ZQAREA and ZQOPENER in
+        each topic, ZQBIO in each persona's bio. An interview nobody plans runs to its end: T1, T2, a
+        close, then the interviewer ends it. segments gives each persona its segment, in their order."""
+        self.sd = self.tmp / "interview"
+        self.sd.mkdir()
+        held = {"about": "how a cafe is run from day to day", "interviewer": {"runner": "claude", "model": "opus"},
+                "goals": [{"id": "G1", "learn": "ZQGOAL what takes most of the week"}],
+                "topics": [{"id": "T1", "area": "ZQAREA the working week", "goals": ["G1"],
+                            "opener": "ZQOPENER what took most of your time last week?"},
+                           {"id": "T2", "area": "ZQAREA the tools", "goals": ["G1"],
+                            "opener": "ZQOPENER what do you keep track of things with?"}],
+                "turns": 6, "situation_card": True, **(guide or {})}
+        self.settings({
+            "type": "interview", "study": "i", "models": models or [self.CLAUDE, self.CODEX], "interview": held,
+            "leak_terms": ["secret codename"],
+            "personas": [{"id": f"P{i:02d}", "name": f"Person {i}", "role": "Owner", "personality": "Sceptic",
+                          "bio": ["Keeps the books in a notebook, under the name ZQBIO."],
+                          **({"segment": segments[i - 1]} if segments else {})}
+                         for i in range(1, personas + 1)], **settings})
+        subprocess.run([sys.executable, str(self.scripts / "init_study.py"), str(self.sd)], check=True,
+                       capture_output=True, text=True)
+        shutil.rmtree(self.fake, True)
+        (self.fake / "go").mkdir(parents=True)
+        (self.fake / "plan.json").write_text(json.dumps(plan or {}))
+
+    # The guide of a debrief, for a review or usability study: one topic, a cap of 4 exchanges, and ZQGOAL
+    # planted in its goal. Its interviewer is on claude, and an unplanned one opens D1, closes and ends.
+    DEBRIEF = {"interviewer": {"runner": "claude", "model": "opus"},
+               "goals": [{"id": "G1", "learn": "ZQGOAL where the product lost them"}],
+               "topics": [{"id": "D1", "area": "the borrowing task", "goals": ["G1"],
+                           "opener": "How did the borrowing task go?"}], "turns": 4}
+
+    def debrief(self, *args, wait=True):
+        """Debrief finished runs with interview.py, to its end. With wait false, start it and leave it
+        running: returns the process."""
+        command = [self.python, str(self.scripts / "interview.py"), str(self.sd), "debrief", *map(str, args),
+                   "--poll", "0.02", "--grace", "0.3"]
+        if wait:
+            return subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=60)
+        self.background.append(subprocess.Popen(command, env=self.env, stdout=subprocess.DEVNULL,
+                                                stderr=subprocess.DEVNULL))
+        return self.background[-1]
+
+    def turns(self, run_id, *types):
+        """The records of an interview's turn log, in order: all of them, or the ones of those types."""
+        log = self.sd / "interviews" / f"{run_id}.jsonl"
+        records = [json.loads(line) for line in log.read_text().split("\n")[:-1]] if log.exists() else []
+        return [r for r in records if not types or r["t"] in types]
+
+    def sent(self, entry):
+        """What each process of an entry was sent on its standard input, in order: its prompt, then one
+        message for each later turn."""
+        return [e["stdin"] for e in self.starts() if e["run"] == entry]
+
+    def reads(self):
+        """The state each interview reads as, from status, which has a row for nothing else. On the way,
+        what holds at every moment: runs.json records no state for an entry of an interview."""
+        for entry in self.entries().values():
+            self.assertEqual([k for k in ("state", "reason", "reset_at", "limited_by") if k in entry], [], entry["run"])
+        return {r["run"]: r["state"] for r in self.status()["runs"]}
+
+    def whole(self, run_id):
+        """An interview's turn log, after checking that it has every turn once: questions and answers
+        numbered 1, 2, 3 with none repeated, and no two records of one attempt of a side."""
+        records = self.turns(run_id)
+        for kind in ("question", "answer"):
+            numbers = [r["n"] for r in records if r["t"] == kind]
+            self.assertEqual(numbers, list(range(1, len(numbers) + 1)), kind)
+        attempts = [(r["side"], r["attempt"]) for r in records if "attempt" in r]
+        self.assertEqual(len(attempts), len(set(attempts)), attempts)
+        return records
 
     def test_usability_run_is_done_by_its_task_sections_and_a_resumed_run_is_told_which_tasks_are_left(self):
         self.usability({"P01-opus": [["write:1", "act:1"], ["write:all"]],  # cut off one step into its second task
@@ -4361,6 +4746,1303 @@ if what == "provision":
         self.assertEqual((followup["mode"], [(x["run"], x["outcome"], x["session"]) for x in followup["runs"]]),
                          ("native", [("P01-opus", "sent by hand", "agent-7")]))
         self.assertEqual((file.read_text(), self.starts()), (before, []))
+
+
+    def test_interview_is_carried_turn_by_turn_and_only_the_words_under_say_reach_the_participant(self):
+        card = "**On my mind:** ZQCARD the roster.\n**What really bothers me:** stocktake, last Tuesday.\n" \
+               "**Not a problem:** the till.\n**What I use and pay for:** a notebook."
+        self.interview({
+            "P01-opus": [[f"say:{card}"], []],
+            # Its notes carry a marker from its first reply on, and the process that ends the interview exits with 3.
+            "interviewer-P01-opus": [["why:ZQWHY it said so"], [], [], ["finish:ZQREASON nothing is left", "code:3"]],
+        }, guide={"topics": [{"id": "ZQT1", "area": "ZQAREA the working week", "goals": ["G1"],
+                              "opener": "ZQOPENER what took most of your time?"},
+                             {"id": "ZQT2", "area": "ZQAREA the tools", "goals": ["G1"],
+                              "opener": "ZQOPENER what do you keep track with?"}]})
+        r = self.launch("run")
+        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
+        # One row for each interview, and nothing but an end record decides that it is done: not the exit code
+        # of the process that wrote it. The interview nobody planned, with its participant on Codex, is done too.
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P01-cx": "done"}, r.stdout)
+        for run_id in ("P01-opus", "P01-cx"):
+            records = self.whole(run_id)
+            self.assertEqual([x["t"] for x in records], ["start", "card", "question", "answer", "question", "answer",
+                                                         "question", "answer", "end"], run_id)
+            self.assertEqual([x.get("topic") for x in records if x["t"] == "question"], ["ZQT1", "ZQT2", "close"])
+            # One process for each record of a turn, the sides alternating, and never two alive at once.
+            sides = {run_id: "participant", f"interviewer-{run_id}": "interviewer"}
+            order = [(sides[e["run"]], e["event"]) for e in self.logged()
+                     if e.get("run") in sides and e.get("event") in ("start", "end")]
+            self.assertEqual(order[::2], [(x["side"], "start") for x in records[1:]], run_id)
+            self.assertEqual(order[1::2], [(x["side"], "end") for x in records[1:]], run_id)
+        self.assertEqual((self.turns("P01-opus", "end")[0]["reason"],
+                          self.entries()["interviewer-P01-opus"]["attempts"][-1],
+                          json.loads(self.sd.joinpath("logs/interviewer-P01-opus.4.end").read_text())["exit_code"]),
+                         ("ZQREASON nothing is left",
+                          {"n": 4, "kind": "turn", "ended": mock.ANY, "seconds": mock.ANY}, 3))
+        # The participant is sent its prompt, then the words under SAY of each question and nothing else: no
+        # goal, topic, opener or note of the interviewer's is in anything it was started with.
+        prompt, *questions = self.sent("P01-opus")
+        self.assertEqual(questions, ["Question 1?", "Question 2?", "Question 3?"])
+        self.assertIn("ZQBIO", prompt)
+        given = json.dumps([e for e in self.starts() if e["run"] == "P01-opus"])
+        self.assertEqual([m for m in ("ZQGOAL", "ZQT", "ZQAREA", "ZQOPENER", "ZQWHY", "ZQREASON") if m in given], [])
+        # The interviewer is sent its prompt, then each answer under a status line: nothing of the persona's bio
+        # or of the card, which the log does hold.
+        brief, *answers = self.sent("interviewer-P01-opus")
+        self.assertEqual(answers, [f"----------\nAnswer {n}.\n----------\n{status}" for n, status in enumerate((
+            "Exchange 1 of 6. ZQT1: 1 of 8. Not opened: ZQT2.", "Exchange 2 of 6. ZQT2: 1 of 8.",
+            "Exchange 3 of 6."), 1)])
+        self.assertTrue(all(m in brief for m in ("ZQGOAL", "ZQT1", "ZQAREA", "ZQOPENER")), brief)
+        # Every topic id the brief shows is one of this guide's, its examples included, so that none gives the
+        # interviewer an id to copy that its guide does not have. Its first reply is asked for by the first id.
+        own, notes = brief.split("\n# Reference notes")
+        shown = ("`TOPIC: ZQT1` and `MOVE: open`", "    TOPIC: ZQT2\n", "`Exchange 4 of 6. ZQT2: 3 of 8.`")
+        self.assertEqual((re.findall(r"\bT\d+\b", own), [x in own for x in shown]), ([], [True] * 3))
+        given = json.dumps([e for e in self.starts() if e["run"] == "interviewer-P01-opus"])
+        self.assertEqual(([m for m in ("ZQBIO", "ZQCARD") if m in given],
+                          "ZQCARD" in self.turns("P01-opus", "card")[0]["text"]), ([], True))
+        # The reference notes are in the interviewer's prompt as it was sent, since it has no file to open: a
+        # line of one of them, as the asset has it, is there, and in nothing a participant was sent.
+        note = max(self.scripts.parent.joinpath("assets/interview-reference/recovery.md").read_text().splitlines(),
+                   key=len)
+        self.assertEqual((note in brief, [e["run"] for e in self.starts() if e["side"] == "participant"
+                                          and note in e["stdin"]]), (True, []))
+        # Both transcripts are written when the interview ends. The whole one has the card and the notes, and
+        # the analysts' copy has the questions and answers and nothing of either.
+        whole = self.sd.joinpath("interviews/P01-opus.md").read_text()
+        copy = self.sd.joinpath("analysis/transcripts/P01-opus.md").read_text()
+        self.assertTrue(all(m in whole for m in ("ZQCARD", "ZQWHY", "ZQT1", "ZQREASON", "**Q:** Question 2?")), whole)
+        self.assertEqual(([m for m in ("ZQCARD", "ZQWHY", "ZQT", "ZQAREA", "ZQREASON", "card") if m in copy],
+                          copy.count("**Q:** Question"), copy.count("**A:** Answer")), ([], 3, 3), copy)
+        # The usage record names each side of an interview as that, and its interviewer's model entry has a
+        # row beside the panel's, so that the rows by model key add up to everything the interviews used.
+        usage = json.loads(self.launch("usage", "--json").stdout)
+        self.assertEqual(([r["side"] for r in usage["roles"]], sorted(k["key"] for k in usage["keys"]),
+                          sum(k["attempts"] for k in usage["keys"])),
+                         (["participant", "interviewer"], ["cx", "interviewer", "opus"], usage["total"]["attempts"]))
+
+    def test_launcher_killed_at_any_point_of_a_turn_loses_no_turn_and_records_none_twice(self):
+        self.interview({"P01-opus": [[], ["wait:a", "say:First answer."], ["wait:b", "say:Second answer."],
+                                     ["wait:c", "say:Third answer."]]}, models=[self.CLAUDE])
+        log = self.sd / "interviews/P01-opus.jsonl"
+
+        def waits_at(gate):
+            return lambda: gate in [e["gate"] for e in self.events("waiting")]
+
+        def carried():
+            return [run_id for run_id, e in self.entries().items() if e.get("carried")]
+
+        # Before its process started. runs.json as a launcher leaves it that died between saving the
+        # participant's first attempt and starting its process: the log begun, the interview carried, the
+        # attempt on record and nothing in its pid file. No launcher is alive to make that state by chance.
+        as_left = self.entries()
+        for entry in as_left.values():
+            entry["carried"] = True
+        session = "0b5e4b1e-6f0c-4c58-9d0c-3f6a1d2c7e11"
+        as_left["P01-opus"].update(pid=None, pid_identity=None, session=session, attempts=[{
+            "n": 1, "kind": "turn", "started": round(time.time(), 3), "allowed": 180.0, "ended": None, "seconds": None,
+            "exit_code": None, "outcome": None, "bound": "turn", "session": session, "was": {}}])
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        log.parent.mkdir(exist_ok=True)
+        log.write_text(json.dumps({"t": "start", "at": round(time.time(), 3), "v": 1, "kind": "interview",
+                                   "run": "P01-opus"}) + "\n")
+        self.sd.joinpath("logs").mkdir(exist_ok=True)
+        self.sd.joinpath("logs/P01-opus.1.pid").write_text("")
+        # "carried" counts only while a launcher has the study. What a dead one left reads as its log does.
+        self.assertEqual(self.reads(), {"P01-opus": "pending"})
+        # While it ran. The launcher that finds the state above takes the attempt back, puts the interview
+        # down and starts it with attempt 1. It is killed while the participant's second process waits, and
+        # the next launcher has adopted that turn before the process is let go on.
+        first, output = self.launch_in_background("run")
+        self.wait_for(waits_at("a"), "the first answer to be under way")
+        first.kill()
+        first.wait()
+        self.assertIn("P01-opus: a turn of the participant was never started", output.read_text())
+        # With no launcher nothing waits for one: the interview is partial to status and to the checks alike,
+        # which name resume, though runs.json still has it as carried and its turn is alive.
+        self.assertEqual((carried(), self.reads()), (["P01-opus", "interviewer-P01-opus"], {"P01-opus": "partial"}))
+        checked = run("check_runs.py", self.sd, check=False).stdout
+        self.assertIn("| P01-opus | no end record: it reads partial, after 0 of 6 exchanges |", checked)
+        self.assertEqual((f"P01-opus (partial): launch.py {self.sd} resume\n" in checked, "is carrying" in checked),
+                         (True, False), checked)
+        second, output = self.launch_in_background("resume")
+        self.wait_for(lambda: "adopted from an earlier launcher" in output.read_text(), "the turn to be adopted")
+        self.assertEqual(self.reads(), {"P01-opus": "running"})  # a launcher has the study, and carries it
+        self.release("a")
+        # After it ended, before the log. The launcher is killed while the third process waits, and that
+        # process ends with no launcher alive: its reply is in logs/ alone.
+        self.wait_for(waits_at("b"), "the second answer to be under way")
+        second.kill()
+        second.wait()
+        self.release("b")
+        self.wait_for(lambda: self.processes() == {"P01-opus": "gone"}, "the second answer to end unwatched")
+        self.assertEqual([x["text"] for x in self.whole("P01-opus") if x["t"] == "answer"], ["First answer."])
+        third, output = self.launch_in_background("resume")
+        # After the log, before runs.json. The fourth process waits with its attempt on record. runs.json is
+        # kept as it is then, the launcher records the answer and the end, and runs.json is put back.
+        self.wait_for(lambda: waits_at("c")() and self.entries()["P01-opus"].get("pid"),
+                      "the third answer to be under way")
+        open_attempt = self.sd.joinpath("runs.json").read_bytes()
+        self.assertEqual([x["text"] for x in self.whole("P01-opus") if x["t"] == "answer"],
+                         ["First answer.", "Second answer."])
+        self.assertIn("Second answer.", self.sd.joinpath("logs/P01-opus.3.out").read_text())
+        self.release("c")
+        self.assertEqual(third.wait(timeout=30), 0, output.read_text())
+        self.assertEqual((carried(), self.reads()), ([], {"P01-opus": "done"}))
+        ended = log.read_bytes()
+        self.sd.joinpath("runs.json").write_bytes(open_attempt)
+        self.assertEqual((carried(), self.entries()["P01-opus"]["attempts"][-1]["ended"]),
+                         (["P01-opus", "interviewer-P01-opus"], None))
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
+        # Nothing was lost and nothing was said or recorded twice: each side was sent each message once, the
+        # log has each turn once and is as the launcher that ended the interview left it, and no attempt is open.
+        self.assertEqual((log.read_bytes() == ended, carried(), self.reads()), (True, [], {"P01-opus": "done"}))
+        records = self.whole("P01-opus")
+        self.assertEqual([x["text"] for x in records if x["t"] == "answer"],
+                         ["First answer.", "Second answer.", "Third answer."])
+        prompt, *questions = self.sent("P01-opus")
+        self.assertEqual((questions, len(self.sent("interviewer-P01-opus"))),
+                         (["Question 1?", "Question 2?", "Question 3?"], 4))
+        self.assertEqual([a["ended"] is None for a in self.entries()["P01-opus"]["attempts"]], [False] * 4)
+
+    def test_reply_that_cannot_be_used_is_never_delivered_and_is_sent_back_or_put_again_once(self):
+        headed = "## On my mind\nThe roster.\n\n## What really bothers me\nStocktake.\n\n## Not a problem\nThe till."
+        self.interview({
+            # A card of three of the four parts, under headings. Its interviewer's first reply has no WHY and a
+            # leak term, its repair is a question, and then two replies in a row follow no format.
+            "P01-cx": [[f"say:{headed}"], []],
+            "interviewer-P01-cx": [["say:TOPIC: T1\nMOVE: open\nSAY:\nHave you heard of Secret Codename?"],
+                                   ["ask:T1:open"], ["say:I would ask about pricing next."], ["say:Still no format."]],
+            "P02-cx": [[], ["say:"]],                                        # answers with nothing, twice
+            "P03-cx": [["say:I am an AI model and cannot play a person."]],  # refuses the role, each time
+        }, personas=3, models=[self.CODEX])
+        r = self.launch("run")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertEqual(self.reads(), {"P01-cx": "partial", "P02-cx": "partial", "P03-cx": "failed"}, r.stdout)
+        reasons = {x["run"]: x["reason"] for x in self.status()["runs"]}
+        # Sent back once with every problem named, and the question that came back is delivered. The second
+        # reply in one slot that cannot be used ends the carrying. No leak term reached the participant.
+        self.assertEqual([(x["t"], [key for key, _ in x.get("problems", [])]) for x in self.whole("P01-cx")[1:]],
+                         [("card", []), ("rejected", ["missing", "leak"]), ("question", []), ("answer", []),
+                          ("rejected", ["format", "missing"]), ("rejected", ["format", "missing"])])
+        _, repair, turn, again = self.sent("interviewer-P01-cx")
+        self.assertIn('It is missing: WHY.\nSAY holds "secret codename", which must not reach the participant', repair)
+        self.assertIn("It does not follow the reply format.", again)
+        self.assertEqual((self.sent("P01-cx")[1:], "ecret" in json.dumps(self.sent("P01-cx")).lower(),
+                          reasons["P01-cx"]),
+                         (["Question 1?"], False, "the interviewer's reply could not be used twice"))
+        # An empty answer: the question is put once more, and said to be, and then the interview is put down.
+        _, asked, asked_again = self.sent("P02-cx")
+        self.assertEqual((asked, asked_again.endswith("\n\nQuestion 1?"), asked_again != asked,
+                          [(x["t"], x.get("why")) for x in self.whole("P02-cx")[3:]], reasons["P02-cx"]),
+                         ("Question 1?", True, True, [("lost", "empty"), ("lost", "empty")],
+                          "the participant replied with nothing twice"))
+        # A first reply that is no card: failed, with the reply on its log, launched afresh once by the same
+        # run and no more, and no interviewer was ever started for it.
+        refused = self.whole("P03-cx")
+        self.assertEqual([(x["t"], x.get("why") or x.get("state") or x.get("by")) for x in refused[1:]],
+                         [("lost", "role"), ("halt", "failed"), ("resume", "run"), ("lost", "role"),
+                          ("halt", "failed")])
+        self.assertEqual((refused[1]["reply"], [e["resumed"] for e in self.starts() if e["run"] == "P03-cx"],
+                          self.sent("interviewer-P03-cx")),
+                         ("I am an AI model and cannot play a person.", [False, False], []))
+        self.assertIn("did not write its situation card: this model may be too small to hold the role",
+                      reasons["P03-cx"])
+        self.assertIn("  failed: P03-cx. Next: run.", r.stdout)
+
+    def test_interview_ends_short_of_its_cap_without_a_close_and_an_early_end_is_asked_about_once(self):
+        self.interview({
+            # T1 reaches its cap of two, and at the last exchange the cap allows it asks about T2 again, twice.
+            "interviewer-P01-opus": [["ask:T1:open"], ["ask:T1"], ["ask:T2:open"], ["ask:T2"]],
+            # Ends after one exchange, with T2 not opened, and says so again when asked.
+            "interviewer-P02-opus": [["ask:T1:open"], ["finish:She has no more time."], ["finish:She said it again."]],
+        }, personas=2, models=[self.CLAUDE], guide={
+            "turns": 4, "topics": [{"id": "T1", "area": "the working week", "goals": ["G1"], "turns": 2,
+                                    "opener": "What took most of your time last week?"},
+                                   {"id": "T2", "area": "the tools", "goals": ["G1"],
+                                    "opener": "What do you keep track of things with?"}]})
+        r = self.launch("run")
+        self.assertEqual((r.returncode, self.reads()), (0, {"P01-opus": "done", "P02-opus": "done"}), r.stdout)
+        capped = self.whole("P01-opus")
+        _, _, at_topic_cap, last, repair = self.sent("interviewer-P01-opus")
+        self.assertEqual((at_topic_cap.split("\n")[-2:], last.split("\n")[-2:]),
+                         (["Exchange 2 of 4. T1: 2 of 2. Not opened: T2.", "T1 has used its turns: move on or close."],
+                          ["Exchange 3 of 4. T2: 1 of 8.", "This is your last question: close the interview."]))
+        self.assertIn("This is the last exchange: reply with TOPIC: close.", repair)
+        self.assertEqual([(x["t"], [key for key, _ in x.get("problems", [])]) for x in capped[-3:]],
+                         [("rejected", ["last-exchange"]), ("rejected", ["last-exchange"]), ("end", [])])
+        self.assertEqual(({k: capped[-1].get(k) for k in ("by", "exchanges", "short", "close", "unopened")},
+                          self.sent("P01-opus")[1:]),
+                         ({"by": "cap", "exchanges": 3, "short": True, "close": False, "unopened": []},
+                          ["Question 1?", "Question 2?", "Question 3?"]))
+        self.assertIn("one short of the cap of 4", self.sd.joinpath("interviews/P01-opus.md").read_text())
+        early = self.whole("P02-opus")
+        _, _, check = self.sent("interviewer-P02-opus")
+        self.assertIn("T2 was not opened. Open it, or confirm the end with your reason.", check)
+        self.assertEqual([(x["t"], x.get("reason")) for x in early[-2:]],
+                         [("end-offered", "She has no more time."), ("end", "She said it again.")])
+        self.assertEqual({k: early[-1][k] for k in ("by", "exchanges", "unopened")},
+                         {"by": "interviewer", "exchanges": 1, "unopened": ["T2"]})
+
+    def test_interview_turn_at_the_turn_limit_waits_for_resume_and_a_side_out_of_its_allowance_for_extend(self):
+        # The participant's second process hangs and its fourth reaches its budget. Nothing is timed but the
+        # turn limit, which outlasts the start of a process many times over, as does what is left of the
+        # participant's time after the turn that hung: 0.8 of a turn limit, for a turn that takes a moment.
+        turn = 3.0
+        self.interview({"P01-opus": [[], ["hang"], [], ["end:budget"], [], ["end:budget"], []]}, models=[self.CLAUDE],
+                       limits={"turn": {"minutes": turn / 60}, "run": {"minutes": 1.8 * turn / 60, "budget_usd": 1}})
+        r = self.launch("run")
+        # Stopped at limits.turn: partial and never limited, and the command that lost the turn does not put it
+        # again. The usage record says partial too: it is written again when an interview is put down, which
+        # is after the record that the end of its last turn wrote.
+        self.assertEqual((r.returncode, self.reads()), (1, {"P01-opus": "partial"}), r.stdout)
+        by_run = self.sd.joinpath("analysis/usage.md").read_text().split("## By run")[1]
+        self.assertEqual((by_run.count("| partial |"), "running" in by_run), (2, False), by_run)
+        self.assertIn("P01-opus: partial after 0 exchanges: the participant's turn was stopped at limits.turn",
+                      r.stdout)
+        self.assertEqual(([x["t"] for x in self.whole("P01-opus")[-2:]], self.turns("P01-opus", "lost")[0]["why"],
+                          self.sent("P01-opus")[1:]), (["question", "lost"], "time", ["Question 1?"]))
+        # resume puts that turn again, once, and says that it does. Two turns on, the participant's process
+        # reaches its budget: limited, with the side at its limit named and the answer it gave kept.
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, self.reads()), (1, {"P01-opus": "limited"}), r.stdout)
+        _, asked, again, second = self.sent("P01-opus")
+        self.assertEqual((asked, again.endswith("\n\nQuestion 1?"), again != asked, second),
+                         ("Question 1?", True, True, "Question 2?"))
+        [limited], kept = self.status()["runs"], self.whole("P01-opus")
+        self.assertEqual(({k: kept[-1].get(k) for k in ("t", "state", "side", "limited_by")},
+                          limited["interview"]["exchanges"]),
+                         ({"t": "halt", "state": "limited", "side": "participant", "limited_by": "budget"}, 1))
+        # Each side's limits are its own and add up over its turns. Spend: a later turn is given the cap less
+        # what its own side's session has reported. Time: the turn that hung was allowed a whole turn limit and
+        # is charged to the participant alone, and a later turn of the participant is allowed only what is left.
+        caps = {entry: [e["argv"][e["argv"].index("--max-budget-usd") + 1] for e in self.starts() if e["run"] == entry]
+                for entry in ("P01-opus", "interviewer-P01-opus")}
+        self.assertEqual(caps, {"P01-opus": ["1", "0.999535", "0.999535", "0.999535"],
+                                "interviewer-P01-opus": ["1", "0.999535"]})
+        attempts = {a["n"]: a for a in self.entries()["P01-opus"]["attempts"]}
+        self.assertEqual((attempts[2]["bound"], attempts[2]["allowed"], attempts[4]["bound"]),
+                         ("turn", turn, "allowance"))
+        self.assertLess(attempts[4]["allowed"], 0.8 * turn)
+        self.assertGreaterEqual(limited["seconds_used"], turn)
+        self.assertLess(limited["interview"]["interviewer"]["seconds_used"], turn)
+        # A limited interview is left alone until it is named with --extend, which gives the side at its limit
+        # one more allowance and goes on at the turn the log reached: every turn it had is kept, and nothing is
+        # asked again but the two turns that were lost.
+        self.assertIn("P01-opus: limited, so resume leaves it alone. Next: resume --runs <ids> --extend",
+                      self.launch("resume", "--runs", "P01-opus").stdout)
+        r = self.launch("resume", "--runs", "P01-opus", "--extend")
+        self.assertEqual((r.returncode, self.reads()), (1, {"P01-opus": "limited"}), r.stdout)
+        self.assertIn("P01-opus: extended, one more allowance of the participant's limits", r.stdout)
+        records, status = self.whole("P01-opus"), self.status()
+        self.assertEqual((records[:len(kept)], [x.get("extended") for x in records if x["t"] == "resume"],
+                          [x["n"] for x in records if x["t"] == "answer"]), (kept, [None, "participant"], [1, 2]))
+        self.assertEqual(({k: e.get("extended") for k, e in self.entries().items()}, status["extended"],
+                          status["ceiling_holds"]),
+                         ({"P01-opus": 1, "interviewer-P01-opus": None}, ["P01-opus"], False))
+        # The grant is the record on the log. A launcher killed after writing it and before saving runs.json
+        # leaves the log as below and runs.json as it was: the halt is cleared, so the interview is partial, and
+        # the resume that takes it up brings the entry level with the log, once, before the turn is started.
+        with open(self.sd / "interviews/P01-opus.jsonl", "a") as log:
+            log.write(json.dumps({"t": "resume", "at": round(time.time(), 3), "by": "resume",
+                                  "extended": "participant"}) + "\n")
+        self.assertEqual((self.reads(), self.entries()["P01-opus"]["extended"]), ({"P01-opus": "partial"}, 1))
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, self.reads()), (0, {"P01-opus": "done"}), r.stdout)
+        self.assertEqual(([x.get("extended") for x in self.whole("P01-opus") if x["t"] == "resume"],
+                          {k: e.get("extended") for k, e in self.entries().items()}),
+                         ([None, "participant", "participant", None], {"P01-opus": 2, "interviewer-P01-opus": None}))
+        self.assertEqual([m.rsplit("\n", 1)[-1] for m in self.sent("P01-opus")[1:]],
+                         ["Question 1?", "Question 1?", "Question 2?", "Question 2?", "Question 3?", "Question 3?"])
+        caps = {e["attempt"]: float(e["argv"][e["argv"].index("--max-budget-usd") + 1])
+                for e in self.starts() if e["run"] == "P01-opus"}
+        self.assertEqual((1 < caps[5] < 2, 2 < caps[7] < 3), (True, True), caps)
+
+    def test_usage_limit_on_either_side_blocks_an_interview_and_on_the_interviewers_runner_stops_every_one(self):
+        others = ("P03-cx", "P04-cx")
+        self.interview({
+            "P01-cx": [[], ["wait:turned", "end:usage_limit"], []],          # its first answer is turned away
+            "interviewer-P02-cx": [["wait:limit", "end:usage_limit"], []],   # its first question is
+            **{run_id: [[], ["wait:hold"], []] for run_id in others},        # their first answers wait to be let go
+        }, personas=4, models=[self.CODEX], runners={"claude": {"concurrency": 3}, "codex": {"concurrency": 1}})
+        log, runs = self.sd / "interviews/P01-cx.jsonl", self.sd / "runs.json"
+        # The participant's side. Its harness turns a turn away: blocked, in the harness's own words.
+        launcher, output = self.launch_in_background("run", "--runs", "P01-cx")
+        self.wait_for(lambda: "P01-cx" in self.waiting() and self.entries()["P01-cx"].get("pid"),
+                      "the first answer to be under way")
+        under_way = runs.read_bytes()
+        self.release("turned")
+        self.assertEqual(launcher.wait(timeout=30), 1, output.read_text())
+        self.assertIn("P01-cx: blocked after 0 exchanges: the participant's turn was turned away by its harness: "
+                      "You've hit your usage limit", output.read_text())
+        self.assertEqual(self.reads(), {"P01-cx": "blocked", "P02-cx": "pending", **dict.fromkeys(others, "pending")})
+        # A launcher killed while it wrote that leaves the first of the two records and a part of the second,
+        # and the attempt open. Neither record is read, and the next launcher writes both from the files of
+        # the attempt, so the interview is blocked still, not merely partial. resume then goes on at the turn the
+        # log reached, and puts the question that was turned away again.
+        log.write_bytes(log.read_bytes()[:-20])
+        runs.write_bytes(under_way)
+        self.assertEqual(self.reads()["P01-cx"], "partial")  # as its log reads with neither record, and no launcher
+        r = self.launch("resume", "--runs", "P01-cx")
+        self.assertEqual((r.returncode, self.reads()["P01-cx"]), (0, "done"), r.stdout)
+        self.assertIn("P01-cx: blocked after 0 exchanges: the participant's turn was turned away", r.stdout)
+        self.assertEqual([(x["t"], x.get("state") or x.get("side")) for x in self.whole("P01-cx")[3:6]],
+                         [("lost", "participant"), ("halt", "blocked"), ("resume", None)])
+        self.assertEqual([m.rsplit("\n", 1)[-1] for m in self.sent("P01-cx")[1:]],
+                         ["Question 1?", "Question 1?", "Question 2?", "Question 3?"])
+        # The interviewer's side, which every interview shares. Three are carried. One participant holds the
+        # only slot of its runner with its first answer, so the first answer of another waits for that slot,
+        # when the interviewer of the third is turned away.
+        launcher, output = self.launch_in_background("run")
+        self.wait_for(lambda: "interviewer-P02-cx" in self.waiting() and any(x in self.waiting() for x in others)
+                      and all(self.turns(x, "question") for x in others), "two answers to be due and one under way")
+        held = next(x for x in others if x in self.waiting())
+        queued = next(x for x in others if x != held)
+        self.release("limit")
+        # The turn that waited is never started: its interview is put down at once, and the command goes on
+        # only for the turn in flight on the other runner, which is recorded before its interview is put down.
+        self.wait_for(lambda: f"{queued}: blocked" in output.read_text(), "the interview whose turn waited")
+        self.assertEqual((launcher.poll(), len(self.sent(queued))), (None, 1))
+        self.release("hold")
+        self.assertEqual(launcher.wait(timeout=30), 1, output.read_text())
+        lifts = time.strftime("%Y-%m-%d %H:%M", time.localtime(self.LIMIT_RESET))
+        self.assertIn(f"claude: the harness is turning requests away, and said its limit lifts at {lifts}. No more "
+                      "launches on this runner for now", output.read_text())
+        self.assertEqual(self.reads(), {"P01-cx": "done", "P02-cx": "blocked", held: "blocked", queued: "blocked"})
+        # Each says which side's harness it waits for, the one it did not hear from itself in that harness's
+        # words too, and when the limit lifts.
+        rows = {r["run"]: r for r in self.status()["runs"]}
+        for run_id, before in (("P02-cx", "lost"), (held, "answer"), (queued, "question")):
+            last, halt = self.turns(run_id)[-2:]
+            self.assertEqual((last["t"], {k: halt.get(k) for k in ("t", "state", "side", "reset_at")},
+                              rows[run_id]["reset_at"], "You've hit your session limit" in rows[run_id]["reason"]),
+                             (before, {"t": "halt", "state": "blocked", "side": "interviewer",
+                                       "reset_at": self.LIMIT_RESET}, self.LIMIT_RESET, True), run_id)
+        # resume continues all three where each stopped: no question is put twice, and none is lost.
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, set(self.reads().values())), (0, {"done"}), r.stdout)
+        for run_id in ("P02-cx", held, queued):
+            self.assertEqual(([x["n"] for x in self.whole(run_id) if x["t"] == "answer"], self.sent(run_id)[1:]),
+                             ([1, 2, 3], ["Question 1?", "Question 2?", "Question 3?"]), run_id)
+
+    def test_interview_with_a_session_that_is_gone_starts_afresh_only_while_it_has_no_answer_on_record(self):
+        first, second, third = "P01-cx", "P02-cx", "P03-cx"
+        self.interview({first: [[], ["end:usage_limit"], []], second: [[], [], ["end:usage_limit"], []],
+                        third: [[], ["end:budget"], [], ["end:budget"], []]}, personas=3, models=[self.CODEX])
+        for run_id in (first, second):  # one at a time: a runner that is turned away stops every interview on it
+            self.launch("run", "--runs", run_id)
+        self.assertEqual((self.reads(), [len(self.turns(x, "answer")) for x in (first, second)]),
+                         ({first: "blocked", second: "blocked", third: "pending"}, [0, 1]))
+        # purge-sessions takes an interview by its run id, which names the sessions of both its sides.
+        sessions = {entry: e.get("session") for entry, e in self.entries().items()}
+        listed = self.launch("purge-sessions", "--runs", first).stdout
+        named = [entry for entry, session in sessions.items() if f"  {entry} (" in listed and session in listed]
+        self.assertEqual(named, [first, f"interviewer-{first}"], listed)
+        # The harness loses the session of both participants.
+        for e in self.starts():
+            if e["run"] in (first, second):
+                self.fake.joinpath("sessions", f"{e['session']}.json").unlink(missing_ok=True)
+        had = {x: self.sd.joinpath(f"interviews/{x}.jsonl").read_bytes() for x in (first, second)}
+        r = self.launch("resume")
+        self.assertEqual((r.returncode, self.reads()), (1, {first: "done", second: "partial", third: "pending"}),
+                         r.stdout)
+        # With no answer on record nothing would be lost: the log it had is moved to logs/, whole, and the
+        # interview is held again from its start, both sides in new sessions.
+        self.assertIn(f"{first}: the participant's session no longer exists and no answer is on record, so the "
+                      f"interview starts afresh. The turn log it had is logs/{first}.interview-1.jsonl.", r.stdout)
+        fresh, now = self.whole(first), self.entries()
+        self.assertEqual((self.sd.joinpath(f"logs/{first}.interview-1.jsonl").read_bytes()[:len(had[first])],
+                          [x["t"] for x in fresh[:2]], [x["n"] for x in fresh if x["t"] == "answer"],
+                          [now[x]["session"] in (None, sessions[x]) for x in (first, f"interviewer-{first}")]),
+                         (had[first], ["start", "card"], [1, 2, 3], [False, False]))
+        # With an answer on record it is the lead's to decide: nothing is moved, the answer stays, and the
+        # next resume knows the session is gone and does not take the interview up to find it out.
+        left = (f"{second}: partial after 1 exchange: the participant's session no longer exists, so it cannot be "
+                "continued")
+        again = self.launch("resume")
+        self.assertEqual((left in r.stdout, left in again.stdout, f"{second}: running" in again.stdout,
+                          again.returncode), (True, True, False, 1), again.stdout)
+        moved = sorted(p.name for p in self.sd.glob("logs/*.interview-*"))
+        self.assertEqual((self.sd.joinpath(f"interviews/{second}.jsonl").read_bytes()[:len(had[second])],
+                          len(self.turns(second, "answer")), moved), (had[second], 1, [f"{first}.interview-1.jsonl"]))
+        # A fresh start gives no allowance back and takes none away. The third participant is at its budget
+        # with no answer on record and its sessions are purged, so the next command starts it afresh. A grant
+        # that a killed launcher recorded and never brought to runs.json is on the log that goes: the new log
+        # begins with it, and the entry has it.
+
+        def granted():
+            """What the turn log's "start" record says each side brought, and the copy on each entry."""
+            return self.turns(third, "start")[0].get("extended"), {
+                x: self.entries()[x].get("extended") for x in (third, f"interviewer-{third}")}
+
+        self.launch("run", "--runs", third)
+        self.assertEqual((self.reads()[third], len(self.turns(third, "answer")), granted()),
+                         ("limited", 0, (None, {third: None, f"interviewer-{third}": None})))
+        self.launch("purge-sessions", "--runs", third, "--yes")
+        with open(self.sd / f"interviews/{third}.jsonl", "a") as log:
+            log.write(json.dumps({"t": "resume", "at": round(time.time(), 3), "by": "resume",
+                                  "extended": "participant"}) + "\n")
+        r = self.launch("resume", "--runs", third)
+        self.assertIn(f"{third}: the participant's session was purged (purge-sessions) and no answer is on record, "
+                      "so the interview starts afresh.", r.stdout)
+        self.assertEqual((self.reads()[third], len(self.turns(third, "answer")), granted()),
+                         ("limited", 0, ({"participant": 1}, {third: 1, f"interviewer-{third}": None})), r.stdout)
+        # The same when "resume --extend" is the command that finds the log must begin again: the allowance it
+        # says it gives is in the new log's "start" record, with the one from before, and on the entry.
+        self.launch("purge-sessions", "--runs", third, "--yes")
+        r = self.launch("resume", "--runs", third, "--extend")
+        self.assertIn(f"{third}: extended, one more allowance of the participant's limits", r.stdout)
+        self.assertEqual((r.returncode, self.reads()[third], granted()),
+                         (0, "done", ({"participant": 2}, {third: 2, f"interviewer-{third}": None})), r.stdout)
+
+    def test_plan_of_an_interview_study_caps_both_sides_of_each_interview_and_refuses_a_runner_that_carries_none(self):
+        synthesis = {"analyst": {"runner": "claude", "model": "sonnet"}, "writer": {"runner": "claude"}}
+        self.interview(personas=2, synthesis=synthesis,
+                       limits={"run": {"budget_usd": 0.5}, "interviewer": {"budget_usd": 2}})
+        before = self.tree()
+        printed, as_json = self.launch("plan"), self.launch("plan", "--json")
+        self.assertEqual((printed.returncode, as_json.returncode), (0, 0), printed.stdout + printed.stderr)
+        # The CLIs were asked whether they are installed and signed in. Nothing was started, and nothing written.
+        self.assertFalse([c for c in self.logged() if c.get("model_call") or c.get("event")])
+        self.assertEqual(self.tree(), before)
+        # Four interviews. Each has an interviewer on claude, capped at $2, and two have a participant on claude,
+        # capped at $0.50: $9 for six sides, and the $5 pool. The two participants on codex have no cap.
+        plan = json.loads(as_json.stdout)
+        ceiling = plan["ceiling"]
+        self.assertEqual((ceiling["usd"], ceiling["capped_runs"], ceiling["uncapped"], ceiling["label"]),
+                         (14.0, 6, ["P01-cx", "P02-cx"], "estimate"))
+        self.assertIn("$9.00 for 6 sides with an enforced cap, each side of each interview counted once",
+                      printed.stdout)
+        self.assertEqual([(i["run"], i["participant"]["limits"]["budget_usd"], i["interviewer"]["limits"]["budget_usd"])
+                          for i in plan["interview"]["interviews"]],
+                         [("P01-opus", 0.5, 2), ("P01-cx", 0.5, 2), ("P02-opus", 0.5, 2), ("P02-cx", 0.5, 2)])
+        # No interview has finished, and none is forecast as a review of pages. A participant on claude, to the
+        # cap of 6 exchanges: 6 processes of 4,300 tokens and 200 more for each exchange so far, in 2 interviews.
+        opus = next(e for e in plan["estimate"]["entries"] if e["entry"] == "opus")
+        self.assertEqual((opus["basis"], opus["tokens"], opus["cost_usd"]), ("exchanges", 60000, None))
+        # An allowance that --extend gave an interviewer is on the interviewer's entry, and breaks the ceiling too.
+        entries = self.entries()
+        entries["interviewer-P01-cx"]["extended"] = 1
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(entries.values())))
+        ceiling = self.plan()["ceiling"]
+        self.assertEqual((ceiling["holds"], ceiling["extended"], ceiling["with_extensions_usd"]),
+                         (False, ["interviewer-P01-cx"], 16.0))
+
+        # A runner that does not declare itself verified for interviews carries neither side of one.
+        shutil.rmtree(self.sd)
+        self.interview(models=[self.CLAUDE, self.PI], guide={"interviewer": {"runner": "pi", "model": PI_MODEL}})
+        refusal = "pi is not verified for interviews, and an interview is carried turn by turn through its runner"
+        planned = self.launch("plan")
+        self.assertEqual(planned.returncode, 1, planned.stdout + planned.stderr)
+        self.assertIn(f"local: {refusal}", planned.stdout)        # as a participant
+        self.assertIn(f"interviewer: {refusal}", planned.stdout)  # and as the interviewer
+        started = self.launch("run")
+        self.assertEqual((started.returncode, self.starts()), (1, []), started.stdout)
+        self.assertIn(f"P01-local: {refusal}", started.stdout)
+        self.assertIn(f"interviewer: {refusal}", started.stdout)
+        # Nor a debrief. A review study that plans one is planned as it was: the plan says whose runs cannot be
+        # debriefed, which stops no run, so it is no problem of the plan.
+        self.study(personas=1, models=[self.CLAUDE, self.PI], materials="text", debrief=self.DEBRIEF)
+        planned = self.launch("plan", "--json")
+        plan = json.loads(planned.stdout)
+        self.assertEqual((planned.returncode, plan["ok"], len(plan["debrief"]["refused"])), (0, True, 1),
+                         planned.stderr)
+        self.assertTrue(plan["debrief"]["refused"][0].startswith(f"local (1 run): {refusal}"), plan["debrief"])
+        self.assertIn(f"Cannot be debriefed: local (1 run): {refusal}", self.launch("plan").stdout)
+
+    def test_jobs_of_an_interview_study_share_the_pool_wait_for_what_they_read_and_are_given_only_their_own(self):
+        # Four personas in two halves. P02's interview stops with its card and one question on record, and
+        # P04's is not held until the jobs are done: one unfinished with a transcript, one pending with none.
+        # The writer's first synthesis has words in quotation marks that nobody said, and its second a
+        # quotation that is in the exchange it names.
+        self.interview({"P02-opus": [[], ["exit:1"], []],
+                        "writer": [['text:They call it "nobody said this" among themselves.'],
+                                   ['text:All it came to was "Answer 1." (P01-opus, 1)']]},
+                       personas=4, models=[self.CLAUDE], limits={"synthesis": {"budget_usd": 5}},
+                       synthesis={"analysts": 2, "analyst": {"runner": "claude", "model": "sonnet"},
+                                  "critic": {"runner": "claude", "model": "fable"},
+                                  "writer": {"runner": "claude", "model": "opus", "effort": "high"}})
+        self.launch("run", "--runs", "P01-opus,P02-opus")
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P02-opus": "partial", "P03-opus": "pending",
+                                        "P04-opus": "pending"})
+
+        def step(args, expected, code, says, then=None, planned=False):
+            """A command, the job processes it starts, its exit code, what it says, and the script that is
+            run after it. A job that is refused is not planned either, unless it was planned before."""
+            before = len(self.starts())
+            r = self.launch(*args)
+            with self.subTest(" ".join(args)):
+                self.assertEqual(sorted(e["run"] for e in self.starts(before)), expected, r.stdout + r.stderr)
+                self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                self.assertIn(says, r.stdout + r.stderr)
+                if code and not expected and not planned:
+                    self.assertFalse([e for e in self.entries().values() if e["role"] == args[2]], args)
+            if then:
+                run(then, self.sd)
+            return r
+
+        step(["run", "--role", "writer"], [], 1, "The writer waits for the analysts, the critics and the themes job: "
+                                                 "analyst-1 is pending")
+        step(["run", "--role", "themes"], [], 1, "The themes job waits for the analysts: analyst-1 is pending")
+        step(["run", "--role", "critic"], [], 1, "Critics wait for the panel: 2 interviews of 4 have not finished "
+                                                 "(P03-opus pending, P04-opus pending)")
+        # A name that is no job of the role is refused before any job is planned.
+        step(["run", "--role", "critic", "--allow-incomplete", "--runs", "P01-opus"], [], 1,
+             "No critic job called P01-opus. There are: critic-1, critic-2")
+        # With part of the panel held, the half with no interview has nothing to read: named by itself it
+        # is refused, and among the role's jobs it is passed over while the one with a transcript runs.
+        step(["run", "--role", "critic", "--allow-incomplete", "--runs", "critic-2"], [], 1,
+             "critic-2 would have nothing to read: no interview of personas P03 to P04 has a turn on record")
+        r = step(["run", "--role", "critic", "--allow-incomplete"], ["critic-1"], 0,
+                 "critic-2: passed over, as it would have nothing to read: no interview of personas P03 to P04 has a "
+                 f"turn on record. Start it once one is held: launch.py {self.sd} run --role critic\n")
+        self.assertEqual([e["run"] for e in self.entries().values() if e["role"] == "critic"], ["critic-1"])
+        # What comes next names the critic that is still to run, and when it can: the role is not finished.
+        self.assertIn("Next: read analysis/critique-1.md. critic-2 is still to run, once an interview of personas "
+                      f"P03 to P04 is held: launch.py {self.sd} run --role critic. The writer waits for it.", r.stdout)
+        self.launch("run", "--runs", "P03-opus")
+        step(["run", "--role", "critic", "--allow-incomplete"], ["critic-2"], 0,
+             "The analysts are still to run (analyst-1, analyst-2)")
+        step(["run", "--role", "analyst"], [], 1, "Analysts wait for the panel")
+        step(["run", "--role", "analyst", "--allow-incomplete"], ["analyst-1", "analyst-2"], 0,
+             f"then extract_notes.py {self.sd}")
+        step(["run", "--role", "themes"], [], 1, "The themes job waits for analysis/notes.csv, which is not there: "
+                                                 f"extract_notes.py {self.sd} writes it", "extract_notes.py")
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}")
+        step(["run", "--role", "writer"], [], 1, "The writer waits for analysis/quant.md, which is not there: "
+                                                 f"analyze.py {self.sd} writes it", "analyze.py")
+        # The quotations of the synthesis are checked when the writer ends: one that nobody said is listed and
+        # is the exit code, and the writer stays done.
+        step(["run", "--role", "writer"], ["writer"], 1, '"nobody said this"')
+        jobs = {e["run"]: e for e in self.starts()
+                if e["run"].split("-")[0] in ("analyst", "critic", "themes", "writer")}
+
+        def option(e, name):
+            return e["argv"][e["argv"].index(name) + 1]
+
+        # Every job has one sixth of the pool as its cap, $5 between six, and runs on its role's model entry:
+        # the critics on synthesis.critic, the themes job on the analysts'.
+        self.assertEqual({k: (option(e, "--model"), option(e, "--max-budget-usd")) for k, e in jobs.items()}, {
+            "analyst-1": ("sonnet", "0.833333"), "analyst-2": ("sonnet", "0.833333"),
+            "critic-1": ("fable", "0.833333"), "critic-2": ("fable", "0.833333"),
+            "themes": ("sonnet", "0.833333"), "writer": ("opus", "0.833333")})
+        self.assertEqual({e["cwd"] for e in jobs.values()}, {str(self.sd)})
+        # Each brief is the prompt, verbatim and with nothing left to fill in. A critic has the personas its
+        # analyst has. An analyst is given the analysts' copies and a critic the full transcripts, each of
+        # the interviews with a turn on record alone, and the themes job and the writer no transcript.
+        given = {}
+        for job, e in jobs.items():
+            self.assertEqual(e["stdin"], self.sd.joinpath(f"prompts/{job}.md").read_text())
+            self.assertNotRegex(e["stdin"], r"<[A-Z][A-Z0-9_]*>")
+            given[job] = (re.findall(r"/analysis/transcripts/(P\d+-\w+)\.md`", e["stdin"]),
+                          re.findall(r"/interviews/(P\d+-\w+)\.md`", e["stdin"]))
+        halves = (["P01-opus", "P02-opus"], ["P03-opus"])
+        self.assertEqual(given, {"analyst-1": (halves[0], []), "analyst-2": (halves[1], []),
+                                 "critic-1": ([], halves[0]), "critic-2": ([], halves[1]),
+                                 "themes": ([], []), "writer": ([], [])})
+        # What each is given of the study: the guide (ZQGOAL, ZQOPENER) and who the personas are (ZQBIO).
+        self.assertEqual({job: [mark for mark in ("ZQGOAL", "ZQOPENER", "ZQBIO") if mark in e["stdin"]]
+                          for job, e in jobs.items()}, {
+            "analyst-1": ["ZQBIO"], "analyst-2": ["ZQBIO"], "critic-1": ["ZQGOAL", "ZQOPENER", "ZQBIO"],
+            "critic-2": ["ZQGOAL", "ZQOPENER", "ZQBIO"], "themes": [], "writer": ["ZQGOAL", "ZQOPENER"]})
+        # An analyst is told which of its interviews did not finish. The one that stopped had its transcripts
+        # written before the brief that names them, though no launcher ever saw it end.
+        self.assertIn("Unfinished interviews:\n- `P02-opus.md` (P02-opus): partial, 0 exchanges\n",
+                      jobs["analyst-1"]["stdin"])
+        self.assertIn("Unfinished interviews:\n- P04-opus: pending, with no turn on record, so it has no transcript\n",
+                      jobs["analyst-2"]["stdin"])
+        self.assertNotIn("Unfinished interviews", jobs["critic-1"]["stdin"])
+        self.assertEqual([self.sd.joinpath(folder, "P02-opus.md").is_file()
+                          for folder in ("analysis/transcripts", "interviews")], [True, True])
+        self.assertEqual({j["run"]: (j["state"], j["file"]) for j in self.status()["jobs"]}, {
+            "analyst-1": ("done", "analysis/qual-1.md"), "analyst-2": ("done", "analysis/qual-2.md"),
+            "critic-1": ("done", "analysis/critique-1.md"), "critic-2": ("done", "analysis/critique-2.md"),
+            "themes": ("done", "analysis/themes.md"), "writer": ("done", "analysis/SYNTHESIS.md")})
+        # A synthesis written again, whose one quotation is in the exchange it names, passes.
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done")
+        # An interview held after a job read its half is not in that job's file. The role says so in place
+        # of what comes next, with what puts it right, and so does the plan: by the attempts on record and
+        # the turn log, since the file is there and the job reads done.
+        self.launch("run", "--runs", "P04-opus")
+        short = ("analyst-2: done, but analysis/qual-2.md was written before P04-opus was held, so it does not cover "
+                 "that interview as it stands now: to put that right, delete analysis/qual-2.md and run launch.py "
+                 f"{self.sd} run --role analyst again.\n")
+        started = len(self.starts())
+        r = self.launch("run", "--role", "analyst")
+        self.assertEqual((r.returncode, self.starts(started), r.stdout), (1, [], f"Finished: done 2.\n{short}"))
+        self.assertIn(f"  {short}", self.launch("plan").stdout)
+        self.sd.joinpath("analysis/qual-2.md").unlink()
+        step(["run", "--role", "analyst"], ["analyst-2"], 0, f"then extract_notes.py {self.sd}")
+
+        # An analyst run again leaves every step after it out of date, though each file is there and each
+        # job reads done. Each command refuses or says so, with what puts it right, and starts nothing: by
+        # the attempts on record for a job, and for a file a script writes by what the script would write now.
+        def stale(job, file, since):
+            return (f"{job}: done, but {file} was written before {since}, so it is not built on what "
+                    f"{'those jobs have' if ' and ' in since else 'that job has'} written since: to put that right, "
+                    f"delete {file} and run launch.py {self.sd} run --role {job} again.")
+
+        themes = stale("themes", "analysis/themes.md", "analyst-2 was run again")
+        tallies = self.sd.joinpath("analysis/quant.json").read_bytes()
+        # A note put into an analyst's file by hand: notes.csv is no longer what the files give.
+        self.analysis("qual-1.md", "## P01-opus\n\n" + self.coded("P01-opus/1", 1, "PAIN", "Answer 1"))
+        notes = ("analysis/notes.csv is not what analysis/qual-1.md and analysis/qual-2.md now give: run "
+                 "extract_notes.py")
+        step(["run", "--role", "themes"], [], 1, f"The themes job waits, because {notes} {self.sd} again, then "
+                                                 f"launch.py {self.sd} run --role themes again.", planned=True)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stderr), (1, f"{notes} {self.sd} again.\n"), r.stdout)
+        run("extract_notes.py", self.sd)
+        r = step(["run", "--role", "themes"], [], 1, themes, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{themes}\n")
+        step(["run", "--role", "writer"], [], 1, f"The writer waits, because a job it reads is out of date. {themes}",
+             planned=True)
+        r = run("analyze.py", self.sd, check=False)  # nor are the tallies written from themes that are out of date
+        self.assertEqual((r.returncode, r.stderr, self.sd.joinpath("analysis/quant.json").read_bytes()),
+                         (1, f"{themes} Then analyze.py {self.sd} again.\n", tallies), r.stdout)
+        plan = self.launch("plan").stdout
+        self.assertEqual((f"  {themes}\n" in plan, plan.count("done, 1 job run again since")), (True, 2), plan)
+        self.assertEqual({j["run"]: j["out_of_date"] for j in self.plan()["synthesis"]["jobs"] if j["out_of_date"]},
+                         {"critic-2": {"P04-opus": "was held"},  # the one critic that was not run again
+                          "themes": {"analyst-2": "was run again"}, "writer": {"analyst-2": "was run again"}})
+        self.sd.joinpath("analysis/themes.md").unlink()
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}")
+        step(["run", "--role", "writer"], [], 1,
+             "The writer waits, because analysis/quant.md is no longer the tallies of the analysis as it stands: run "
+             f"analyze.py {self.sd} again", "analyze.py", planned=True)
+        # The writer stays done on the synthesis it wrote, which is not checked again: it is to be written again.
+        r = step(["run", "--role", "writer"], [], 1,
+                 stale("writer", "analysis/SYNTHESIS.md", "analyst-2 and themes were run again"),
+                 planned=True)
+        self.assertNotIn("# Quote check", r.stdout)
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done")
+        self.assertEqual([j["run"] for j in self.plan()["synthesis"]["jobs"] if j["out_of_date"]], ["critic-2"])
+        # A command that finds its jobs done says that it started nothing, and how one is done again.
+        step(["run", "--role", "writer"], [], 0,
+             "writer was done already, and nothing was started. To have it done again, delete its file "
+             f"(analysis/SYNTHESIS.md) and run launch.py {self.sd} run --role writer again.\n")
+
+        # A file a done job was given may change with no job run again, which no attempt's time shows: a note
+        # put right by hand and extracted again. The launch of a themes job and of a writer recorded a
+        # fingerprint of each file its brief named, so the job names the file that changed, with the same
+        # remedy, and nothing goes on from it: not the role that reads it, and not the tallies.
+        def altered(job, file, since):
+            return (f"{job}: done, but {file} was written before {since}, so it is built on what "
+                    f"{'those files' if ' and ' in since else 'that file'} held then: to put that right, delete "
+                    f"{file} and run launch.py {self.sd} run --role {job} again.")
+
+        self.assertEqual({job: sorted(self.entries()[job]["attempts"][-1].get("read", {}))
+                          for job in ("analyst-1", "themes", "writer")}, {
+            "analyst-1": [], "themes": ["analysis/notes.csv"],
+            "writer": ["analysis/critique-1.md", "analysis/critique-2.md", "analysis/qual-1.md",
+                       "analysis/qual-2.md", "analysis/quant.json", "analysis/themes.md"]})
+        self.analysis("qual-1.md", "## P01-opus\n\n" + self.coded("P01-opus/1", 1, "MONEY", "Answer 1"))
+        run("extract_notes.py", self.sd)
+        themes = altered("themes", "analysis/themes.md", "analysis/notes.csv changed")
+        r = step(["run", "--role", "themes"], [], 1, themes, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{themes}\n")
+        step(["run", "--role", "writer"], [], 1, f"The writer waits, because a job it reads is out of date. {themes}",
+             planned=True)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stderr), (1, f"{themes} Then analyze.py {self.sd} again.\n"), r.stdout)
+        plan = self.launch("plan").stdout
+        self.assertEqual((f"  {themes}\n" in plan, plan.count("done, 1 file changed since")), (True, 2), plan)
+        self.assertEqual({j["run"]: j["out_of_date"] for j in self.plan()["synthesis"]["jobs"]
+                          if j["role"] in ("themes", "writer")},
+                         {"themes": {"analysis/notes.csv": "changed"}, "writer": {"analysis/qual-1.md": "changed"}})
+        # The lead does what it says. The writer then names the job that was run again, as above, and once
+        # it is written again every job is good: also after both scripts run again with nothing changed.
+        self.sd.joinpath("analysis/themes.md").unlink()
+        step(["run", "--role", "themes"], ["themes"], 0, f"then analyze.py {self.sd}", "analyze.py")
+        step(["run", "--role", "writer"], [], 1, stale("writer", "analysis/SYNTHESIS.md", "themes was run again"),
+             planned=True)
+        self.sd.joinpath("analysis/SYNTHESIS.md").unlink()
+        step(["run", "--role", "writer"], ["writer"], 0, "writer: done", "extract_notes.py")
+        run("analyze.py", self.sd)
+        step(["run", "--role", "writer"], [], 0, "writer was done already, and nothing was started.")
+        # The writer says the same of what it read: a critic's file edited by hand, which changes no tally.
+        critique = self.sd / "analysis/critique-1.md"
+        critique.write_text(critique.read_text().replace("\n", ", read again by hand\n", 1))
+        writer = altered("writer", "analysis/SYNTHESIS.md", "analysis/critique-1.md changed")
+        r = step(["run", "--role", "writer"], [], 1, writer, planned=True)
+        self.assertEqual(r.stdout, f"Finished: done 1.\n{writer}\n")
+
+    def test_checks_block_an_interview_with_no_end_record_and_note_a_topic_that_was_never_opened(self):
+        opener = "ZQOPENER what do you keep track of things with?"
+        self.interview({
+            # Ends after one exchange with T2 not opened, and says so again when asked: done, with T2 unopened.
+            "interviewer-P01-opus": [["ask:T1:open"], ["finish:She has no more time."], ["finish:She said it again."]],
+            # The participant's second process dies in the middle of its turn: partial, with one question asked.
+            "P01-cx": [[], ["exit:1"], []],
+            # Its interviewer then opens T2 with its opener, in other case, under the label of the topic it leaves.
+            "interviewer-P01-cx": [[], [f"ask:T1:accept:Fair enough. {opener.upper()}"], []]})
+        self.launch("run")
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P01-cx": "partial"})
+        checked = run("check_runs.py", self.sd, check=False)
+        rows = {line.split(" | ")[0][2:]: line.split(" | ")[1:] for line in checked.stdout.splitlines()
+                if line.startswith("| P")}
+        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+        self.assertEqual((rows["P01-cx"][0], rows["P01-opus"]),
+                         ("no end record: it reads partial, after 0 of 6 exchanges", ["-", "topic never opened: T2 |"]))
+        # What the lead does about the blocking row is said under the table, and the file has what was printed.
+        self.assertIn(f"P01-cx (partial): launch.py {self.sd} resume\n", checked.stdout)
+        self.assertEqual(self.sd.joinpath("analysis/checks.md").read_text(), checked.stdout)
+        self.assertEqual(self.launch("resume").returncode, 0)
+        checked = run("check_runs.py", self.sd, check=False)
+        self.assertEqual(checked.returncode, 0, checked.stdout)  # an unopened topic is a finding, and blocks nothing
+        self.assertIn("| P01-opus | - | topic never opened: T2 |", checked.stdout)
+        # A question counts for the topic whose opener its words hold. The launcher went by that, so T2 was
+        # never reported to the interviewer as unopened, and the log, the transcript and the checks say both.
+        asked = self.turns("P01-cx", "question")
+        self.assertEqual(([(x["topic"], x.get("labelled")) for x in asked],
+                          self.sent("interviewer-P01-cx")[-1].split("\n")[-1]),
+                         ([("T1", None), ("T2", "T1"), ("close", None)], "Exchange 3 of 6."))
+        self.assertIn("- Topic: T2, ZQAREA the tools (the interviewer labelled it T1)",
+                      self.sd.joinpath("interviews/P01-cx.md").read_text())
+        self.assertIn("| P01-cx | - | question 2 holds the opener of T2 and was labelled T1: it is counted under T2; "
+                      "1 turn of the participant left no reply and was put again |", checked.stdout)
+        # A record that lacks a field every launcher writes, or holds another kind of value there than one
+        # writes, makes the log one of the wrong form, which blocks, and nothing else of that log is checked:
+        # an answer with no text is not an empty answer that passes, and a topic that is no text stops no reader.
+        # "unread" is a reader's name for a record it set aside and no type of one: a line that calls itself
+        # that is of no known type, whatever well-formed record it holds inside.
+        log = self.sd / "interviews/P01-cx.jsonl"
+        records = self.turns("P01-cx")[:-1]  # and with no "end", so that it reads as one to go on with
+        asked = next(i for i, x in enumerate(records) if x["t"] == "question")
+        at = max(i for i, x in enumerate(records) if x["t"] == "answer")  # the participant's last turn
+        records[asked]["topic"] = []
+        del records[at]["text"]
+        records.append({"t": "unread", "record": {"t": "resume", "at": time.time(), "by": "resume"}})
+        log.write_text("".join(json.dumps(x) + "\n" for x in records))
+        wrong = (f'Record {asked + 1} (question) lacks "topic", which a launcher always writes. Record {at + 1} '
+                 f'(answer) lacks "text", which a launcher always writes. Record {len(records)} is not a record of '
+                 "a known type")
+        checked = run("check_runs.py", self.sd, check=False)
+        self.assertEqual(checked.returncode, 1, checked.stdout)
+        self.assertIn(f"| P01-cx | turn log of the wrong form: {wrong} | - |", checked.stdout)
+        # No command goes on with such a log: resume says which record is wrong and what to do, and adds nothing.
+        # Not for a turn it finds to settle either. runs.json is as a launcher leaves it that was killed between
+        # the log and runs.json, with the attempt of that answer open: the attempt is on the log, though no
+        # reader counts its record, so it is settled and nothing is recorded of it a second time.
+        as_left = self.entries()
+        for entry in (as_left["P01-cx"], as_left["interviewer-P01-cx"]):
+            entry["carried"] = True
+        turn = as_left["P01-cx"]["attempts"][-1]
+        turn.update(started=turn["ended"] - turn["seconds"], allowed=180.0, ended=None, seconds=None, exit_code=None,
+                    outcome=None, bound="turn", session=as_left["P01-cx"]["session"], was={})
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        self.assertEqual(turn["n"], records[at]["attempt"])
+        r = self.launch("resume", "--runs", "P01-cx")
+        settled = self.entries()["P01-cx"]
+        self.assertEqual((r.returncode, self.turns("P01-cx"), settled["attempts"][-1]["ended"] is None,
+                          settled.get("carried")), (1, records, False, None), r.stdout + r.stderr)
+        self.assertIn(f"P01-cx: its turn log is of the wrong form ({wrong}), so resume leaves it alone. Put "
+                      "interviews/P01-cx.jsonl right, or to hold the interview again from its start move that file "
+                      "into logs/", r.stdout)
+
+    def talked(self):
+        """An interview study whose interviews were held on the fakes, for the scripts that read them
+        afterwards. P01 (segment solo) and P02 (segment firm), each on opus and cx, three exchanges an
+        interview: T1, T2 and a close, with the answers of SAID. P02-cx stops after its first answer and
+        stays partial. The interviewer of P01-cx labels its second question T1, and its words open T2."""
+        plan = {run_id: [[], *([f"say:{answer}"] for answer in answers)] for run_id, answers in self.SAID.items()}
+        plan["P02-cx"] = [[], ["say:Stocktake, mostly."], ["exit:1"], []]
+        plan["interviewer-P01-cx"] = [
+            [], ["ask:T1:accept:Fair enough. ZQOPENER WHAT DO YOU KEEP TRACK OF THINGS WITH?"], []]
+        self.interview(plan, personas=2, segments=("solo", "firm"))
+        self.launch("run")
+        self.assertEqual(self.reads(), {"P01-opus": "done", "P01-cx": "done", "P02-opus": "done", "P02-cx": "partial"})
+
+    SAID = {"P01-opus": ["The roster ate my week. I rang Sam on the Thursday and I was still waiting on the Monday.",
+                         "A notebook. It's fine, I never lose anything in it.", "Nothing else comes to mind."],
+            "P01-cx": ["Mostly the roster again. It usually sorts itself out.", "A notebook, and it does the job.",
+                       "No."],
+            "P02-opus": ["Stocktake. Last Tuesday it took me four hours and I paid a casual to cover the floor.",
+                         "A spreadsheet my accountant set up.", "No."]}
+
+    def analysis(self, name, text=None):
+        """Write a file of analysis/ by hand, as a job of the synthesis would, or with no text read the
+        rows of a CSV file a script wrote there."""
+        path = self.sd / "analysis" / name
+        if text is None:
+            with open(path, newline="") as f:
+                return list(csv.DictReader(f))
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(text)
+
+    @staticmethod
+    def coded(note, turns, signal, quote, raised="prompted", evidence="general", effort="none"):
+        """An evidence note in the form the analysts' brief gives."""
+        return (f"### Note {note}\n- Turns: {turns}\n- Signal: {signal}\n- Statement: What they said, in a line\n"
+                f"- Raised: {raised}\n- Evidence: {evidence}\n- Effort: {effort}\n- Quote: \"{quote}\"\n\n")
+
+    def test_notes_and_critique_become_rows_and_what_cannot_be_read_or_verified_is_listed_and_never_guessed(self):
+        self.study()  # a review study has no notes of this form: refused in a sentence, with nothing written
+        r = run("extract_notes.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stdout, "Traceback" in r.stderr, list(self.sd.glob("analysis/*.csv"))),
+                         (1, "", False, []), r.stderr)
+        self.talked()
+        r = run("extract_notes.py", self.sd, check=False)  # before the analysts and the critics: what to run
+        self.assertEqual((r.returncode, "run --role analyst" in r.stderr), (1, True), r.stderr)
+        self.analysis("critique-1.md", "# Critique\n\n## P01-opus\n\n**Final check.** Prose.\n\n" + "".join(
+            f"### {kind} {where}\n- {line}: {value}\n- {second}: One line of it\n\n"
+            for kind, where, line, value, second in (
+                ("Flag", "P01-opus/2", "Flag", "leading", "Better"),
+                ("Flag", "P01-opus/2", "Flag", "compound", "Better"),
+                ("Missed", "P01-cx/1", "Signal", "generality", "Note"),
+                ("Good", "P01-opus/1", "Move", "anchored", "Note"),
+                ("Flag", "P01-opus/3", "Flag", "rude", "Better"),    # no such flag
+                ("Good", "P01-opus/7", "Move", "anchored", "Note")))   # no such exchange
+            # A section with no mark in it, its run id in code marks and the persona's name after it: a critique
+            # all the same. And the section of another interview, whose id only begins with one of the study's.
+            + "## `P02-opus` (Person 2)\n\nNothing to mark.\n\n## P02-cx-r2\n\nProse.\n")
+        # The critics may write first. Their entries are read, and the analysts' job is named as still to run.
+        r = run("extract_notes.py", self.sd)
+        self.assertEqual((self.analysis("notes.csv"), len(self.analysis("critique.csv")),
+                          "Not written yet: analysis/qual-1.md (analyst-1)" in r.stdout,
+                          f"Next: launch.py {self.sd} run --role analyst" in r.stdout), ([], 6, True, True), r.stdout)
+        self.analysis("qual-1.md", "# P01\n\n## P01-opus\n\nWhat she said, in prose.\n\n" + "".join([
+            # In the answer named, with curly marks, another case and other spacing, and no closing full stop.
+            self.coded("P01-opus/1", 1, "PAIN", "i rang Sam on the  Thursday and I was still waiting on the Monday",
+                       "unprompted", "incident", "workaround").replace('"i rang', "\u201ci rang").replace(
+                           'Monday"', "Monday\u201d"),
+            self.coded("P01-opus/2", "1-2", "NON-PROBLEM", "I never lose anything in it."),  # in the second of two
+            self.coded("P01-opus/3", 3, "CONTEXT", "Nothing else comes to mind."),           # under a closing question
+            self.coded("P01-opus/4", 2, "PAIN", "I never lose a thing in it."),              # a word changed
+            self.coded("P01-opus/5", 2, "ANNOYED", "A notebook."),                           # no such signal
+            self.coded("P01-opus/6", 9, "PAIN", "A notebook."),                              # no such exchange
+            self.coded("P01-opus/8", "2-5000000", "PAIN", "A notebook."),                    # nor is its far end one
+            self.coded("P09-opus/1", 1, "PAIN", "A notebook."),                              # no such interview
+            self.coded("P01-opus/7", 2, "PAIN", "A notebook.").replace("- Effort: none\n", ""),  # a line short
+            # An id that is taken. The heading of the next section follows it at once, with its run id in bold,
+            # and is no line of the note.
+            self.coded("P01-opus/1", 2, "GOAL", "A notebook.").rstrip() + "\n",
+            "## **P01-cx**\n\n", self.coded("P01-cx/1", 2, "WORKAROUND", "A notebook, and it does the job.")]))
+        r = run("extract_notes.py", self.sd)
+        notes = self.analysis("notes.csv")
+        self.assertEqual([tuple(n[k] for k in ("note", "turn_from", "turn_to", "topic", "signal", "quote_verified",
+                                               "quote_turn")) for n in notes], [
+            ("P01-opus/1", "1", "1", "T1", "PAIN", "1", "1"),
+            ("P01-opus/2", "1", "2", "T1", "NON-PROBLEM", "1", "2"),  # the exchange its quote is in
+            ("P01-opus/3", "3", "3", "close", "CONTEXT", "1", "3"),
+            ("P01-opus/4", "2", "2", "T2", "PAIN", "0", ""),          # still a note, with a quote nobody may use
+            *((note, "", "", "", "unparsed", "", "") for note in ("P01-opus/5", "P01-opus/6", "P01-opus/8",
+                                                                   "P09-opus/1", "P01-opus/7", "P01-opus/1")),
+            # The topic is the one the turn log counts the question for, which its interviewer labelled T1.
+            ("P01-cx/1", "2", "2", "T2", "WORKAROUND", "1", "2")])
+        self.assertEqual(([self.turns("P01-cx", "question")[1].get(k) for k in ("topic", "labelled")],
+                          [notes[0][k] for k in ("run", "persona_id", "model", "replicate", "complete", "segment",
+                                                 "analyst")]),
+                         (["T2", "T1"], ["P01-opus", "P01", "opus", "1", "1", "solo", "1"]))
+        # Nothing of an unparsed note is filled in but what was written, whole.
+        unparsed = [n for n in notes if n["signal"] == "unparsed"]
+        filled = [[k for k in ("statement", "raised", "evidence", "effort", "quote") if n[k]] for n in unparsed]
+        self.assertEqual((filled, "- Signal: ANNOYED" in unparsed[0]["raw"], unparsed[3]["run"]), ([[]] * 6, True, ""))
+        self.assertEqual([(m["run"], m["turn"], m["kind"], m["value"]) for m in self.analysis("critique.csv")], [
+            ("P01-opus", "2", "flag", "leading"), ("P01-opus", "2", "flag", "compound"),  # two flags, one exchange
+            ("P01-cx", "1", "missed", "generality"), ("P01-opus", "1", "good", "anchored"),
+            ("P01-opus", "3", "unparsed", ""), ("P01-opus", "7", "unparsed", "")])
+        # Each is listed with what is wrong with it, and the quote that is not in the answer with them.
+        said = r.stdout.splitlines()
+        # A range is named by the end the log does not have, and never walked to find it.
+        for what, why in (("Note P01-opus/5", 'Signal is "ANNOYED"'), ("Note P01-opus/6", "exchange 9"),
+                          ("Note P01-opus/8", "exchange 5000000"),
+                          ("Note P09-opus/1", "no interview of this study"), ("Note P01-opus/7", '"- Effort: ..."'),
+                          ("Note P01-opus/1", "taken by an earlier note"), ("Flag P01-opus/3", 'Flag is "rude"'),
+                          ("Good P01-opus/7", "exchange 7"), ("Note P01-opus/4", '"I never lose a thing in it."')):
+            self.assertEqual(len([line for line in said if f"{what}: " in line and why in line]), 1, (what, r.stdout))
+        self.assertIn("5 read (P01-opus 4, P01-cx 1), 6 unparsed. 1 quote of the 5 could not be verified.", said[0])
+        # A file with no section for an interview its job was given is named, with what writes it again: the
+        # one analyst and the one critic have P02 too. The analyst's file says nothing of its interviews, and
+        # the critic's has a section for P02-opus, whatever marks its heading holds the run id in.
+        for name, role, left in (("qual-1.md", "analyst", "P02-opus and P02-cx"),
+                                 ("critique-1.md", "critic", "P02-cx")):
+            end = f"delete the file and run launch.py {self.sd} run --role {role}."
+            self.assertEqual(len([line for line in said
+                                  if line.startswith(f"{name} says nothing of {left}: ") and line.endswith(end)]),
+                             1, r.stdout)
+
+    def test_tallies_count_participants_who_raised_a_theme_apart_from_those_it_is_no_problem_for(self):
+        self.talked()
+        self.analysis("qual-1.md", "# P01\n\n## P01-opus\n\nProse.\n\n" + "".join([
+            self.coded("P01-opus/1", 1, "PAIN", "I rang Sam on the Thursday", "unprompted", "incident", "workaround"),
+            self.coded("P01-opus/2", 2, "NON-PROBLEM", "I never lose anything in it."),
+            self.coded("P01-opus/3", 3, "CONTEXT", "Nothing else comes to mind."),
+            self.coded("P01-opus/4", 2, "WORKAROUND", "A notebook.", effort="workaround"),  # and told of it too
+            self.coded("P01-cx/1", 1, "PAIN", "Mostly the roster again."),
+            self.coded("P01-cx/2", 2, "NON-PROBLEM", "A notebook, and it does the job.")]))
+        self.analysis("qual-2.md", "# P02\n\n" + "".join([
+            self.coded("P02-opus/1", 1, "PAIN", "I paid a casual to cover the floor", "unprompted", "incident", "paid"),
+            self.coded("P02-opus/2", 2, "MONEY", "A spreadsheet my accountant set up.", effort="paid"),
+            self.coded("P02-cx/1", 1, "PAIN", "Stocktake, mostly.", "unprompted")]))  # of the interview that stopped
+        # Two critics. The first marked no flag in P01-opus and says nothing of P01-cx, which has no critique.
+        self.analysis("critique-1.md", "## P01-opus\n\nProse.\n\n"
+                                       "### Good P01-opus/1\n- Move: anchored\n- Note: Asked for the last time\n")
+        self.analysis("critique-2.md", "## P02-opus\n\nProse.\n\n### Flag P02-opus/2\n- Flag: leading\n"
+                                       "- Better: What do you use?\n\n## P02-cx\n\nProse.\n")
+        r = run("analyze.py", self.sd, check=False)  # before the notes are extracted and grouped: what to run
+        self.assertEqual((r.returncode, "extract_notes.py" in r.stderr), (1, True), r.stderr)
+        run("extract_notes.py", self.sd)
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, "run --role themes" in r.stderr), (1, True), r.stderr)
+        self.analysis("themes.md", "# Themes\n\n" + "".join(
+            f"### Theme {theme}\n- Definition: What is in it\n- Notes: {notes}\n\n" for theme, notes in (
+                ("TH1: The roster", "P01-opus/1, P01-cx/1"),
+                ("TH2: Keeping track", "P01-opus/2, P01-opus/4, P01-cx/2, P02-opus/2"),
+                ("TH3: Stocktake", "P02-opus/1, P02-cx/1, P01-opus/1"),  # the last is TH1's already
+                ("TH4: Parking", "P01-opus/9"))))  # a note notes.csv does not have: the theme is in no table
+        run("analyze.py", self.sd)
+        quant = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+
+        def counts(tally):  # each count with the run ids it counted, so that a hand count can be set against it
+            return {k: (tally[k]["n"], tally[k]["runs"])
+                    for k in ("raised", "not_a_problem", "both", "unprompted", "incident")}
+
+        roster, track, stock = quant["themes"]
+        self.assertEqual((quant["runs"]["complete"], quant["runs"]["expected"], quant["runs"]["interviewed"],
+                          quant["runs"]["not_started"]),
+                         (3, 4, ["P01-opus", "P01-cx", "P02-opus"], {"n": 0, "runs": []}))
+        # Raised by two, one of them unprompted and with an incident, each with the furthest it had gone.
+        self.assertEqual((counts(roster), {e: c["runs"] for e, c in roster["effort"].items()}),
+                         ({"raised": (2, ["P01-opus", "P01-cx"]), "not_a_problem": (0, []), "both": (0, []),
+                           "unprompted": (1, ["P01-opus"]), "incident": (1, ["P01-opus"])},
+                          {"none": ["P01-cx"], "workaround": ["P01-opus"]}))
+        # Three groups that never overlap: who raised it, who said it is no problem and told of nothing under
+        # it, and who did both. Effort is counted over the first and the third, from the notes that tell of it.
+        self.assertEqual((counts(track), {e: c["runs"] for e, c in track["effort"].items()}),
+                         ({"raised": (1, ["P02-opus"]), "not_a_problem": (1, ["P01-cx"]), "both": (1, ["P01-opus"]),
+                           "unprompted": (0, []), "incident": (0, [])},
+                          {"workaround": ["P01-opus"], "paid": ["P02-opus"]}))
+        # One of its two notes that tell of it rests on a flagged question. A note of an interview with no
+        # critique is counted apart, never as one that rests on none.
+        self.assertEqual((track["flagged"], roster["flagged"]),
+                         ({"n": 1, "of": 2, "notes": ["P02-opus/2"], "not_critiqued": []},
+                          {"n": 0, "of": 1, "notes": [], "not_critiqued": ["P01-cx/1"]}))
+        # The interview that stopped is in no count, and a note two themes list is counted under the first.
+        # What is wrong with themes.md is kept as data: which theme, what kind of problem and which notes.
+        self.assertEqual((counts(stock)["raised"], quant["themes_problems"], quant["no_theme"]),
+                         ((1, ["P02-opus"]),
+                          [{"theme": "TH3", "name": "Stocktake", "kind": "listed_twice", "notes": ["P01-opus/1"],
+                            "counted_under": "TH1"},
+                           {"theme": "TH4", "name": "Parking", "kind": "unknown_notes", "notes": ["P01-opus/9"]}],
+                          ["P01-opus/3"]))
+        self.assertEqual(({k: (v["raised"]["n"], v["interviewed"]["n"]) for k, v in stock["by_segment"].items()},
+                          {k: (v["raised"]["n"], v["interviewed"]["n"]) for k, v in roster["by_model"].items()}),
+                         ({"solo": (0, 2), "firm": (1, 1)}, {"opus": (1, 2), "cx": (1, 1)}))
+        # Coverage: who opened each topic, by the turn logs, the notes under it by their ids, and the same
+        # three groups: a NON-PROBLEM note under a topic puts nobody who told of something there among those
+        # who only said it is no problem.
+        self.assertEqual([(c["topic"], c["opened"]["n"], c["interviews"]["n"], c["notes"], c["raised"]["runs"],
+                           c["not_a_problem"]["runs"], c["both"]["runs"]) for c in quant["coverage"]["topics"]], [
+            ("T1", 3, 3, {"n": 3, "notes": ["P01-opus/1", "P01-cx/1", "P02-opus/1"]},
+             ["P01-opus", "P01-cx", "P02-opus"], [], []),
+            ("T2", 3, 3, {"n": 4, "notes": ["P01-opus/2", "P01-opus/4", "P01-cx/2", "P02-opus/2"]},
+             ["P02-opus"], ["P01-cx"], ["P01-opus"])])
+        # A theme a persona told of on one model and not on the other is said, with the interviews compared.
+        self.assertEqual([(d["persona"], d["theme"], d["agree"], d["models"]["cx"]["runs"], d["interviews"]["cx"])
+                          for d in quant["model_agreement"]],
+                         [("P01", "TH1", True, ["P01-cx"], {"n": 1, "runs": ["P01-cx"]}),
+                          ("P01", "TH2", False, [], {"n": 1, "runs": ["P01-cx"]})])
+        self.assertEqual([(d["run"], d["state"], d["exchanges"], d["notes"]) for d in quant["runs"]["incomplete"]],
+                         [("P02-cx", "partial", 1, ["P02-cx/1"])])
+        # The critique: an interview no critic's file has a section for has no critique, which is counted
+        # and is not the same as one its critic marked no flag in. Each interview has its critic beside it.
+        self.assertEqual((quant["runs"]["no_critique"], quant["runs"]["no_notes"], quant["critique"]["by_interview"]),
+                         ({"n": 1, "runs": ["P01-cx"]}, {"n": 0, "runs": []},
+                          {"P01-opus": {"critic": "critic-1", "flag": 0, "missed": 0, "good": 1},
+                           "P01-cx": {"critic": None, "flag": 0, "missed": 0, "good": 0},
+                           "P02-opus": {"critic": "critic-2", "flag": 1, "missed": 0, "good": 0}}))
+        # The report: every table is under a heading that says what its counts are of, the unfinished
+        # interview is in none but its own, and each verified quote stands ready with its one exchange.
+        report = self.sd.joinpath("analysis/quant.md").read_text()
+        sections = {part.split("\n", 1)[0]: part for part in report.split("\n## ")[1:]}
+        tables = [name for name, part in sections.items() if "\n|---" in part]
+        self.assertEqual(([name for name in tables if "simulated" not in name and name != "Incomplete interviews"],
+                          [name for name, part in sections.items() if "P02-cx" in part],
+                          "Themes (simulated participants)" in tables,
+                          [word for word in ("frequency", "prevalence") if word in report.lower()]),
+                         ([], ["Incomplete interviews"], True, []), report)
+        self.assertIn('- "I paid a casual to cover the floor" (P02-opus, 1). PAIN, note P02-opus/1.',
+                      sections["Verified quotes"])
+        # It is titled with the study's name, which the folder's is not, and carries the notice under it.
+        from panel_lib import NOTICE
+        self.assertEqual((report.split("\n## ")[0], self.sd.name),
+                         (f"# Quantitative analysis: i\n\n{NOTICE}\n", "interview"))
+        self.assertIn("- 1 of the 4 interviews with a turn on record has no critique (P01-cx): ",
+                      sections["Key numbers"])
+        # The critics' marks stand by critic, the interview with no critique last and with no count, under a
+        # sentence that says marks by different critics are not comparable.
+        critique = next(part for name, part in sections.items() if name.startswith("Critique "))
+        self.assertEqual(([line for line in critique.splitlines() if line.startswith("| P")],
+                          "Marks by different critics are not comparable" in critique),
+                         (["| P01-opus | critic-1 | 0 | 0 | 1 |", "| P02-opus | critic-2 | 1 | 0 | 0 |",
+                           "| P01-cx | no critique | - | - | - |"], True))
+        # The tallies stand for the files they were made from. Once a critic's file says something else,
+        # critique.csv is not what it gives, and nothing is written until the marks are extracted again.
+        written = [self.sd.joinpath("analysis", name).read_bytes() for name in ("quant.md", "quant.json")]
+        self.analysis("critique-2.md", "## P02-opus\n\nProse.\n\n## P02-cx\n\nProse.\n")
+        r = run("analyze.py", self.sd, check=False)
+        self.assertEqual((r.returncode, r.stdout, r.stderr, written),
+                         (1, "", "analysis/critique.csv is not what analysis/critique-1.md and analysis/critique-2.md "
+                                 f"now give: run extract_notes.py {self.sd} again.\n",
+                          [self.sd.joinpath("analysis", name).read_bytes() for name in ("quant.md", "quant.json")]))
+        run("extract_notes.py", self.sd)
+        run("analyze.py", self.sd)
+        again = json.loads(self.sd.joinpath("analysis/quant.json").read_text())
+        self.assertEqual(again["themes"][1]["flagged"]["n"], 0)  # the flag that is gone is counted no longer
+        # quant.json says what is wrong with themes.md and never where, so it is the same file from any folder
+        # and inside an archive. Two lines put at the top of themes.md, as an archive puts the notice into one
+        # that lacks it, move the line the report gives the lead and leave quant.json byte for byte as it was.
+        figures, grouped = (self.sd.joinpath("analysis", name) for name in ("quant.json", "themes.md"))
+        as_it_was = figures.read_bytes()
+        grouped.write_text(f"{NOTICE}\n\n{grouped.read_text()}")
+        run("analyze.py", self.sd)
+        fault = "Theme TH4: Parking: it names P01-opus/9, which notes.csv does not have as a note. It is in no table."
+        self.assertEqual((f"- Line 15, {fault}" in report,
+                          f"- Line 17, {fault}" in self.sd.joinpath("analysis/quant.md").read_text(),
+                          figures.read_bytes() == as_it_was), (True, True, True))
+
+    def test_archive_of_an_interview_study_keeps_the_turn_logs_and_both_transcripts(self):
+        from panel_lib import NOTICE
+        self.talked()
+        run("check_runs.py", self.sd, check=False)  # a report of the study, to archive with it
+        checks = self.sd.joinpath("analysis/checks.md").read_text()
+        as_left = self.entries()  # a launcher that was killed leaves its interviews marked as carried
+        for entry in (as_left["P02-cx"], as_left["interviewer-P02-cx"]):
+            entry["carried"] = True
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        themes = "### Theme TH1: The roster\n- Definition: What is in it\n- Notes: P01-opus/1\n"
+        self.analysis("themes.md", themes)  # as a themes job that left out the title and the notice writes it
+        dest = self.tmp / "archive/panel/round-1"
+        r = run("archive.py", self.sd, "--dest", dest, check=False)
+        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
+        logs = {f.name: f.read_bytes() for f in self.sd.glob("interviews/*.jsonl")}
+        self.assertEqual((sorted(logs), {f.name: f.read_bytes() for f in dest.glob("interviews/*.jsonl")}),
+                         (["P01-cx.jsonl", "P01-opus.jsonl", "P02-cx.jsonl", "P02-opus.jsonl"], logs))
+        both = [dest.joinpath(folder, "P01-opus.md").read_text() for folder in ("interviews", "analysis/transcripts")]
+        self.assertEqual((["On my mind" in text for text in both],  # the card, which the analysts' copy leaves out
+                          ["**A:** Nothing else comes to mind." in text for text in both]),
+                         ([True, False], [True, True]))
+        # Nothing of a room, an interviewer's folder or the logs travels.
+        self.assertEqual(sorted(p.name for p in dest.iterdir()), ["analysis", "interviews", "prompts", "runs.json",
+                                                                  "study.json"])
+        # An interview with no end record is archived as it stands, and said plainly.
+        self.assertIn("1 of the 4 interviews has no end record and is archived as it stands: P02-cx (partial, 1 of 6 "
+                      "exchanges).", r.stdout)
+        # A report carries the notice from the script that writes it, so it is one file in the study and in the
+        # round, and the line is still there once the script has run again inside the round.
+        archived = dest.joinpath("analysis/checks.md").read_text()
+        run("check_runs.py", dest, check=False)
+        self.assertEqual((checks.startswith(f"# Run checks\n\n{NOTICE}\n"), archived == checks,
+                          NOTICE in dest.joinpath("analysis/checks.md").read_text()), (True, True, True))
+        # A file that opens with the heading of a form and no title gets the notice above that heading: a line
+        # between a theme's heading and its fields would leave the theme unread, and out of every tally.
+        self.assertEqual(dest.joinpath("analysis/themes.md").read_text(), f"{NOTICE}\n\n{themes}")
+        # A turn in flight is refused, with nothing archived: its answer is not on the turn log yet.
+        as_left["P02-cx"]["attempts"][-1]["ended"] = None
+        self.sd.joinpath("runs.json").write_text(json.dumps(list(as_left.values())))
+        other = self.tmp / "archive/panel/round-2"
+        r = run("archive.py", self.sd, "--dest", other, check=False)
+        self.assertEqual((r.returncode, "P02-cx, the participant's turn" in r.stderr,
+                          "Nothing was archived" in r.stderr, other.exists()), (1, True, True, False), r.stderr)
+
+    def test_quotations_of_the_synthesis_are_checked_against_the_exchange_each_names(self):
+        self.talked()
+        r = run("interview.py", self.sd, "quotes", check=False)  # no synthesis yet: it says who writes it
+        self.assertEqual((r.returncode, "run --role writer" in r.stderr), (1, True), r.stderr)
+        found = ['An answer: "I rang Sam on the Thursday and I was still waiting on the Monday." (P01-opus, 1)',
+                 "Curly marks, another case and other spacing: \u201ci rang Sam on  the Thursday\u201d (P01-opus, 1)",
+                 'A question: "Question 2?" (P01-opus, 2).',
+                 # A quotation may wrap, with its attribution on the next line, and so may the attribution.
+                 'One that wraps: "I rang Sam on the Thursday and I was\nstill waiting on the Monday."\n(P01-opus, 1)',
+                 'An attribution that wraps: "A notebook." (P01-opus,\n2) is all she said of it.',
+                 'A term, in a code span: `"keeping track"` is a theme.',
+                 "An apostrophe and a possessive: it's the brokers' files, and Sam's 'big week' is a term.",
+                 '```text\n"Inside a fence."\n```',
+                 # A block of four backticks holds a line of three, and ends where its own fence does.
+                 '````text\n```\n"Inside the block still."\n````']
+        wrong = ['Not what was said: "I rang Sam on the Friday" (P01-opus, 1)',
+                 'An exchange the log does not have: "Stocktake, mostly." (P02-cx, 4)',
+                 'Two words and no attribution: "fair enough"',
+                 'A sentence and no attribution: "Nobody here has the time to count stock every single week."',
+                 # No other marks, and no place, take a quotation past the check: its attribution brings it here.
+                 "In single marks: 'I rang Sam on the Thursday and I was still waiting on the Monday.' (P01-opus, 1)",
+                 "In curly single marks, with no attribution: ‘Nobody here has the time to count stock.’",
+                 "In guillemets: «I rang Sam on the Thursday» (P01-opus, 1)",
+                 "In no marks at all: she rang Sam on the Thursday (P01-opus, 1).",
+                 "In no marks, with the bracket over a line break: nobody ever said this of it (P01-opus,\n1).",
+                 'In a code span: `"I rang Sam on the Friday" (P01-opus, 1)`',
+                 'With an ellipsis that nobody said: "I rang Sam..." (P01-opus, 1)',
+                 'A mark that is never closed: "A notebook.']
+        lines = ["# Synthesis", *found[:5], *wrong[:2], *found[5:], *wrong[2:]]
+        self.analysis("SYNTHESIS.md", "\n\n".join(lines) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        listed = [int(line.split()[2].rstrip(":")) for line in r.stdout.splitlines() if line.startswith("- Line ")]
+        # Each is listed by the line it opens on, which for a bracket over a line break is where the bracket opens.
+        opens = {"\n\n".join(lines[:i]).count("\n") + (2 if i else 0) + item.count("\n", 0, item.find("(P01-opus,\n"))
+                 + 1: item for i, item in enumerate(lines)}
+        self.assertEqual((r.returncode, [opens.get(n) for n in listed]), (1, wrong), r.stdout + r.stderr)
+        from panel_lib import NOTICE
+        self.assertEqual((self.sd.joinpath("analysis/quote-check.md").read_text(),
+                          r.stdout.startswith(f"# Quote check\n\n{NOTICE}\n")), (r.stdout, True))
+        # With each of those taken out, the synthesis passes.
+        self.analysis("SYNTHESIS.md", "\n\n".join(["# Synthesis", *found]) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        self.assertEqual((r.returncode, "- Line" in r.stdout), (0, False), r.stdout + r.stderr)
+        # One that quotes nobody in the form has not passed: nothing in it was checked, and it says so.
+        self.analysis("SYNTHESIS.md", "\n\n".join(["# Synthesis", "She keeps a notebook.", *found[5:]]) + "\n")
+        r = run("interview.py", self.sd, "quotes", check=False)
+        self.assertEqual((r.returncode, "- Line" in r.stdout, "No quotation of analysis/SYNTHESIS.md was verified"
+                          in r.stdout), (1, False, True), r.stdout + r.stderr)
+
+    def test_debrief_is_held_in_the_finished_runs_session_and_leaves_the_run_and_its_persona_file_as_they_were(self):
+        # P01-opus was cut off one step into its second task and finished when resumed, so its step log has more
+        # steps of that task than the task's limit. In its debrief it answers the first question. Before it
+        # answers the second it changes a score in its persona file and empties its step log, and then waits.
+        # P01-cx waits before its first answer, and its process for the second reaches its budget.
+        self.usability({"P01-opus": [["write:1", "act:1"], ["write:all"], ["say:ZQONE I stopped at the rate table."],
+                                     ["rescore", "empty", "wait:second", "say:ZQTWO"],
+                                     ["say:ZQTHREE It was the form."]],
+                        "P01-cx": [["write:all"], ["wait:first", "say:Fine."], ["end:budget"]]},
+                       tasks=self.tasks(steps=2), debrief=self.DEBRIEF,
+                       limits={"debrief": {"minutes": 4, "budget_usd": 0.75}})
+        self.assertEqual((self.launch("run").returncode, self.launch("resume").returncode), (1, 0))
+        before, file = self.entries()["P01-opus"], self.sd / self.entries()["P01-opus"]["file"]
+        written, panel = file.read_bytes(), {k: v for k, v in self.tree().items() if "/panel/" in k}
+        kept = ("state", "reason", "seconds_used", "session")
+
+        def run_and_debrief():
+            """What runs.json has of the run and status reads as its own usage, which entries are marked as
+            carried, and the states and counts status gives the run and its debrief."""
+            entries, row = self.entries(), next(r for r in self.status()["runs"] if r["run"] == "P01-opus")
+            return ({**{k: entries["P01-opus"].get(k) for k in kept}, "usage": row["usage"]},
+                    sorted(run_id for run_id, e in entries.items() if e.get("carried")),
+                    (row["state"], row["attempts"], row["debrief"]["state"], row["debrief"]["exchanges"]))
+
+        unmoved = {**{k: before.get(k) for k in kept},
+                   "usage": next(r for r in self.status()["runs"] if r["run"] == "P01-opus")["usage"]}
+        # A dry run says which runs it would debrief and the most they can use, and leaves the study as it is.
+        study, processes = self.tree(), len(self.starts())
+        dry = self.debrief("--runs", "all", "--dry-run")
+        self.assertEqual((dry.returncode, self.tree(), len(self.starts())), (0, study, processes), dry.stderr)
+        self.assertIn("Debrief: would begin 2 debriefs (P01-opus, P01-cx).", dry.stdout)
+        self.assertIn("Each side of each has up to 4 min and $0.75 over the whole debrief (limits.debrief)", dry.stdout)
+        held = self.debrief("--runs", "P01-opus", wait=False)
+        self.wait_for(lambda: "P01-opus" in self.waiting(), "the second answer to wait")
+        # While the debrief is carried, its interviewer's entry alone says so: the run is done, as it was. Its
+        # file holds the changed score now, and whatever reads it reads the copy made before the turn.
+        self.assertEqual(run_and_debrief(), (unmoved, ["interviewer-P01-opus"], ("done", 2, "running", 1)))
+        self.assertNotEqual(file.read_bytes(), written)
+        self.assertIn("P01-opus: a turn of its debrief is not settled", run("extract_scores.py", self.sd).stdout)
+        # Stopped in the middle of that turn: the file and the step log are put back, what the turn left of
+        # each is kept, and the debrief is partial. The run is still done.
+        self.assertEqual(self.launch("stop").returncode, 0)
+        held.wait(timeout=30)
+        self.assertEqual(run_and_debrief(), (unmoved, [], ("done", 2, "partial", 1)))
+        self.assertEqual(file.read_bytes(), written)
+        self.assertIn("| 8 |", self.sd.joinpath("logs/P01-opus.4.rejected.md").read_text())
+        self.assertEqual({k: v for k, v in self.tree().items() if "/panel/" in k}, panel)
+        self.assertEqual(self.sd.joinpath("logs/P01-opus.4.rejected.evidence/steps.jsonl").read_bytes(), b"")
+        # The same command goes on with it, and puts the question that was lost again.
+        r = self.debrief("--runs", "P01-opus")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([(x["t"], x.get("n")) for x in self.whole("P01-opus")
+                          if x["t"] in ("answer", "lost", "resume", "end")],
+                         [("answer", 1), ("lost", None), ("resume", None), ("answer", 2), ("end", None)])
+        self.assertEqual(run_and_debrief(), (unmoved, [], ("done", 2, "done", 2)))
+        # Every turn reached the session the run worked in, in the run's folder, with no browser session,
+        # and was sent the question inside words that say it is spoken. Nothing of the guide went with it.
+        launched, _, *spoken = [e for e in self.starts() if e["run"] == "P01-opus"]
+        self.assertTrue(launched["browser"]["env"])
+        self.assertEqual([(e["resumed"], e["session"], e["cwd"], e["browser"]["env"]) for e in spoken],
+                         [(True, before["session"], launched["cwd"], {})] * 3)
+        first, second, again = (e["stdin"] for e in spoken)
+        self.assertIn("An interviewer would now like to talk with you", first)
+        self.assertTrue(first.endswith("Question 1?") and second.endswith("Question 2?"), (first, second))
+        self.assertIn("Write nothing, open nothing and use no tool", second)
+        self.assertTrue(again.endswith("Here is the question again.\n\nQuestion 2?"), again)
+        self.assertNotIn("ZQGOAL", first + second + again)
+        # The interviewer was told the tasks by their labels, and nothing of what the run made of them.
+        brief = self.sent("interviewer-P01-opus")[0]
+        self.assertIn("- Task T1: Find out what you could borrow.", brief)
+        self.assertNotIn("as it went", brief)
+        # All the debrief left on the run is its attempts, what its session reported and what the turns used.
+        # Nothing under panel/ moved: the persona file, the step log and the screenshots are as the run left them.
+        after = self.entries()["P01-opus"]
+        self.assertEqual({k for k in {*before, *after} if before.get(k) != after.get(k)} - {"sessions"},
+                         {"attempts", "debrief"})
+        self.assertEqual(([a["kind"] for a in after["attempts"]], after["debrief"]["turns"]),
+                         (["launch", "resume", "debrief", "debrief", "debrief"], 3))
+        self.assertEqual({k: v for k, v in self.tree().items() if "/panel/" in k}, panel)
+        transcript = self.sd.joinpath("interviews/P01-opus.md").read_text()
+        self.assertTrue(transcript.startswith("# Debrief P01-opus: Person 1\n"), transcript)
+        self.assertIn("ZQONE I stopped at the rate table.",
+                      self.sd.joinpath("analysis/transcripts/P01-opus.md").read_text())
+        # Its turns are in the usage record under a role of their own, and in no row of the run.
+        usage = json.loads(self.launch("usage", "--json").stdout)
+        self.assertEqual(({r["run"]: r["attempts"] for r in usage["runs"]},
+                          [(r["run"], r["side"], r["attempts"]) for r in usage["debriefs"]]),
+                         ({"P01-opus": 2, "P01-cx": 1},
+                          [("P01-opus", "participant", 3), ("P01-opus", "interviewer", 3)]))
+        # The analyst and the writer are given the transcript as what it is.
+        self.settings({"synthesis": {"analyst": {"runner": "claude"}, "writer": {"runner": "claude"}}})
+        jobs = len(self.starts())
+        self.assertEqual((self.launch("run", "--role", "analyst").returncode,
+                          self.launch("run", "--role", "writer").returncode), (0, 0))
+        for told in (e["stdin"] for e in self.starts(since=jobs)):
+            self.assertIn("analysis/transcripts/P01-opus.md` (P01-opus): 2 exchanges\n", told)
+            self.assertIn("say that it was given in a debrief", told)
+        # A run is debriefed once.
+        processes = len(self.starts())
+        again = self.debrief("--runs", "P01-opus")
+        self.assertEqual((again.returncode, len(self.starts())), (1, processes), again.stdout)
+        self.assertIn("P01-opus: cannot be debriefed: it has been debriefed", again.stdout)
+        # A launcher killed in the middle of a turn leaves the turn in flight. A dry run says what the command
+        # would do, which is go on with that debrief, and the command does: it has the answer, and asks again.
+        held = self.debrief("--runs", "all", wait=False)
+        self.wait_for(lambda: "P01-cx" in self.waiting(), "P01-cx's first answer to wait")
+        held.kill()
+        held.wait()
+        dry = self.debrief("--runs", "all", "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stdout)
+        self.assertIn("Debrief: would go on with 1 debrief (P01-cx).", dry.stdout)
+        self.release("first")
+        # Once that turn has ended with no launcher alive, the command records it before it chooses, and what
+        # it came to may leave the debrief at its end. A dry run records nothing, so it says that it cannot say,
+        # and judges nothing that the turn could put aside: the interviewer's CLI, signed out for this dry run, is
+        # the command's to find, and only if that debrief goes on.
+        turn = self.entries()["P01-cx"]["attempts"][-1]["n"]
+        self.wait_for(lambda: self.sd.joinpath(f"logs/P01-cx.{turn}.end").exists(), "that turn to end")
+        study = self.tree()
+        self.env["FAKE_CLAUDE"] = "signed_out"
+        dry = self.debrief("--runs", "all", "--dry-run")
+        del self.env["FAKE_CLAUDE"]
+        self.assertEqual((dry.returncode, self.tree()), (1, study), dry.stdout)
+        self.assertIn("Debrief: not known for 1 debrief (P01-cx).", dry.stdout)
+        self.assertNotIn("would go on", dry.stdout)
+        self.assertEqual(self.debrief("--runs", "all").returncode, 1)
+        states = {r["run"]: (r["debrief"]["state"], r["debrief"]["exchanges"]) for r in self.status()["runs"]}
+        self.assertEqual(states, {"P01-opus": ("done", 2), "P01-cx": ("limited", 1)})
+        # "all" is every run that can still be debriefed: with each debrief at its end it holds none, and
+        # that is no failure. A run named whose debrief is at its end is refused, as above.
+        processes = len(self.starts())
+        none = self.debrief("--runs", "all")
+        self.assertEqual((none.returncode, len(self.starts())), (0, processes), none.stdout)
+
+        # A finished run on a runner that is not verified for interviews is refused, and the refusal records nothing.
+        self.study({"P01-opus": [["write:all"], ["say:Fine."]]}, personas=1, models=[self.CLAUDE, self.PI],
+                   materials="text", debrief=self.DEBRIEF)
+        self.assertEqual(self.launch("run").returncode, 0)
+        recorded, processes = self.sd.joinpath("runs.json").read_text(), len(self.starts())
+        refused = self.debrief("--runs", "all")
+        self.assertEqual((refused.returncode, self.sd.joinpath("runs.json").read_text(), len(self.starts())),
+                         (1, recorded, processes), refused.stdout + refused.stderr)
+        self.assertIn("P01-local: cannot be debriefed: pi is not verified for interviews", refused.stdout)
+        self.assertEqual(self.sd.joinpath("interviews").exists(), False)
 
 
 class LauncherWithoutWaitidTest(LauncherTest):

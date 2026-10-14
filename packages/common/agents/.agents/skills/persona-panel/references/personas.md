@@ -37,6 +37,18 @@ For a follow-up, keep only the personas closest to the target audience plus the 
 
 Write bios in second person ("You are ...") in the persona file header, as `init_study.py` does. Use they/them unless the persona's pronouns are part of the design.
 
+## Personas for an interview study
+
+A participant of an interview study (`references/interviews.md`) is shown nothing, so its bio is all it has to build a working life on: its situation card is written from it.
+
+- **Give it the work:** the tools they use and pay for, who decides on them, how the work reaches them, who they hand off to, and a habit or two of their own.
+- **Leave out how they read a page** and what would make them say yes. Nothing is reviewed.
+- **Do not plant the problem the team hopes to find.** A bio that says they hate chasing documents makes every interview find it. Describe the work, and let the card settle what bothers them and what does not.
+- **Never name the user's product** or its idea in a bio.
+- **`segment` decides which topics a persona gets** (`topics[].segments`), so that a buyer is asked about buying and a user is not.
+- **The interviewer knows the name, the role line and the segment,** as a recruiter would. The personality and the bio reach the participant, the analysts and the critics alone.
+- **The id `interviewer` is taken:** the launcher names each interviewer's entry `interviewer-<run id>`.
+
 ## Roster grid
 
 `roster.py <study> grid` writes skeleton personas into `study.json` from its `roster` block, so the grid is covered before any bio is written.

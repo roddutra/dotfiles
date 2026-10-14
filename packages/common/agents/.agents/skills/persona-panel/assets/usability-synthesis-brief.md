@@ -10,6 +10,7 @@ You are writing the final synthesis of a simulated usability study for <DECISION
 <EXTRA_CONTEXT_FILES>
 - You may spot-check a persona file in `panel/personas/`, and a step log (`steps.jsonl`) or a screenshot in `panel/evidence/<run id>/`, to confirm a finding.
 <FOLLOWUPS>
+<DEBRIEFS>
 
 ## Output: `<STUDY_DIR>/analysis/SYNTHESIS.md`
 Open the file with a `#` title and, directly under it, this line on its own, word for word:

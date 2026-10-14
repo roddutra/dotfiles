@@ -11,13 +11,17 @@ The text is `NOTICE` in `scripts/panel_lib.py`. Copy it, never paraphrase it: `a
 | Where | Who puts it there |
 |---|---|
 | Each persona file, under its title | `init_study.py` |
-| `analysis/qual-*.md` and `analysis/SYNTHESIS.md` | The analysts and the writer, whose briefs ask for it. The launcher adds it to a saved output that lacks it |
+| `analysis/qual-*.md` and `analysis/SYNTHESIS.md` | The analysts and the writer, whose briefs ask for it. The launcher adds it to a saved output that lacks it. The same for an interview study's `critique-*.md` and `themes.md` |
+| An interview's or a debrief's transcripts, `interviews/<run id>.md` and `analysis/transcripts/<run id>.md` | The launcher, and `interview.py <study> render` |
+| An interview study's `analysis/quant.md`, `analysis/checks.md` and `analysis/quote-check.md` | `analyze.py`, `check_runs.py` and `interview.py <study> quotes`, each under the report's title. A review or a usability study's `quant.md` and `checks.md` get it from `archive.py` alone |
 | Every markdown file of an archived round | `archive.py`, where the line is missing |
 | The end-of-study message to the user | The lead |
-| The visual summary page, under its title | The lead |
+| The visual summary page, under its title | The lead. `report_kit.py <study> init` writes it into the starting page, and `bundle` refuses a page without it |
 | The study card README, each file in `findings/` and the product repo's findings README | The lead (`references/archive.md`) |
 
 The line is there so that nothing read on its own is taken for research with real people.
+
+Where the launcher, `extract_agent_reply.py` or `archive.py` adds the line to a file that lacks it, it goes under the `# ` title the file opens with, or at the very top when the file opens with anything else, a `##` or deeper heading included.
 
 ## To the user during runs
 
@@ -53,24 +57,59 @@ Rules for the report:
 - **A test account's name is the test's.** Where a screen greets a name that is not the persona's, the name came from the provision script: never report it as a finding about the product.
 - **Never quote a secret.** Identifiers of test accounts may appear. Show no screenshot from a run whose panellist was given a secret to type.
 
-On a visual summary page, replace the leaderboard, matrix and answer sections below with: completion by task as paired bars (claimed, checked), the stuck points with their screenshots, where runs stopped, and a persona x model grid of each task's outcome. `analysis/quant.json` has `completion`, `steps`, `stopped` and `stuck_points`.
+## Reporting debrief findings
+
+A debrief is an interview held with a finished review or usability run about the session it had (`references/debriefs.md`). Its answers go in the report of that study, as feedback on the product beside the stuck points or the scores, never as a result of their own.
+
+- **Say it was asked.** Every answer follows an interviewer's question: "asked in a debrief what she expected at the error, P03-a said ...". Never report one as something the panellist raised, and say when the interviewer named the moment first.
+- **Cite the run and the exchange number,** and quote the transcript exactly.
+- **No count and no score.** No script tallies a debrief, each run was asked different questions, and only the runs you chose were asked. "3 of the 4 runs debriefed" is as far as a count goes, with who they were.
+- **It explains a finding and never makes one.** Tie each answer to the step, the screenshot or the score it explains. An answer with nothing in the run behind it is a model's account of its own session.
+- **Never as real customers, and never as discovery.** The participant is a simulated one that has seen the product: what it says is a hypothesis about the product, and nothing about a problem people have without it.
+- **Say what was used:** the role `debrief` in `analysis/usage.md`, which is outside the plan's ceiling.
+
+## Reporting an interview round
+
+Lead with what the round is, then what it found as hypotheses, never with a count. Read `analysis/SYNTHESIS.md` against `analysis/quant.md` first, and send nothing before `interview.py <study> quotes` exits 0 (`references/interviews.md`). Give the user:
+
+- the synthetic panel notice, first
+- the limits, in plain words: the participants' histories are invented, a model is more agreeable and articulate than a busy person, the critique is a model's opinion of a model's questions, and nothing here says how common a problem is or what it costs
+- for each learning goal, what was heard and what was heard against it
+- the problem themes, strongest evidence first: unprompted before prompted, a specific incident before a generality, effort (a workaround, a search, money spent) before none
+- what was not a problem, with as much room as what was
+- which findings rest on a question the critique flagged, and which on one model alone
+- how the interviews went: the two or three exchanges that teach most, each bad question with a better one beside it
+- the revised guide and the next three learning goals for interviews with real people, one of them the uncomfortable one
+- what remains unproven, and what was used (`analysis/usage.md`)
+
+Rules for the report:
+
+- **A count is of simulated participants, with its base:** "3 of 8 simulated participants, 2 of them unprompted". Never a percentage, and never "frequency", "prevalence", "most" or "common" of anyone outside the panel.
+- **Never report an opinion, a promise or a feature request as a problem found.** Say which kind of evidence stands behind each claim.
+- **The three groups stay apart:** raised it, said it is not a problem, and both. Only the second supports saying that something did not trouble a participant, and the groups are never added into one total of people.
+- **Marks by different critics are not comparable.** A difference in flags between interviews that different critics read is no finding.
+- **Every quotation is one the quote check verified,** in its form: the words, then the run and the exchange. Paraphrase the rest.
+- **Four conclusions stay apart:** a problem exists, this segment puts it first, a solution delivers, a buyer pays. The round offers guesses about the first two and nothing on the last two. No solution was shown and nobody was asked to pay.
+- **Never say the round validated, confirmed or proved anything about customers.** It produced hypotheses and a rehearsed guide.
+
+The shape of a report, in a few lines (the figures are invented):
+
+```text
+Synthetic panel: the feedback in this study was generated by AI personas, not by real people. It is not user research.
+
+What this was: 12 simulated interviews (6 personas on 2 models), about how brokers run a loan. Histories are invented: read every finding as a hypothesis.
+Strongest hypotheses: (1) chasing the lender after lodgement: 5 of 12 simulated participants, 4 unprompted, 3 with an incident, a workaround in each. (2) ...
+Not a problem: collecting documents from clients: 7 of 12 said so, and gave the list they send on day one as the reason.
+Lean on less: theme TH4 rests on two flagged questions, and TH6 was told of on one model only.
+For the real interviews: the revised guide (3 topics, new openers), and three goals, the uncomfortable one first.
+Unproven: that the problem exists outside this panel, that this segment puts it first. Nothing on a solution or on paying.
+Used: 1.9 million tokens, $1.62 at list price where reported. Quote check: passed.
+```
 
 ## Visual summary page
 
-When the session can publish a page, a one-page visual summary is the best way to share a panel. Sections that worked in the Sept 2026 study:
+Every study ends with one, built from the report kit and sent with the end-of-study message: `references/report-page.md`. The notice and the rules above hold on it as in any report. Beyond the kit's recipes (`assets/report-kit/kit.html`, Recipes):
 
-1. Header: question, the synthetic panel notice directly under the title, run and review counts, personas, models.
-2. Three headline takeaways.
-3. Leaderboard as a dot plot (truncated axes are fine for dots, not bars), coloured by concept type, with the gap marked.
-4. Reviewer quotes, each with persona role, model, and one line of context.
-5. Per-run matrix: persona x model rows, concept columns, the run's first choice filled.
-6. Factor heat table: concepts x factors, leader outlined.
-7. Round-over-round dumbbell: previous winners vs current, per factor.
-8. Find-the-answer bars (Found / Partly per question), from the "Find the answer" table.
-9. Lines not believed (with counts) and lines to keep, from "Lines that recur".
-10. Asks tracker across rounds with status pills (solved, partly, missing, regressed).
-11. ICP tiers: ideal, strong, not yet, gatekeepers, out of scope, each with personas, fit, why, and a quote.
-12. Recommendation and decisions.
-13. Method and caveats, including "simulated buyers" and model-skew notes.
-
-`analysis/quant.json` holds the data for most of these (leaderboard, factors, per-model levels, persona agreement, fit, and `answers`, `lines`, `replicates` and `variants` when their tables were written). An archived example is `report/index.html` in the TomoBroker research repo's `customer-research/2026-09-25-homepage-concepts/`.
+- **Review, where their tables were written:** the find-the-answer verdicts (found and partly, per question) and the lines not believed and the lines to keep, each with its count.
+- **A follow-up round:** each factor beside the last round's winner, and the asks tracker since that round.
+- **Axes:** a dot plot's axis may start where the scores do, never a bar chart's.

@@ -77,6 +77,24 @@ gives each run its account when the run starts (accounts.py). The summary ends w
 launch.py <study-dir> plan". An accounts command or a "success_check" whose file is not there
 stops the scaffold (panel_lib.usability_problems).
 
+An interview study ("type": "interview", panel_lib.py "Interview studies") has a guide in place
+of concepts or tasks, and nothing to copy, capture, browse or score. A run is one interview, and
+it gets two of everything (scaffold_interview()): a folder for each side to start in,
+panel/rooms/<run id>/ for the participant and interviewer/<run id>/ for its interviewer, both
+empty and both left empty, since neither side has a tool to read a file with; a launch prompt
+for each side in prompts/, <run id>.md and interviewer-<run id>.md (interview.py); and an entry
+for each side in runs.json, the participant's first. A participant's prompt holds the
+participant brief, its persona and the study's "context_notes", and nothing of the guide. An
+interviewer's holds the method, the guide as that persona's interview has it, the name, role
+and segment of the participant, and the reference notes of assets/interview-reference/. It
+holds nothing of the persona's bio, and nothing of the study brief. There is no key.md, no
+forms.json, no instructions file and no persona file: the launcher writes the only record of an
+interview, its turn log in interviews/. These stop it before it writes anything: a
+"leak_terms" entry in something the interviewer is given to say, a persona that the topics'
+"segments" leave with no topic (panel_lib.interview_problems), and a copy of the study brief
+under panel/ or interviewer/. More than five learning goals draw a WARNING. The summary ends
+with "Next: launch.py <study-dir> plan".
+
 These stop the scaffold before it writes anything, with or without --force:
   - a concept whose source is missing: a site without index.html, or a file that is not there
   - a name that could leave its folder: a concept id, a state name, a pinned label, a persona id
@@ -109,6 +127,31 @@ launcher left running is ended and waited for, and a teardown that was cut short
 from the start, since its account is among those in force. A symbolic link where an evidence
 folder should be is removed, never followed.
 
+In an interview study --force starts every interview again. The turn logs and transcripts in
+interviews/, and the analysts' copies in analysis/transcripts/, are moved to
+logs/interviews-<epoch seconds>/ (the copies under transcripts/ in it), never deleted: they are
+the only record of the interviews held. What belongs to those interviews goes with them, so
+that nothing of an interview that was replaced can be read as the new one's: the files their
+processes left, logs/<entry id>.<attempt>.* of every entry of the runs.json that is replaced
+and a turn log that a fresh start had moved to logs/ (under logs/ in that folder), and the two
+reports written from them, analysis/usage.md and analysis/checks.md (under analysis/). The new
+interviews number their attempts from 1 again, and would otherwise sit among the files of the
+old ones. Each room and each interviewer's folder is removed and made anew, and a symbolic link
+at its name is removed, never followed. Without --force the scaffold is refused while there is
+a runs.json or a turn log, and says how many interviews have one. A review or a usability
+study's --force leaves logs/ and those two reports where they are, as it always has: a launcher
+makes the files of an attempt anew when it starts it, and the reports are written again by
+the next command that makes them. What it does move is what a debrief left
+("interview.py <study-dir> debrief", panel_lib.py "Debriefs"): the turn logs and transcripts
+in interviews/ and analysis/transcripts/, the files of each debrief's interviewer in logs/ and
+a turn log that a fresh start had moved there, to logs/interviews-<epoch seconds>/ in the same
+way. A new run has the id of the run it replaces, so a debrief of it must find no log.
+
+Whatever the plan would refuse about study.json alone, the scaffold refuses too, before it
+writes anything: what panel_lib.load_study() refuses, said here with "Nothing was written.",
+and the jobs of the synthesis (panel_lib.synthesis_jobs()), such as two analysts for one
+persona.
+
 --force is refused while a launcher has the study, or while a run, job or follow-up question of
 it still has a process at work: it would replace runs.json and the persona files under them.
 Stop them first, with "launch.py <study-dir> stop". It holds the launcher's lock while it
@@ -130,6 +173,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import accounts  # noqa: E402
+import interview  # noqa: E402
 import launch  # noqa: E402
 import panel_lib as pl  # noqa: E402
 import runners  # noqa: E402
@@ -489,10 +533,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
     ap.add_argument("--force", action="store_true",
-                    help="overwrite existing persona files, site copies and runs.json. Refused while a "
+                    help="overwrite existing persona files, site copies and runs.json, and in an interview study "
+                         "start every interview again, with the turn logs moved to logs/. Refused while a "
                          "launcher has the study or a process of its runs is alive")
     args = ap.parse_args()
-    cfg = pl.load_study(args.study_dir)
+    try:
+        cfg = pl.load_study(args.study_dir)
+        pl.synthesis_jobs(cfg)  # as the plan asks for them: what it would refuse of study.json is refused here
+    except SystemExit as refused:  # of study.json, before anything is written: said as every refusal here is
+        said = refused.code.rstrip() if isinstance(refused.code, str) else None
+        if not said:
+            raise
+        raise SystemExit(f"{said}{'' if said.endswith('.') else '.'} Nothing was written.") from None
     lock = take_study(cfg["_dir"]) if args.force else None
     try:
         scaffold(cfg, args.force)
@@ -517,13 +569,26 @@ def refuse_existing(sd, force):
         have = len(existing)
         raise SystemExit(f"{pl.plural(have, 'persona file')} already {pl.agree(have, 'exists', 'exist')}. Re-run with "
                          f"--force to overwrite {pl.agree(have, 'it', 'them')}.")
+    logs = list((sd / pl.INTERVIEWS).glob("*.jsonl"))
     if (sd / "runs.json").exists() and not force:
-        raise SystemExit("runs.json already exists. Re-run with --force to replace it and the run state it records.")
+        have = len(logs)  # an interview study's: what --force would start again is said before it is asked for
+        raise SystemExit("runs.json already exists. Re-run with --force to replace it and the run state it records."
+                         + (f" {pl.plural(have, 'interview')} of it {pl.agree(have, 'has', 'have')} a turn log in "
+                            f"{pl.INTERVIEWS}/: --force starts every interview again, and moves "
+                            f"{pl.agree(have, 'that log and its transcripts', 'those logs and their transcripts')} to "
+                            "logs/, not deleted." if have else ""))
+    if logs and not force:
+        have = len(logs)
+        raise SystemExit(f"{pl.plural(have, 'turn log')} already {pl.agree(have, 'exists', 'exist')} in "
+                         f"{pl.INTERVIEWS}/. Re-run with --force to start every interview again: "
+                         f"{pl.agree(have, 'it is', 'they are')} then moved to logs/, not deleted.")
 
 
 def scaffold(cfg, force):
     if cfg["type"] == "usability":
         return scaffold_usability(cfg, force)
+    if cfg["type"] == "interview":
+        return scaffold_interview(cfg, force)
     sd = cfg["_dir"]
     panel = sd / "panel"
     refuse_skeletons(cfg)
@@ -689,6 +754,10 @@ def scaffold(cfg, force):
                 model_notes=notes)
             pp.write_text(prompt)
             runs.append(entry)
+    aside = set_aside(sd, debriefs=True) if force else None  # the debriefs of the runs that are replaced
+    if aside:
+        print(f"The turn logs and transcripts of the debriefs held before are in {aside.relative_to(sd)}/: the runs "
+              "they were held with are replaced.")
     earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0
     pl.write_runs(sd, runs)
     pl.write_forms(sd, pl.file_forms(cfg))
@@ -894,6 +963,10 @@ def scaffold_usability(cfg, force):
                 the_tasks=the_tasks, attempt_step=attempt_step, run_id=rid,
                 account_line=ACCOUNT_LINE[told].format(run_id=rid), model_notes="".join(f"- {x}\n" for x in found)))
             runs.append(entry)
+    aside = set_aside(sd, debriefs=True) if force else None  # the debriefs of the runs that are replaced
+    if aside:
+        print(f"The turn logs and transcripts of the debriefs held before are in {aside.relative_to(sd)}/: the runs "
+              "they were held with are replaced.")
     earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0
     pl.write_runs(sd, runs)
     for record in (pl.MODIFICATIONS, pl.FOLLOWUPS):  # what was recorded of the runs just replaced
@@ -919,6 +992,134 @@ def scaffold_usability(cfg, force):
               f"{pl.EARLIER_SESSIONS}. launch.py {sd} purge-sessions lists what is on that record and, with --yes, "
               "deletes it.")
     print(f"Nothing is captured for a usability study. Next: launch.py {sd} plan")
+
+
+# ---------------------------------------------------------------- interview studies
+
+MANY_GOALS = 5  # more learning goals than this draw a warning: an interview cannot follow each of them far
+
+
+def set_aside(sd, debriefs=False):
+    """Before --force starts every interview again: move the turn logs and transcripts of the
+    interviews held so far, and the analysts' copies of the transcripts, to a folder of their
+    own under logs/ (module docstring). Returns that folder, or None when no interview had a
+    turn log or a transcript, and nothing is then moved. Nothing is deleted: a turn log is the
+    only record of its interview.
+
+    What belongs to those interviews goes with them. Under logs/ in that folder: every file in
+    logs/ that is named for an entry of the runs.json about to be replaced, which is what each
+    process of each side left (<entry id>.<attempt>.in, .out and the rest) and a turn log that
+    a fresh start had moved there. The new entries have the same ids and count their attempts
+    from 1 again, so a file left behind would read as theirs. Under analysis/: usage.md and
+    checks.md, which were written from the interviews that are replaced.
+
+    debriefs: the same for a review or usability study, whose turn logs are those of the
+    debriefs held with the runs that --force replaces. A new run has the id of the one it
+    replaces, and a debrief of it would otherwise go on with the old one's log. Of logs/ only
+    what belongs to a debrief goes: the files of each debrief's interviewer, and a turn log
+    that a fresh start had moved there. The runs' own files and the two reports stay, as they
+    always have in these studies."""
+    held = {sd / pl.INTERVIEWS: "", sd / pl.TRANSCRIPTS: Path(pl.TRANSCRIPTS).name}  # folder -> where under it
+    files = {folder: sorted(f for f in folder.iterdir() if not f.is_dir()) if folder.is_dir() else []
+             for folder in held}
+    if not any(files.values()):
+        return None
+    try:
+        entries = pl.read_runs(sd) if (sd / "runs.json").exists() else []
+    except ValueError:  # not valid JSON: it names no entry whose files to look for
+        entries = []
+    hosts = [e for e in entries if e.get("kind") == "debrief"]  # the interviewers of the debriefs
+    replaced = ([f"{e['run']}." for e in hosts] + [f"{e['interview']}.interview-" for e in hosts] if debriefs
+                else [f"{e['run']}." for e in entries])  # how the files of what is replaced are named
+    logs = sd / "logs"
+    files[logs] = sorted(f for f in logs.iterdir() if not f.is_dir()
+                         and any(f.name.startswith(name) for name in replaced)) if logs.is_dir() else []
+    reports = () if debriefs else ("usage.md", "checks.md")
+    files[sd / "analysis"] = [f for f in (sd / "analysis" / name for name in reports) if f.is_file()]
+    held.update({logs: "logs", sd / "analysis": "analysis"})
+    stamp, aside = int(time.time()), None
+    while aside is None or aside.exists():  # a second --force within the same second gets the next one
+        aside, stamp = logs / f"{pl.INTERVIEWS}-{stamp}", stamp + 1
+    for folder, under in held.items():
+        for f in files[folder]:
+            (aside / under).mkdir(parents=True, exist_ok=True)
+            f.rename(aside / under / f.name)
+    return aside
+
+
+def empty_folder(folder):
+    """Make a folder that holds nothing, where a side of an interview starts: whatever is at its
+    name goes first. A symbolic link there is removed and never followed, since a process of an
+    earlier scaffold may have left it and what it points at is not the scaffold's to empty."""
+    if folder.is_symlink() or folder.is_file():
+        folder.unlink()
+    shutil.rmtree(folder, True)
+    folder.mkdir(parents=True)
+
+
+def scaffold_interview(cfg, force):
+    sd = cfg["_dir"]
+    panel, held = sd / "panel", cfg["interview"]
+    refuse_skeletons(cfg)
+    entries = pl.model_entries(cfg)
+    for name in {e["runner"] for e in entries} | {held["interviewer"]["runner"]}:
+        runners.get(name)  # a runner that does not exist stops the scaffold here
+    problems = pl.interview_problems(cfg)
+    if problems:
+        raise SystemExit("study.json: " + " ".join(problems) + " Nothing was written.")
+    copy = brief_copy(sd, [panel, sd / pl.INTERVIEWER_DIR])
+    if copy:
+        raise SystemExit(f"{copy} is a copy of the study brief, where a participant or an interviewer starts. The "
+                         "brief holds the team's hypotheses, which neither may ever see: an interviewer that has "
+                         f"read them asks for them. Delete that file: the brief stays at {sd / pl.STUDY_BRIEF}, "
+                         "beside study.json.")
+    refuse_existing(sd, force)
+
+    aside = set_aside(sd) if force else None
+    earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0  # with each side's own folder
+    for sub in (pl.INTERVIEWS, "prompts", "analysis"):
+        (sd / sub).mkdir(exist_ok=True)
+    for link in (panel, sd / pl.ROOMS, sd / pl.INTERVIEWER_DIR):  # never followed: it goes, and the folder is made
+        if link.is_symlink():
+            link.unlink()
+    reps, runs = cfg["replicates"], []
+    for p in cfg["personas"]:
+        prompts = interview.participant_prompt(cfg, p), interview.interviewer_prompt(cfg, p)
+        for e, rep in ((e, rep) for e in entries for rep in range(1, reps + 1)):
+            pair = pl.run_entry(sd, p, e, rep, interview=True)
+            pair = pair, pl.interviewer_entry(cfg, pair)
+            for entry, prompt in zip(pair, prompts):
+                empty_folder(sd / entry["workdir"])  # each side starts in a folder of its own that holds nothing
+                (sd / entry["prompt"]).write_text(prompt)
+                runs.append(entry)
+    pl.write_runs(sd, runs)
+    for record in (pl.MODIFICATIONS, pl.FOLLOWUPS):  # an interview study has neither: what another type left
+        (sd / record).unlink(missing_ok=True)
+
+    topics, n = held["topics"], len(runs) // 2
+    by = held["interviewer"]
+    print(f"Interview study {cfg.get('study') or sd.name}: {pl.plural(len(topics), 'topic')} "
+          f"({', '.join(t['id'] for t in topics)}), "
+          f"{pl.plural(len(cfg['personas']), 'persona')} x {pl.plural(len(entries), 'model')}"
+          f"{f' x {reps} replicates' if reps > 1 else ''} = {pl.plural(n, 'interview')}, "
+          f"{pl.agree(n, 'led', 'each led')} by an interviewer on {by['runner']}"
+          + (f" ({by['model']})" if by["model"] else "") + ".")
+    print(f"{pl.agree(n, 'The', 'Each')} interview is capped at {pl.plural(held['turns'], 'exchange')}, and "
+          f"{pl.agree(n, 'its', 'each')} participant "
+          + ("writes a situation card first, which its interviewer never sees."
+             if held["situation_card"] else 'replies "Ready" and writes no situation card.'))
+    if len(held["goals"]) > MANY_GOALS:
+        print(f"WARNING: the guide has {len(held['goals'])} learning goals. An interview follows three well, one of "
+              f"them uncomfortable, and with more than {MANY_GOALS} none is followed far: cut the guide down, or "
+              "split the round.")
+    if aside:
+        print(f"The turn logs and transcripts of the interviews held before are in {aside.relative_to(sd)}/, with the "
+              "files their processes left and the usage and check reports made from them.")
+    if earlier:
+        print(f"Harness sessions of the earlier scaffold still held by their harnesses: {earlier}, on record in "
+              f"{pl.EARLIER_SESSIONS}. launch.py {sd} purge-sessions lists what is on that record and, with --yes, "
+              "deletes it.")
+    print(f"Nothing is captured for an interview study. Next: launch.py {sd} plan")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ You are a qualitative research analyst for a simulated customer research study.
 <PERSONA_FILES>
 <INCOMPLETE_RUNS>
 <FOLLOWUPS>
+<DEBRIEFS>
 
 ## Produce `<STUDY_DIR>/analysis/<OUTPUT_FILE>`
 Open the file with a `#` title and, directly under it, this line on its own, word for word:
