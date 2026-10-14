@@ -121,8 +121,9 @@ EVIDENCE = ("incident", "general", "opinion", "future", "request")
 EFFORT = ("none", "workaround", "searched", "paid", "unknown")
 FLAGS = ("pitch", "hypothetical", "leading", "opinion", "generic", "price-guess", "wishlist", "zoom", "talking",
          "rescue", "compound")
-MISSED = ("praise-taken", "generality", "feature-request", "feeling", "contradiction", "payer", "pushed-no-problem")
-GOOD = ("anchored", "consequence", "accepted", "deflected", "dug", "priority", "spend")
+MISSED = ("praise-taken", "generality", "feature-request", "feeling", "contradiction", "payer", "pushed-no-problem",
+          "surface")
+GOOD = ("anchored", "consequence", "accepted", "deflected", "dug", "priority", "spend", "rooted")
 UNPARSED = "unparsed"
 DIGITS = 9  # an exchange number is written in this many digits at most: a longer one is in no turn log
 # The files of the two kinds of job this script reads, analysis/<stem>-<n>.md, and the role that writes each.

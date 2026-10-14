@@ -289,13 +289,16 @@ the guide, and fills its defaults:
     goals           [{"id", "learn"}, ...]: what the user wants to find out, each written as a
                     question to settle and never as something to prove. "id" is letters and
                     digits, unique ignoring case
-    topics          [{"id", "area", "goals", "turns", "opener", "segments"}, ...], opened in the
+    topics          [{"id", "area", "goals", "turns", "opener", "dig_for", "segments"}, ...], opened in the
                     order written. "id" is as a goal's, and never open, close or end, which an
                     interviewer's reply uses for itself. "area" is a neutral name the
                     interviewer may say to raise the topic, and "opener" its first question,
                     sent as written. "goals" lists the ids of the goals the topic serves
                     (default: none). "turns" caps the topic in exchanges (default
                     DEFAULT_TOPIC_TURNS): the interviewer is told, and nothing enforces it.
+                    "dig_for" is a list of short lines on what the user most wants understood
+                    under the topic (default none): the interviewer alone is given them, to
+                    choose which thread to follow and how far, and never says them.
                     "segments" keeps the topic to the personas of those segments (default
                     None: every persona gets it)
     turns           the cap of one interview in exchanges, which the launcher enforces (default
@@ -937,7 +940,7 @@ NOT_INTERVIEW = ("materials", "browse", "capture", "factors", "fit_factors", "mo
                  "product_phrase", "debrief")
 GUIDE_KEYS = ("about", "interviewer", "goals", "topics", "turns", "situation_card")  # of "interview", the guide
 DEBRIEF_KEYS = ("interviewer", "goals", "topics", "turns")  # of "debrief", the guide of a debrief
-GOAL_FIELDS, TOPIC_FIELDS = ("id", "learn"), ("id", "area", "goals", "turns", "opener", "segments")
+GOAL_FIELDS, TOPIC_FIELDS = ("id", "learn"), ("id", "area", "goals", "turns", "opener", "dig_for", "segments")
 GUIDE_ID = re.compile(r"[A-Za-z0-9]+")  # a goal or topic id. A topic id is none of NOT_TOPIC, in any case
 NOT_TOPIC = ("open", "close", "end")    # what an interviewer's reply writes where a topic id goes, or to end
 DEFAULT_TURNS = 30       # the cap of an interview that names none, in exchanges
@@ -2134,6 +2137,11 @@ def check_guide(cfg: dict, block: str, keys: tuple = GUIDE_KEYS) -> dict:
         if not _positive(t.setdefault("turns", DEFAULT_TOPIC_TURNS), whole=True):
             _fail(f'{where} "turns" must be a whole number, 1 or more: the most exchanges the topic gets (default '
                   f"{DEFAULT_TOPIC_TURNS})")
+        dig = t.setdefault("dig_for", [])
+        if not isinstance(dig, list) or not all(isinstance(x, str) and x.strip() for x in dig):
+            _fail(f'{where} "dig_for" must be a list of short lines, none of them empty: what the user most wants '
+                  "understood under the topic, which the interviewer uses to choose what to follow and never says")
+        t["dig_for"] = [" ".join(x.split()) for x in dig]
         only = t.setdefault("segments", None)
         if only is not None:
             if not isinstance(only, list) or not only or not all(isinstance(x, str) for x in only):
@@ -2228,11 +2236,12 @@ def debrief_problems(cfg: dict) -> tuple[list[str], list[str]]:
                 problems.append(f'debrief topic {t["id"]}: its {part} holds the leak term "{found(t[part])}". The '
                                 "interviewer would say it, and a question that holds a leak term is never "
                                 'delivered. Reword it, or take the term out of "leak_terms".')
-    for g in held["goals"]:
-        if found(g["learn"]):
-            notes.append(f'debrief goal {g["id"]} holds the leak term "{found(g["learn"])}". A goal may name what a '
-                         "participant has seen, and is never read to one, so nothing is refused: a question that "
-                         "says the term is sent back once, and a second one stops the debrief.")
+    for where, text in [(f"goal {g['id']}", g["learn"]) for g in held["goals"]] + [
+            (f"topic {t['id']}'s dig_for", line) for t in held["topics"] for line in t["dig_for"]]:
+        if found(text):
+            notes.append(f'debrief {where} holds the leak term "{found(text)}". A goal or a line to dig for may name '
+                         "what a participant has seen, and is never read to one, so nothing is refused: a question "
+                         "that says the term is sent back once, and a second one stops the debrief.")
     topics = held["topics"]
     roomy = sum(min(ROOMY_TOPIC, t["turns"]) for t in topics) + 2  # as check_guide() counts: the opening, the close
     if len(topics) > 1 and held["turns"] < roomy:
@@ -2270,8 +2279,8 @@ def guide(cfg: dict, pid: str, block: str = "interview") -> dict:
 
 def interview_problems(cfg: dict) -> list[str]:
     """What would spoil an interview study's interviews as study.json stands, each a sentence: a
-    "leak_terms" entry, ignoring case, in something the interviewer is given to say (the purpose,
-    a goal, a topic's opener or its area), and a persona that "segments" leaves with no topic.
+    "leak_terms" entry, ignoring case, in something the interviewer is given (the purpose, a goal,
+    a topic's opener, its area or a line of its "dig_for"), and a persona that "segments" leaves with no topic.
     Empty for a study of another type. The scaffold, the plan and every command that starts an
     interview ask this, so an archived study still loads. A runner that does not exist is said
     by runners.get(), which exits, as for every study."""
@@ -2281,6 +2290,7 @@ def interview_problems(cfg: dict) -> list[str]:
     said = [("interview.about", "it", held["about"])]
     said += [(f"goal {g['id']}", 'its "learn"', g["learn"]) for g in held["goals"]]
     said += [(f"topic {t['id']}", f"its {part}", t[part]) for t in held["topics"] for part in ("opener", "area")]
+    said += [(f"topic {t['id']}", 'its "dig_for"', line) for t in held["topics"] for line in t["dig_for"]]
     for where, what, text in said:
         found = next((term for term in cfg["leak_terms"] if term.lower() in text.lower()), None)
         if found:

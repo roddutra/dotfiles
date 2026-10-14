@@ -32,7 +32,7 @@ The participants as they were briefed. The personality and the background lines 
 Open nothing else in `<STUDY_DIR>`: not `study.json`, a study brief, nor any other file. You mark against the method, and what the team hopes to hear would bend the marking.
 
 ## The method
-The interview is about the participant's work, never about an idea. Evidence is a specific past event: what happened, what it cost, what they did. The interviewer asks short questions one at a time, settles whether a topic matters before asking for its detail, takes "that's not a problem for me" as a finding, and asks about money as it is spent now.
+The interview is about the participant's work, never about an idea. Evidence is a specific past event: what happened, what it cost, what they did. The interviewer asks short questions one at a time, settles whether a topic matters before asking for its detail, follows a real problem past its facts to why it matters and what causes it, takes "that's not a problem for me" as a finding, and asks about money as it is spent now.
 
 **An opener is the guide's question, not the interviewer's.** A question that is a topic's opener as the guide has it gets no `Flag` and no `Good` entry: the interviewer is marked on what it chose to ask. Words it added around an opener are its own.
 
@@ -54,13 +54,14 @@ A flag names a fault in a question as asked. Use only these eleven:
 | `compound` | Asks several things at once |
 
 - **Judge the words of the question,** not its `Move` label and not the answer it got. A hypothetical is flagged whether the participant agreed or declined.
+- **One question about what could have been is allowed:** what would have made the event just told go more smoothly, asked once on that thread after its facts and its cause are known. Flag it `hypothetical` when it comes before them, is a second on the same thread, or asks whether they would use, buy or pay for something.
 - **`zoom` is about order:** asking for detail after the participant has said or shown that the topic does not concern them.
 - **`generic` needs the next exchange.** A habit question followed at once by a request for an instance is not flagged.
 - **`leading` includes a recap that puts words in their mouth.** A neutral reference to something they said ("that file you mentioned") is neither `leading` nor `talking`.
 - **`compound` is two or more separate questions,** not one question with a clause that sets it up.
 
 ## Missed signals on an answer
-Something in an answer that the method says to follow, and that the interviewer did not follow, then or later. Use only these seven:
+Something in an answer that the method says to follow, and that the interviewer did not follow, then or later. Use only these eight:
 
 | `Signal` | What happened |
 | --- | --- |
@@ -71,13 +72,14 @@ Something in an answer that the method says to follow, and that the interviewer 
 | `contradiction` | An answer disagreed with an earlier one and it was passed over |
 | `payer` | Spending or a purchase came up and who pays, approves or can refuse was never asked |
 | `pushed-no-problem` | They said something is not a problem and the interviewer pushed against it |
+| `surface` | A cost, a workaround, a loss or a change of habit was told, and the interviewer moved on without asking why it matters to them or what caused it |
 
 - A signal picked up within the next two exchanges is not missed.
 - A signal dropped because a cap left no room is still missed.
 - A generality inside a topic the participant has shown does not matter to them is rightly left.
 
 ## Good moves
-The reader learns as much from these. Use only these seven, and name one only where the question clearly did it:
+The reader learns as much from these. Use only these eight, and name one only where the question clearly did it:
 
 | `Move` | The question |
 | --- | --- |
@@ -88,6 +90,7 @@ The reader learns as much from these. Use only these seven, and name one only wh
 | `dug` | Asked what lies behind a feature idea or strong feeling |
 | `priority` | Settled whether the topic matters before asking for detail |
 | `spend` | Asked what is spent now, who approved it or who can refuse |
+| `rooted` | Asked why it matters, what caused it or what was hardest, and the answer reached a motive or a cause |
 
 ## Produce `<STUDY_DIR>/analysis/<OUTPUT_FILE>`
 Open the file with a `#` title and, directly under it, this line on its own, word for word:
@@ -102,6 +105,7 @@ Then one `## <run id>` section for each interview: its summary first, then its e
   - a specific past event was found
   - what that event took to get through (time, steps, people) was found
   - what it cost or changed was found
+  - why one problem matters to them, or what causes it, was found
   - priority came before detail in every topic that went into detail
   - who uses and who pays or decides were told apart
   - for each learning goal, an item that opens with its id: what was learned against it, in a sentence
@@ -140,6 +144,6 @@ A script reads every entry with one pattern. Keep each form's lines, their names
 - Write only your one output file, and never use git.
 - If you are blocked from writing the file, return the complete document as your reply instead.
 
-**Sources.** The method, ten of the flags, the missed signals, the good moves and the final check are those of the book The Mom Test, in this skill's own words. The `compound` flag, every label, the two-exchange rule, the comparison with the card and the entry forms are adaptations for a simulation.
+**Sources.** The method, ten of the flags, the missed signals, the good moves and the final check are those of the book The Mom Test, in this skill's own words. The `surface` signal, the `rooted` move and their check come from common practice in discovery interviews. The `compound` flag, every label, the two-exchange rule, the comparison with the card and the entry forms are adaptations for a simulation.
 
 When done, reply with the number of flags, missed signals and good moves for each interview, and the one exchange you would show someone learning the method.

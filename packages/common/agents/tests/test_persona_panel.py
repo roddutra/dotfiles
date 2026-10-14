@@ -384,6 +384,9 @@ class PersonaPanelTest(unittest.TestCase):
                 self.interview(runner=None), "an interview study cannot run in native mode"),
             "a topic whose id is what a reply writes to close": (
                 self.interview({"topics": [{**topic, "id": "Close"}]}), 'the topic id "Close" is taken'),
+            "a line to dig for that is empty": (
+                self.interview({"topics": [{**topic, "dig_for": ["  "]}]}),
+                'topic T1: "dig_for" must be a list of short lines, none of them empty'),
             "an interview cap with no room for the opening and the close": (
                 self.interview({"turns": 2}), "interview.turns is 2, but 1 topic needs at least 3"),
             "a follow-up allowance in an interview study": (
@@ -407,6 +410,9 @@ class PersonaPanelTest(unittest.TestCase):
             "a leak term in a topic's opener": (
                 self.interview({"topics": [{**topic, "opener": "What do you make of Secret Codename?"}]}),
                 'topic T1: its opener holds the leak term "secret codename"'),
+            "a leak term in a line to dig for": (
+                self.interview({"topics": [{**topic, "dig_for": ["How the secret codename is talked about"]}]}),
+                'topic T1: its "dig_for" holds the leak term "secret codename"'),
             "a leak term in a learning goal": (
                 self.interview({"goals": [{"id": "G1", "learn": "Whether the secret codename would sell"}]}),
                 'goal G1: its "learn" holds the leak term "secret codename"'),
@@ -1487,7 +1493,7 @@ class InterviewRulesTest(unittest.TestCase):
             "an end with no reason": ("END:\nSAY:\nThanks.", [["missing", "the reason after END"]]),
             "a topic that is not in this persona's guide": (plain.replace("T2", "T3"), [["topic", "T3"]]),
             "a topic id in another case": (plain.replace("T2", "t2"), [["topic", "t2"]]),
-            "a move that is not one of the sixteen": (plain.replace("anchor", "probe"), [["move", "probe"]]),
+            "a move that is not one of the twenty": (plain.replace("anchor", "probe"), [["move", "probe"]]),
             "no reply at all": ("", [["missing", "TOPIC, MOVE, WHY, SAY"]]),
             # Every problem is found in one pass, so that one repair can name them all.
             "several problems at once": ("Sure.\nTOPIC: T9\nMOVE: probe\nSAY:\n", [
@@ -3640,13 +3646,15 @@ if what == "provision":
         says otherwise, each with an interviewer on claude, entry interviewer-<run id>. The guide has two
         topics, T1 and T2, a cap of 6 exchanges and the situation card on, and guide changes keys of it.
         Planted, for a test to look for where it must not be: ZQGOAL in the goal, ZQAREA and ZQOPENER in
-        each topic, ZQBIO in each persona's bio. An interview nobody plans runs to its end: T1, T2, a
-        close, then the interviewer ends it. segments gives each persona its segment, in their order."""
+        each topic, ZQDIG in T1's dig_for, ZQBIO in each persona's bio. An interview nobody plans runs to
+        its end: T1, T2, a close, then the interviewer ends it. segments gives each persona its segment, in
+        their order."""
         self.sd = self.tmp / "interview"
         self.sd.mkdir()
         held = {"about": "how a cafe is run from day to day", "interviewer": {"runner": "claude", "model": "opus"},
                 "goals": [{"id": "G1", "learn": "ZQGOAL what takes most of the week"}],
                 "topics": [{"id": "T1", "area": "ZQAREA the working week", "goals": ["G1"],
+                            "dig_for": ["ZQDIG why the week runs long"],
                             "opener": "ZQOPENER what took most of your time last week?"},
                            {"id": "T2", "area": "ZQAREA the tools", "goals": ["G1"],
                             "opener": "ZQOPENER what do you keep track of things with?"}],
@@ -4756,6 +4764,7 @@ if what == "provision":
             # Its notes carry a marker from its first reply on, and the process that ends the interview exits with 3.
             "interviewer-P01-opus": [["why:ZQWHY it said so"], [], [], ["finish:ZQREASON nothing is left", "code:3"]],
         }, guide={"topics": [{"id": "ZQT1", "area": "ZQAREA the working week", "goals": ["G1"],
+                              "dig_for": ["ZQDIG why the week runs long"],
                               "opener": "ZQOPENER what took most of your time?"},
                              {"id": "ZQT2", "area": "ZQAREA the tools", "goals": ["G1"],
                               "opener": "ZQOPENER what do you keep track with?"}]})
@@ -4786,14 +4795,15 @@ if what == "provision":
         self.assertEqual(questions, ["Question 1?", "Question 2?", "Question 3?"])
         self.assertIn("ZQBIO", prompt)
         given = json.dumps([e for e in self.starts() if e["run"] == "P01-opus"])
-        self.assertEqual([m for m in ("ZQGOAL", "ZQT", "ZQAREA", "ZQOPENER", "ZQWHY", "ZQREASON") if m in given], [])
+        self.assertEqual([m for m in ("ZQGOAL", "ZQT", "ZQAREA", "ZQOPENER", "ZQDIG", "ZQWHY", "ZQREASON")
+                          if m in given], [])
         # The interviewer is sent its prompt, then each answer under a status line: nothing of the persona's bio
         # or of the card, which the log does hold.
         brief, *answers = self.sent("interviewer-P01-opus")
         self.assertEqual(answers, [f"----------\nAnswer {n}.\n----------\n{status}" for n, status in enumerate((
             "Exchange 1 of 6. ZQT1: 1 of 8. Not opened: ZQT2.", "Exchange 2 of 6. ZQT2: 1 of 8.",
             "Exchange 3 of 6."), 1)])
-        self.assertTrue(all(m in brief for m in ("ZQGOAL", "ZQT1", "ZQAREA", "ZQOPENER")), brief)
+        self.assertTrue(all(m in brief for m in ("ZQGOAL", "ZQT1", "ZQAREA", "ZQOPENER", "ZQDIG")), brief)
         # Every topic id the brief shows is one of this guide's, its examples included, so that none gives the
         # interviewer an id to copy that its guide does not have. Its first reply is asked for by the first id.
         own, notes = brief.split("\n# Reference notes")
@@ -4968,7 +4978,9 @@ if what == "provision":
         capped = self.whole("P01-opus")
         _, _, at_topic_cap, last, repair = self.sent("interviewer-P01-opus")
         self.assertEqual((at_topic_cap.split("\n")[-2:], last.split("\n")[-2:]),
-                         (["Exchange 2 of 4. T1: 2 of 2. Not opened: T2.", "T1 has used its turns: move on or close."],
+                         (["Exchange 2 of 4. T1: 2 of 2. Not opened: T2.",
+                           "T1 has used its planned turns: finish the thread you are on while it still produces facts, "
+                           "then move on or close."],
                           ["Exchange 3 of 4. T2: 1 of 8.", "This is your last question: close the interview."]))
         self.assertIn("This is the last exchange: reply with TOPIC: close.", repair)
         self.assertEqual([(x["t"], [key for key, _ in x.get("problems", [])]) for x in capped[-3:]],
@@ -5342,8 +5354,9 @@ if what == "provision":
         self.assertEqual(given, {"analyst-1": (halves[0], []), "analyst-2": (halves[1], []),
                                  "critic-1": ([], halves[0]), "critic-2": ([], halves[1]),
                                  "themes": ([], []), "writer": ([], [])})
-        # What each is given of the study: the guide (ZQGOAL, ZQOPENER) and who the personas are (ZQBIO).
-        self.assertEqual({job: [mark for mark in ("ZQGOAL", "ZQOPENER", "ZQBIO") if mark in e["stdin"]]
+        # What each is given of the study: the guide (ZQGOAL, ZQOPENER) and who the personas are (ZQBIO). The
+        # lines to dig for (ZQDIG) are the interviewer's alone: a critic or a writer would mark or write to them.
+        self.assertEqual({job: [mark for mark in ("ZQGOAL", "ZQOPENER", "ZQDIG", "ZQBIO") if mark in e["stdin"]]
                           for job, e in jobs.items()}, {
             "analyst-1": ["ZQBIO"], "analyst-2": ["ZQBIO"], "critic-1": ["ZQGOAL", "ZQOPENER", "ZQBIO"],
             "critic-2": ["ZQGOAL", "ZQOPENER", "ZQBIO"], "themes": [], "writer": ["ZQGOAL", "ZQOPENER"]})

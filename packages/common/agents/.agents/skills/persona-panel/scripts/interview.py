@@ -325,7 +325,8 @@ import runners  # noqa: E402
 
 # The moves an interviewer names in its reply, one for each: assets/interviewer-brief.md says what each is.
 MOVES = ("open", "priority", "raise", "anchor", "sequence", "consequence", "coping", "alternatives",
-         "frequency", "constraint", "money", "deflect", "dig", "clarify", "accept", "close")
+         "frequency", "constraint", "why", "cause", "hardest", "ideal", "money", "deflect", "dig", "clarify",
+         "accept", "close")
 PARTICIPANT_TOOLS, INTERVIEWER_TOOLS = "none", "none"  # run["tools"] of each side: neither has a tool (tools())
 PROVENANCE = "Provenance, for maintainers:"            # where the participant brief is cut
 REFERENCES = "interview-reference"                     # the folder of the reference notes, in assets/
@@ -482,7 +483,7 @@ def interviewer_prompt(cfg: dict, persona: dict, block: str = "interview") -> st
     shown = held["topics"][min(1, len(held["topics"]) - 1)]
     values = {"NAME": persona["name"], "ROLE": persona["role"], "SEGMENT_LINE": _segment_line(cfg, persona),
               "GOALS": _goal_lines(held["goals"]),
-              "TOPICS": _topic_lines(cfg, held["topics"]), "TURNS": held["turns"], "REFERENCES": references(),
+              "TOPICS": _topic_lines(cfg, held["topics"], dig=True), "TURNS": held["turns"], "REFERENCES": references(),
               "FIRST_TOPIC": held["topics"][0]["id"], "EXAMPLE_TOPIC": shown["id"],
               "EXAMPLE_STATUS": _example_status(held, shown)}
     if block == "debrief":  # a second whole brief: the same rules, turned on a session the participant has had
@@ -520,14 +521,17 @@ def _goal_lines(goals: list[dict]) -> str:
     return "\n".join(f"- {g['id']}: {' '.join(g['learn'].split())}" for g in goals)
 
 
-def _topic_lines(cfg: dict, topics: list[dict], kept: bool = False) -> str:
+def _topic_lines(cfg: dict, topics: list[dict], kept: bool = False, dig: bool = False) -> str:
     """The topics of a guide as a brief lists them, numbered in the order they are opened, a
     line each: the id, the area, the goals it serves, its cap and its opener. This is the one
     form of it, for the interviewer and for the jobs that are given the guide. kept: say of a
     topic that "segments" keeps to some personas which segments those are, by their names in
     study.json "segments". An interviewer is given its own persona's topics and needs no such
     word. A critic and the writer are given every topic of the study, and would otherwise read
-    a topic that a participant was never to be asked as one the interviewer left out."""
+    a topic that a participant was never to be asked as one the interviewer left out. dig: end
+    a topic's line with its "dig_for", "Dig for: <line>; <line>.", for the interviewer alone.
+    They are what the user hopes to understand, and a critic or a writer given them would mark
+    or write towards them."""
     names = cfg.get("segments") if isinstance(cfg.get("segments"), dict) else {}
 
     def only(t: dict) -> str:
@@ -536,10 +540,13 @@ def _topic_lines(cfg: dict, topics: list[dict], kept: bool = False) -> str:
         whom = [names.get(s, s) for s in t["segments"]]
         return f" Asked only of the {pl.agree(len(whom), 'segment')} {pl.listed(whom)}."
 
+    def digs(t: dict) -> str:
+        return f" Dig for: {'; '.join(x.rstrip('.') for x in t['dig_for'])}." if dig and t["dig_for"] else ""
+
     return "\n".join(f"{i}. {t['id']}, {t['area']}. "
                      f"Serves {pl.listed(t['goals']) if t['goals'] else 'no goal in particular'}. "
                      f"Cap: {pl.plural(t['turns'], 'exchange')}. Opener: \"{' '.join(t['opener'].split())}\""
-                     + only(t) for i, t in enumerate(topics, start=1))
+                     + only(t) + digs(t) for i, t in enumerate(topics, start=1))
 
 
 def _example_status(guide: dict, shown: dict) -> str:

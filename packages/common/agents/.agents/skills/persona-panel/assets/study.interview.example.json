@@ -50,6 +50,10 @@
         "area": "collecting documents from clients",
         "goals": ["G2"],
         "turns": 8,
+        "dig_for": [
+          "what slows a document down between the client and lodgement, and why",
+          "what a late document costs the broker and the client"
+        ],
         "opener": "Walk me through the last loan where you had to collect documents from a client."
       },
       {

@@ -38,7 +38,7 @@ The turn loop, the reply format, the caps, the repair, the leak gate and the end
 
 - **Two sessions, with the launcher between them.** The interviewer is a new session and the participant is the run's own, resumed. The launcher resumes one side with the other's words and records each reply in the turn log, `interviews/<run id>.jsonl`. One process is alive for a debrief at any moment.
 - **An exchange is one question and its answer.** Every cap counts exchanges, and a number in a transcript or a citation is an exchange number.
-- **Every reply of the interviewer has a topic, a move, a reason and a question.** The topic is a topic id of the guide, `open` for an exchange outside every topic, or `close`. The move names the technique, one of sixteen that `assets/interviewer-brief-debrief.md` explains. The reason is one sentence on what the interviewer is following. Only the question reaches the participant.
+- **Every reply of the interviewer has a topic, a move, a reason and a question.** The topic is a topic id of the guide, `open` for an exchange outside every topic, or `close`. The move names the technique, one of twenty that `assets/interviewer-brief-debrief.md` explains. The reason is one sentence on what the interviewer is following. Only the question reaches the participant.
 - **`debrief.turns` is exact.** The launcher ends the debrief once the last exchange the cap allows has its answer, and tells the interviewer beforehand that this question is its last and must be a close.
 - **A topic's `turns` is advisory.** The interviewer is told when a topic has used them, and nothing enforces it.
 - **A repair.** A reply that cannot be used is never delivered. It is sent back once, with every problem named: it does not follow the form, its topic or move is not one of the list, its question is empty or holds a leak term, or the last exchange is no close. The launcher prints "P01-a: a reply of the interviewer could not be used (topic)" and the debrief goes on. A second unusable reply in the same turn stops the debrief as `partial`, or at the last exchange ends it one exchange short with no close.
@@ -69,7 +69,7 @@ Add it to the study's `study.json`, before the runs or after them. It changes no
 |---|---|
 | `debrief.interviewer` | The model entry of every debrief's interviewer. No default, and it must name a runner |
 | `debrief.goals` | `[{"id", "learn"}, ...]`, at least one, as `interview.goals` in an interview study: `learn` is what to find out. A goal may name the product: a goal is never read to the participant |
-| `debrief.topics` | As `interview.topics` in an interview study, at least one, opened in the order written: `id`, `area`, `opener`, `goals`, `turns` (default 8) and `segments` (below) |
+| `debrief.topics` | As `interview.topics` in an interview study, at least one, opened in the order written: `id`, `area`, `opener`, `goals`, `turns` (default 8), `dig_for` and `segments` (below) |
 | `debrief.turns` | The cap of one debrief in exchanges, which the launcher enforces. Default 30 |
 | `limits.debrief` | `{"minutes", "budget_usd"}`: what each side of one debrief may use over all its turns. Default 10 minutes and $2.00 |
 
@@ -82,6 +82,7 @@ The keys of a topic:
 | `opener` | The topic's first question, which the interviewer is told to use word for word |
 | `goals` | The ids of the goals the topic serves. Default none |
 | `turns` | The topic's cap in exchanges. Default 8, and advisory ([How a debrief is carried](#how-a-debrief-is-carried)) |
+| `dig_for` | Short lines on what the user most wants understood under the topic. Default none. The interviewer alone is given them, to choose which moment to follow and how far, and never says them. A leak term in one is a note, as in a goal |
 | `segments` | Keeps the topic to personas of those segments. Default: every persona gets it |
 
 Refused when `study.json` is loaded, by `init_study.py`, the plan and every command:

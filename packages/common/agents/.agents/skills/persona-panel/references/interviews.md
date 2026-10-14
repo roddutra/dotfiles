@@ -55,12 +55,13 @@ Personas, `models`, `runner`, `runners`, `replicates`, `segments`, `leak_terms`,
 | `interview.about` | One neutral sentence on the area of work, such as "how mortgage brokers run a loan from first enquiry to settlement". The interviewer states it as the purpose when it opens every interview, before the first topic's opener, and again when a participant asks what this is for. So every participant hears it before any question, and what it names is no longer something a participant can raise unprompted: name the whole area of work, not the part of it the team's idea is about, and never an idea, a product or a problem |
 | `interview.interviewer` | The model entry of every interviewer of the study. No default. Its key is `interviewer` unless it gives one |
 | `interview.goals` | `[{"id", "learn"}, ...]`, at least one. `learn` is what to find out. More than five draw a warning from `init_study.py`: none is then followed far |
-| `interview.topics` | `[{"id", "area", "opener", "goals", "turns", "segments"}, ...]`, opened in the order written |
+| `interview.topics` | `[{"id", "area", "opener", "goals", "turns", "dig_for", "segments"}, ...]`, opened in the order written |
 | `topics[].id` | Letters and digits, unique ignoring case, and never `open`, `close` or `end` |
 | `topics[].area` | A neutral name the interviewer may say aloud to raise the topic |
 | `topics[].opener` | The topic's first question, which the interviewer is told to use word for word |
 | `topics[].goals` | The ids of the goals the topic serves. Default none |
-| `topics[].turns` | The topic's cap in exchanges. Default 8. The interviewer is told when it is reached, and nothing enforces it |
+| `topics[].turns` | The topic's cap in exchanges. Default 8. A plan, not a stop: the interviewer is told when it is reached, finishes the thread it is on, and nothing enforces it |
+| `topics[].dig_for` | Short lines on what the user most wants understood under the topic, such as "how much broker time early enquiries take, and why". Default none. The interviewer alone is given them, to choose which thread to follow and how far, and is told never to say them or steer towards them. The critics and the writer never see them |
 | `topics[].segments` | Keeps the topic to personas of those segments. Default: every persona gets it. A goal that only topics kept from a persona serve is left out of that persona's interview |
 | `interview.turns` | The cap of one interview in exchanges, which the launcher enforces. Default 30. At least the number of topics plus two, for the opening and the close |
 | `interview.situation_card` | Default true: each participant writes a private situation card before the first question ([The protocol](#the-protocol)). False: it replies "Ready" |
@@ -87,7 +88,7 @@ What is refused, each in a sentence that says what to do:
 | `debrief` | A debrief belongs to a review or a usability study |
 | `limits.followup` | No follow-up question is put to an interview |
 | A model entry with no runner | Native mode cannot carry a turn |
-| A `leak_terms` entry in `interview.about`, a goal's `learn`, a topic's `opener` or its `area` | The interviewer would say it. Checked by `init_study.py`, by the plan and at every start |
+| A `leak_terms` entry in `interview.about`, a goal's `learn`, a topic's `opener`, its `area` or a line of its `dig_for` | The interviewer would say it. Checked by `init_study.py`, by the plan and at every start |
 | A persona whose segment no topic takes | It would have nothing to be asked. Add its segment to a topic, or take the persona out |
 | An empty `leak_terms` entry | It is found in every question |
 | A `synthesis.context_files` path under `interviews/`, `analysis/transcripts/`, `prompts/`, `interviewer/`, `panel/` or `logs/` | The writer is given the analysis and the guide, never what was said or how it was asked |
@@ -97,6 +98,10 @@ What is refused, each in a sentence that says what to do:
 `interview.interviewer` and a persona's model entry may be the same runner and model. The plan notes it, and the study runs.
 
 **Writing a learning goal.** Write what you would know afterwards that you do not know now: "How documents are collected from clients, and what happens when that goes wrong". A goal that names the hoped-for answer ("Confirm that chasing documents is painful") turns the interviewer into an advocate. The interviewer is told never to read a goal to the participant.
+
+**Writing what to dig for.** A `dig_for` line says where to go deep, not what to find: "what clients had worked out for themselves before first contact, and what they still needed the broker for", "how much broker time early-stage enquiries take, what that crowds out, and why". Name the root you want understood (the cost, the cause, why it matters), never the answer you hope for: "brokers waste time on unready clients" is a hypothesis, and the interviewer would hunt for it. Keep the team's hypotheses in the study brief, where no model reads them. Two or three lines a topic at most: each competes for the same exchanges.
+
+**Depth over breadth.** The interviewer follows a thread past its facts to why it matters and what causes it (`assets/interviewer-brief.md`, "Digging to the root"), and that takes exchanges. A thread followed to its root needs 6 to 10; the opener and a check on whether the topic matters take two more. So prefer five or six topics with caps of 8 to 10 over ten topics of 5: a topic whose cap is used before its first thread reaches a cause comes back with facts and no reason. Raise `interview.turns` to fit, and pilot to see where it lands ([Pilot, then run](#pilot-then-run)).
 
 **Writing an opener.** It is the one question you control word for word, so hold it to the method:
 
@@ -155,7 +160,7 @@ Which loan did that last happen on?
 
 - **Only the words under `SAY` reach the participant,** word for word, with no frame, count or topic.
 - **`TOPIC`** is a topic id of this persona's guide, `open` for an exchange outside every topic, or `close`.
-- **`MOVE`** names the technique, one of sixteen: `open`, `priority`, `raise`, `anchor`, `sequence`, `consequence`, `coping`, `alternatives`, `frequency`, `constraint`, `money`, `deflect`, `dig`, `clarify`, `accept`, `close`. `assets/interviewer-brief.md` says what each is.
+- **`MOVE`** names the technique, one of twenty: `open`, `priority`, `raise`, `anchor`, `sequence`, `consequence`, `coping`, `alternatives`, `frequency`, `constraint`, `why`, `cause`, `hardest`, `ideal`, `money`, `deflect`, `dig`, `clarify`, `accept`, `close`. `assets/interviewer-brief.md` says what each is.
 - **`WHY`** is one sentence for the user and the critic.
 - **To end,** `END: <reason>` replaces `TOPIC`, `MOVE` and `WHY`, and the line under `SAY` is recorded and not sent.
 
@@ -164,7 +169,7 @@ The interviewer receives each answer between two lines of dashes, then a status 
 **Caps.**
 
 - **`interview.turns` is exact.** The launcher counts exchanges and ends the interview once the last one the cap allows has its answer. That exchange is meant to be a close: the interviewer is told "This is your last question: close the interview."
-- **A topic's cap is advisory.** The interviewer is told "T2 has used its turns: move on or close." An exchange past the cap is delivered, counted and noted by `check_runs.py`.
+- **A topic's cap is advisory.** The interviewer is told "T2 has used its planned turns: finish the thread you are on while it still produces facts, then move on or close." An exchange past the cap is delivered, counted and noted by `check_runs.py`.
 
 **A repair.** A reply that cannot be used is never delivered. It is sent back once, with every problem named in one message: it does not follow the format, a field is missing, `TOPIC` or `MOVE` is not one of the list, `SAY` is empty, `SAY` holds a leak term, or the last exchange is no close. Each interviewer turn gets one send-back whatever the reasons. A second unusable reply in the same turn stops the interview as `partial`, or at the last exchange ends it one exchange short with no close.
 
@@ -300,7 +305,7 @@ Notes, none of which blocks. Record them: the writer is given `checks.md`.
 |---|---|
 | "topic never opened: T3" | Coverage the round did not get for that participant. `quant.md` counts it too |
 | "ended at its cap of 30 exchanges with no close" | The interviewer ran out of room. Lower the topic caps or raise `interview.turns` |
-| "T2 had 9 exchanges, 1 past its cap of 8" | The interviewer went on after the notice |
+| "T2 had 9 exchanges, 1 past its cap of 8" | The interviewer finished a thread after the notice, as it is told to. Read whether the thread earned it. When most topics run over, raise their caps and `interview.turns` |
 | "question 7 holds the opener of T3 and was labelled T2: it is counted under T3" | The interviewer opened the next topic under the old label. The launcher went by the words, so nothing is wrong with the counts. Many of these point at a smaller interviewer model |
 | "leak term "doc chase" in answer 4" or in its card | Background leaking in from the harness, as in a review. Read where it came from before trusting that interview |
 | "speaks of being an AI, a model or a persona in answer 9 ("language model")" | The participant broke character. Read the answer, and treat what follows it with care |
@@ -385,8 +390,8 @@ An analyst writes, for each interview, a `## <run id>` section: 100 to 200 words
 A critic writes, for each interview, a summary (a final check, the card items found and missed, the exchanges worth learning from) and one entry for each mark:
 
 - **`Flag`** on a question, with a better question beside it: `pitch`, `hypothetical`, `leading`, `opinion`, `generic`, `price-guess`, `wishlist`, `zoom`, `talking`, `rescue`, `compound`. At most two a question.
-- **`Missed`** signal on an answer, with a one-line note: `praise-taken`, `generality`, `feature-request`, `feeling`, `contradiction`, `payer`, `pushed-no-problem`.
-- **`Good`** move, with a one-line note: `anchored`, `consequence`, `accepted`, `deflected`, `dug`, `priority`, `spend`.
+- **`Missed`** signal on an answer, with a one-line note: `praise-taken`, `generality`, `feature-request`, `feeling`, `contradiction`, `payer`, `pushed-no-problem`, `surface` (a cost, a workaround, a loss or a change of habit left without asking why it matters or what caused it).
+- **`Good`** move, with a one-line note: `anchored`, `consequence`, `accepted`, `deflected`, `dug`, `priority`, `spend`, `rooted` (asked why it matters, what caused it or what was hardest, and reached a motive or a cause).
 - **An opener gets no flag and no good move:** it is the guide's question, not the interviewer's. A leading opener is yours to fix.
 
 ### `extract_notes.py`

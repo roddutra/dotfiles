@@ -9,7 +9,7 @@ The fixed sentences the launcher sends to an interviewer. An entry is a line tha
 
 All of it is this skill's own wording for the turn loop. None of it comes from the book.
 
-topic-cap: <TOPIC> has used its turns: move on or close.
+topic-cap: <TOPIC> has used its planned turns: finish the thread you are on while it still produces facts, then move on or close.
 last-question: This is your last question: close the interview.
 end-check-one: <TOPICS> was not opened. Open it, or confirm the end with your reason.
 end-check-many: <TOPICS> were not opened. Open the next one, or confirm the end with your reason.
