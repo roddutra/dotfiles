@@ -127,6 +127,8 @@ def cannot_ask(cfg: dict, e: dict) -> str | None:
     """Why a run cannot be asked a follow-up question whatever its runner says of its CLI and its
     model, in a clause, or None. choose() then asks the runner."""
     if e["role"] != "panellist":
+        if e["role"] == "interviewer":  # of a debrief: it is named by its run in every command
+            return "it is the interviewer of a debrief, and only a panellist run can be asked"
         job = "an analyst" if e["role"] == "analyst" else "the writer"
         return f"it is {job} job, and only a panellist run can be asked"
     state = launch.state_of(cfg, e)

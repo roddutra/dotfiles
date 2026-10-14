@@ -75,7 +75,13 @@ Standard library only. Every script takes a study directory laid out as:
                               attempt that put a follow-up question, .before, the persona file
                               as it was, kept until the attempt's end is in runs.json (the
                               snapshot rule, below), and .rejected.md, the file as a rejected
-                              follow-up left it; and, in a usability study,
+                              follow-up left it; the same two for an attempt that was a turn
+                              of a debrief, whose .rejected.md is the file as that turn left
+                              it before it was put back, and for such a turn of a usability
+                              run two folders more, .before.evidence, its evidence folder as
+                              it was, kept as long as .before is, and .rejected.evidence, each
+                              file of that folder as the turn left it before it was put back;
+                              and, in a usability study,
                               <run id>.<attempt>.evidence, a folder: what the run's evidence
                               folder held after that attempt, moved here when the run was
                               next started afresh (launch.py). It is the lead's alone, and
@@ -341,7 +347,8 @@ runs.json is a list. init_study.py writes one entry per panellist run:
     workdir    optional: the directory the entry's processes start in, relative to the study
                directory. An entry without one works where its role does (workdir()): panel/
                for a panellist, the study directory for a job. Only an entry of an interview
-               has one so far ("Interview entries", below)
+               and the interviewer of a debrief have one so far ("Interview entries" and
+               "Debriefs", below)
 
 launch.py hands an entry to a runner with three keys more, which are never written here:
 "browse", whether this attempt may use agent-browser, with it "browser_env", the variables by
@@ -362,8 +369,9 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
     sessions      {session id: usage}: what each session reported, one record per session
                   (runners.merge_usage). The run's usage is their sum (runners.total_usage)
     attempts      one object per process started: "n" (1-based), "kind" (launch, retry,
-                  resume, restart for a fresh launch made by the resume command, or followup
-                  for a follow-up question put to a finished run), "started"
+                  resume, restart for a fresh launch made by the resume command, followup
+                  for a follow-up question put to a finished run, or debrief for one turn
+                  of a debrief of it: "Debriefs", below), "started"
                   (epoch seconds), "allowed" (the seconds its watchdog was given: what was
                   left of the run's time), "ended" (epoch seconds, from the watchdog's end
                   record), "seconds", "exit_code" (null when unknown), "outcome" (the
@@ -421,9 +429,12 @@ id, in native mode. launch.py adds these, and an entry it has never touched has 
                   "run_unreported", the figures the run itself had reported none of. Nothing
                   can split it, so it is in neither the run's usage nor the follow-up's: its
                   "usage" has no tokens or cost, and the usage record lists it apart
-    seconds_used  wall-clock seconds over every attempt but the followup ones. With the
-                  reported spend it counts against the run's limits, which cover all its
-                  attempts. A follow-up has an allowance of its own (limits.followup)
+    seconds_used  wall-clock seconds over every attempt but the followup and debrief ones
+                  (APART_KINDS). With the reported spend it counts against the run's limits,
+                  which cover all its own attempts. A follow-up has an allowance of its own
+                  (limits.followup), and so has a debrief (limits.debrief)
+    debrief       there only for a run that has had a turn of a debrief: {"turns", "seconds",
+                  "usage"}, what its debrief attempts have used ("Debriefs", below)
     reason        why the run stopped, in a sentence; null while running and when done. For a
                   blocked run it carries the harness's own message, which says whether it was
                   a usage limit, a rate limit or a capacity refusal. In a usability study a
@@ -544,6 +555,61 @@ timed out, failed, turned away) stays whole, as evidence. So of a settled attemp
 "kind" and "seconds" can be counted on, and "ended" says that it has ended. TURN_KINDS are the
 attempt kinds that are one turn of a conversation, and APART_KINDS the ones that leave their
 run's state and limits alone.
+
+Debriefs. A debrief is an interview held in the session of a finished run of a review or
+usability study, about what that run did, saw and expected: product feedback, and the one place
+where an interviewer may name the product. study.json "debrief" is its guide, with the keys of
+DEBRIEF_KEYS, each as "interview" has it (check_debrief()): "interviewer", "goals", "topics" and
+"turns". It has no "about" and no situation card, and an interview study has no "debrief". A
+topic id may not be a task id of a usability study, since the interviewer is told the tasks by
+their ids. limits.debrief is the allowance of each side of one debrief, over all its turns
+(DEFAULT_LIMITS["debrief"], set from debriefs measured on real harnesses in October 2026), and
+limits.turn is not a key of these studies: a turn of a debrief has DEFAULT_LIMITS["turn"].
+guide(cfg, pid, "debrief") reads the guide for one persona, and debrief_problems() says what
+would spoil a debrief as study.json stands.
+
+"interview.py <study-dir> debrief" adds one entry for each run it debriefs, the interviewer's
+(interviewer_entry(cfg, run entry, "debrief"), debrief_of()), with the fields of an
+interviewer's entry above and one more:
+
+    kind       "debrief". An interviewer's entry of an interview study has none
+
+That entry and the turn log interviews/<run id>.jsonl, whose "start" record has "kind":
+"debrief", are where the debrief's own state lives: "carried", its halts, its end. The
+participant's side is the finished run's own entry, which is no entry of the conversation: it
+has no "interview" and is never "carried". All a debrief writes on it:
+
+    attempts   one of kind "debrief" for each of its turns, a resume of the run's session, cut
+               down like any turn once its reply is on the turn log
+    pid, pid_identity   while its turn runs, null again after
+    sessions   its session's totals, as every process adds to them
+    debrief    {"turns", "seconds", "usage"}: the debrief attempts that have ended, the seconds
+               they ran and what they used (the usage figures of runners/__init__.py), summed as
+               each is settled. The run's own usage is its sessions' less this (and less its
+               follow-ups'), and its "seconds_used" leaves these attempts out. "unallocated" is
+               there too when a turn's result was one total for itself and for an earlier
+               process of the run that had been stopped before reporting: the figures of that
+               total and "run_unreported", as on a followup attempt, in neither the run's
+               usage nor the debrief's
+    lost, unsaved   its session, when a turn found it gone or not kept
+
+Never "state", "reason", "reset_at", "limited_by", "seconds_used", "extended" or "carried": the
+run stays done, with the limits and the usage it had. Before each of its turns the persona file
+is copied to logs/<run id>.<attempt>.before, and when the turn has ended a file that differs
+from the copy is put back from it, what the turn left being kept in
+logs/<run id>.<attempt>.rejected.md: a debrief is spoken, and writes nothing. Until the
+attempt's end is in runs.json every reader reads the copy (read_persona(), the snapshot rule
+below). The copy is deleted last.
+
+The turn's process works in panel/ with the file tools the run had, so a usability run's evidence
+folder is as open to it as the persona file. It is kept and put back the same way, file by file:
+copied to logs/<run id>.<attempt>.before.evidence/ before the turn, each file that differs from
+its copy afterwards put back, with what the turn left of it kept in
+logs/<run id>.<attempt>.rejected.evidence/. A file the turn added is left where it is, since a
+launcher deletes nothing a run wrote. No reader is given this copy: while the turn runs, the
+step log and the screenshots are read as they stand. The rest of panel/ is as it is during any
+run: another run's persona file that changed is on the modification record (below), and nothing
+watches another run's evidence folder, the scratch folders, the instructions or the materials.
 
 read_runs() and write_runs() pass fields they don't know through untouched. Entries written
 before "key", "runner", "effort", "replicate" and "role" existed read as native-mode panellist
@@ -876,6 +942,7 @@ GUIDE_ID = re.compile(r"[A-Za-z0-9]+")  # a goal or topic id. A topic id is none
 NOT_TOPIC = ("open", "close", "end")    # what an interviewer's reply writes where a topic id goes, or to end
 DEFAULT_TURNS = 30       # the cap of an interview that names none, in exchanges
 DEFAULT_TOPIC_TURNS = 8  # the cap of a topic that names none
+ROOMY_TOPIC = 3          # exchanges a topic: a debrief's cap that leaves its topics fewer is noted
 SIDES = ("participant", "interviewer")  # the two sides of a conversation, as a turn log names them
 TURN_KINDS = ("turn", "debrief")        # attempt kinds that are one turn of a conversation
 APART_KINDS = ("followup", "debrief")   # attempt kinds that leave their run's state and limits alone
@@ -961,8 +1028,13 @@ DEFAULT_LIMITS = {
     "followup": {"minutes": 5, "budget_usd": 0.5},    # each run asked a follow-up, for each question
     "interviewer": {"minutes": 15, "budget_usd": 1.0},  # each interviewer, over its whole interview
     "turn": {"minutes": 3},                           # one turn of either side of a conversation
-    "debrief": {"minutes": 15, "budget_usd": 1.5},    # each side of a debrief: a placeholder, not yet measured
+    "debrief": {"minutes": 10, "budget_usd": 2.0},    # each side of a debrief, over all its turns
 }
+# limits.debrief is what debriefs measured on real harnesses in October 2026 leave room for. A side of a
+# six-exchange debrief used 20 to 45 seconds, a top-tier interviewer cost 0.15 USD, and the dearest side 0.235
+# USD: a mid-tier participant resuming a usability session of about 46k tokens, 0.19 USD of it for its first
+# turn, which misses the prompt cache because a turn of a debrief has other tools than the run had. On a
+# top-tier model a session over 100k tokens would pay about 1 USD for that first turn alone.
 # limits.run of an interview's participant, where study.json gives none. With the interviewer's and
 # the turn limit above it is what interviews measured on 13 October 2026 leave room for: the slowest
 # of 921 processes took 31 seconds, the longest side used 280 seconds of its own process time, and
@@ -1000,6 +1072,7 @@ PLACEHOLDER = re.compile(r"<([A-Z][A-Z0-9_]*)>")
 # adds it, and a brief asks for it with <NOTICE>.
 NOTICE = ("Synthetic panel: the feedback in this study was generated by AI personas, not by real people. "
           "It is not user research.")
+TITLE = re.compile(r"# +\S")  # the line a markdown file is titled with, which with_notice() puts the notice under
 # The name roster.py gives a skeleton persona. init_study.py refuses a study that still has one.
 SKELETON_NAME = "TODO"
 # What every script says after a refusal that a sandboxed shell tool can cause: the two ways out.
@@ -1116,6 +1189,8 @@ def check_study(cfg: dict):
         check_usability(cfg)
     if cfg["type"] == "interview":
         check_interview(cfg)
+    elif "debrief" in cfg:
+        check_debrief(cfg)
 
     limits, allowed = cfg["limits"], LIMIT_SETS[cfg["type"]]
     if not isinstance(limits, dict) or set(limits) - {*allowed, "overrides"}:
@@ -2104,6 +2179,72 @@ def check_interview(cfg: dict):
               f'"{interviewer_id("<run id>")}". Give the persona another id')
 
 
+def check_debrief(cfg: dict):
+    """Validate "debrief", the guide of the debriefs of a review or usability study, and fill
+    its defaults (module docstring, "Debriefs"): the keys of DEBRIEF_KEYS, each as "interview"
+    has it. An interview study has none (check_type_keys()). What depends on the runs is said
+    when a debrief is about to be held (debrief_problems(), and interview.py debrief), so a
+    study with the block loads, plans and runs as it did without it."""
+    held = check_guide(cfg, "debrief", DEBRIEF_KEYS)
+    terms = cfg["leak_terms"]
+    if not isinstance(terms, list) or not all(isinstance(t, str) and t.strip() for t in terms):
+        _fail('"leak_terms" must be a list of words or phrases, none of them empty: every question of a debrief is '
+              "searched for each before it is delivered, and an empty one is in every question")
+    taken = [p["id"] for p in cfg.get("personas") or [] if p["id"].lower() == "interviewer"]
+    if taken:
+        _fail(f'the persona id "{taken[0]}" is taken: the launcher names the entry of each debrief\'s interviewer '
+              f'"{interviewer_id("<run id>")}". Give the persona another id')
+    tasks = {str(t.get("id")).lower() for t in cfg.get("tasks") or [] if isinstance(t, dict)}
+    clash = next((t["id"] for t in held["topics"] if t["id"].lower() in tasks), None)
+    if clash:
+        _fail(f'debrief.topics: the topic id "{clash}" is also a task id. The interviewer is told the tasks by their '
+              "ids, and a transcript shows a topic id beside them, so the two would be taken for each other. Give "
+              'the topic an id that no task has, such as "D1"')
+
+
+def debrief_problems(cfg: dict) -> tuple[list[str], list[str]]:
+    """What would spoil a debrief as study.json stands, and what the lead should know before
+    one: (problems, notes), each a sentence. Asked when a debrief is about to be held and by
+    the plan, never when the study is loaded.
+
+    A problem: a "leak_terms" entry, ignoring case, in a topic's opener or its area. The
+    interviewer says an opener as it is written and may say an area, and a question that holds
+    a leak term is never delivered (interview.taken()), so that topic could not be opened. A
+    note: a leak term in a goal's "learn". It is not refused, since a debrief's goals may name
+    the product and a goal is never read to the participant, but a question that repeats the
+    term is sent back like any other. Another note: a cap, "turns", that leaves two topics or
+    more fewer than ROOMY_TOPIC exchanges each once the opening and the close are taken off,
+    counting a topic with a smaller cap of its own for that cap. check_guide() lets such a
+    guide through, down to one exchange a topic, and an interviewer that follows the first
+    topic up then reaches its last question with a topic unopened."""
+    held, problems, notes = cfg["debrief"], [], []
+
+    def found(text: str) -> str | None:
+        return next((term for term in cfg["leak_terms"] if term.lower() in text.lower()), None)
+
+    for t in held["topics"]:
+        for part in ("opener", "area"):
+            if found(t[part]):
+                problems.append(f'debrief topic {t["id"]}: its {part} holds the leak term "{found(t[part])}". The '
+                                "interviewer would say it, and a question that holds a leak term is never "
+                                'delivered. Reword it, or take the term out of "leak_terms".')
+    for g in held["goals"]:
+        if found(g["learn"]):
+            notes.append(f'debrief goal {g["id"]} holds the leak term "{found(g["learn"])}". A goal may name what a '
+                         "participant has seen, and is never read to one, so nothing is refused: a question that "
+                         "says the term is sent back once, and a second one stops the debrief.")
+    topics = held["topics"]
+    roomy = sum(min(ROOMY_TOPIC, t["turns"]) for t in topics) + 2  # as check_guide() counts: the opening, the close
+    if len(topics) > 1 and held["turns"] < roomy:
+        capped = any(t["turns"] < ROOMY_TOPIC for t in topics)
+        notes.append(f'debrief.turns is {held["turns"]}, which leaves the {len(topics)} topics fewer than '
+                     f"{ROOMY_TOPIC} exchanges each after the opening and the close, so a topic is likely to go "
+                     "unopened: an interviewer follows up the first one, and its last question is the close. "
+                     f"{roomy} would give each topic {ROOMY_TOPIC}"
+                     + (", or its own cap where that is less." if capped else "."))
+    return problems, notes
+
+
 def guide(cfg: dict, pid: str, block: str = "interview") -> dict:
     """The guide as one persona's interview has it, the one reading of it: {"about", "turns",
     "card", "goals", "topics"}.
@@ -2862,14 +3003,33 @@ def interview_of(entry: dict) -> str:
     return entry.get("interview") or entry["run"]
 
 
-def interviewer_entry(cfg: dict, participant: dict) -> dict:
+def interviewer_entry(cfg: dict, participant: dict, block: str = "interview") -> dict:
     """The runs.json entry of the interviewer of an interview, from its participant's entry,
-    before anything has started it (module docstring, "Interview entries")."""
+    before anything has started it (module docstring, "Interview entries"). block "debrief":
+    the entry of the interviewer of a debrief of a finished run, which that run's entry is the
+    participant of (module docstring, "Debriefs"). It has "kind": "debrief", the model entry
+    of debrief.interviewer, and the turn log as its file, where its participant's is a persona
+    file."""
     rid = participant["run"]
-    return {"run": interviewer_id(rid), "role": "interviewer", "interview": rid, "persona": participant["persona"],
-            "name": f"Interviewer of {rid}", "segment": participant["segment"], **cfg["interview"]["interviewer"],
-            "file": participant["file"], "prompt": f"prompts/{interviewer_id(rid)}.md",
+    return {"run": interviewer_id(rid), "role": "interviewer", "interview": rid,
+            **({"kind": "debrief"} if block == "debrief" else {}), "persona": participant["persona"],
+            "name": f"Interviewer of {rid}", "segment": participant["segment"], **cfg[block]["interviewer"],
+            "file": f"{INTERVIEWS}/{rid}.jsonl", "prompt": f"prompts/{interviewer_id(rid)}.md",
             "workdir": f"{INTERVIEWER_DIR}/{rid}"}
+
+
+def debrief_of(runs: list[dict], run: str) -> dict | None:
+    """The entry of the interviewer of the debrief of a run, among the entries of runs.json,
+    None when the run has had none. A debrief's state is that entry's: its turn log and its
+    "carried" (interview_state())."""
+    return next((e for e in runs if e.get("role") == "interviewer" and e.get("kind") == "debrief"
+                 and e.get("interview") == run), None)
+
+
+def block_of(entry: dict) -> str:
+    """The study.json key that holds the guide of the conversation an entry is of: "debrief" for
+    the entry of a debrief's interviewer, and "interview" for any other."""
+    return "debrief" if entry.get("kind") == "debrief" else "interview"
 
 
 def planned_runs(cfg: dict) -> list[dict]:
@@ -2915,13 +3075,15 @@ def fill_brief(name: str, values: dict) -> str:
 
 def with_notice(text: str) -> str:
     """Markdown text carrying the synthetic panel notice: unchanged when it has the line anywhere,
-    else with the line as a paragraph of its own under the heading the text opens with, or at the
-    very top when it opens with anything else."""
+    else with the line as a paragraph of its own under the title the text opens with ("# " and
+    its words), or at the very top when it opens with anything else. A deeper heading is no
+    title: it may open a fixed form, a theme or a note with its fields on the lines under it,
+    and a line put between the two would leave the form unread."""
     if NOTICE in text:
         return text
     lines = text.split("\n")
     first = next((i for i, line in enumerate(lines) if line.strip()), None)
-    at = first + 1 if first is not None and lines[first].startswith("#") else 0
+    at = first + 1 if first is not None and TITLE.match(lines[first]) else 0
     after = [] if at < len(lines) and not lines[at].strip() else [""]
     return "\n".join([*lines[:at], *([""] if at else []), NOTICE, *after, *lines[at:]])
 
@@ -3120,6 +3282,15 @@ def asking(entry: dict) -> dict | None:
     or may have ended with no launcher alive to settle it. The run's "state" does not show it."""
     last = (entry.get("attempts") or [None])[-1]
     return last if last and last.get("kind") == "followup" and last.get("ended") is None else None
+
+
+def apart_attempt(entry: dict) -> dict | None:
+    """The attempt of a finished run that may change its persona file and is not settled yet, if
+    there is one: the last attempt, of a kind in APART_KINDS (a follow-up question, or a turn
+    of a debrief), with no end in runs.json. A launcher made a copy of the file before it, and
+    until its end is on record that copy is what is read (read_persona())."""
+    last = (entry.get("attempts") or [None])[-1]
+    return last if last and last.get("kind") in APART_KINDS and last.get("ended") is None else None
 
 
 def open_attempt(entry: dict) -> dict | None:
@@ -3720,6 +3891,8 @@ def run_state(progress: dict, recorded: str | None = None, ended: dict | None = 
 
 
 UNSETTLED = "a follow-up is unsettled, so its file was read as it stood before the question"
+# The same of a run whose debrief has a turn out: every turn of one is put to it with a copy of its file kept.
+UNSETTLED_TURN = "a turn of its debrief is not settled, so its file was read as it stood before the turn"
 LOOKS = 5  # how many times read_persona() chooses and reads while the run's attempts change under it
 
 
@@ -3752,7 +3925,10 @@ def read_persona(study_dir: Path, cfg: dict, path: Path, entry: dict | None = No
     is read in place of the file, and "unsettled" is true: the file may hold what settling will
     reject and put back (the snapshot rule, module docstring). The copy is in logs/, which only
     a live study has, and it is there until the attempt's end is in runs.json. Without one the
-    file itself is read.
+    file itself is read. A turn of a debrief that is not settled is read the same way
+    (apart_attempt()): its copy is the file as it must stay, and what the turn left in the file
+    is put back before its end is on record. "unsettled_by" says which it was, "followup" or
+    "debrief", None when the file itself was read.
 
     entry is only the first word on the run: the caller read it some time ago, and a follow-up
     may have started or been settled since. So once the content is read, the run's attempts are
@@ -3781,7 +3957,7 @@ def read_persona(study_dir: Path, cfg: dict, path: Path, entry: dict | None = No
         return None if held is None else as_text(held)
 
     for _ in range(LOOKS):
-        attempt = asking(entry or {})
+        attempt = apart_attempt(entry or {})
         before = copy(entry, attempt) if attempt else None
         try:
             text = as_text(persona_bytes(study_dir, path)) if before is None else before
@@ -3793,20 +3969,23 @@ def read_persona(study_dir: Path, cfg: dict, path: Path, entry: dict | None = No
         if steady:
             break
     else:  # never the same attempts twice: a copy is the file before a question, whatever happened since
-        copies = (copy(entry, a) for a in reversed(_attempts(entry)) if a.get("kind") == "followup")
+        copies = (copy(entry, a) for a in reversed(_attempts(entry)) if a.get("kind") in APART_KINDS)
         text = before = next((c for c in copies if c is not None), before)
         if before is None:  # what was read from the file may be what a follow-up left: it is not returned
             raise SystemExit(
                 f"Follow-up questions to {(entry or {}).get('run') or run or path.stem} kept starting and settling "
                 f"while its persona file {path} was being read, so nothing was read from it: run the command "
                 f"again once they have finished (launch.py {study_dir} status shows them).")
-    return None if text is None else {**parse_persona_file(path, cfg, text), "unsettled": before is not None}
+    held = None if before is None else "debrief" if (attempt or {}).get("kind") == "debrief" else "followup"
+    return None if text is None else {**parse_persona_file(path, cfg, text), "unsettled": before is not None,
+                                      "unsettled_by": held}
 
 
 def unsettled_lines(runs: list[dict]) -> list[str]:
     """One line for each run that was read from the copy made before an unsettled follow-up, for
     the script that read it to print. runs are read_persona() results or run_records() records."""
-    return [f"{r['run']}: {UNSETTLED}" for r in runs if r.get("unsettled")]
+    return [f"{r['run']}: {UNSETTLED_TURN if r.get('unsettled_by') == 'debrief' else UNSETTLED}"
+            for r in runs if r.get("unsettled")]
 
 
 def persona_files(study_dir: Path) -> list[tuple[Path, dict | None]]:
@@ -3891,7 +4070,8 @@ def run_records(study_dir: Path, cfg: dict, held: bool = False) -> list[dict]:
         prog = run_progress(cfg, parsed)
         out.append({"run": run, "pid": pid, "model": key, "replicate": replicate, "segment": seg.get(pid, ""),
                     "parsed": parsed, "progress": prog, "state": run_state(prog, recorded),
-                    "unsettled": bool(parsed and parsed["unsettled"])})
+                    "unsettled": bool(parsed and parsed["unsettled"]),
+                    "unsettled_by": parsed.get("unsettled_by") if parsed else None})
     return out
 
 
@@ -4185,8 +4365,8 @@ def interview_progress(cfg: dict, entry: dict, records: list[dict]) -> dict:
     has carried, and "has_final" and "complete" alike whether the log has an "end" record. An
     interview that ended with a topic unopened is complete: the unopened topic is a finding.
     Two keys more: "exchanges", the answers on record, and "cap", the most the interview may
-    have."""
-    held = guide(cfg, entry["persona"])
+    have. The entry of a debrief's interviewer is read against the debrief's guide (block_of())."""
+    held = guide(cfg, entry["persona"], block_of(entry))
     carried = {r.get("topic") for r in records if r["t"] == "question"}
     opened = [t["id"] for t in held["topics"] if t["id"] in carried]
     ended = any(r["t"] == "end" for r in records)

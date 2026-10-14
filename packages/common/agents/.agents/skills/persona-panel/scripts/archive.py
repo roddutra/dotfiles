@@ -17,8 +17,9 @@ while they can be read, else from the study's own record (panel_lib.py, "Forms")
 made without --concepts has no source to tell a PDF from an image, and analyze.py needs to.
 
 Every markdown file kept gets the synthetic panel notice (panel_lib.NOTICE) when it lacks it:
-under the heading the file opens with, or at the very top when it opens with anything else. A
-file that has the line anywhere is left as it is, so archiving twice changes nothing, and the
+under the "# " title the file opens with, or at the very top when it opens with anything else,
+a deeper heading among them (panel_lib.with_notice()). A file that has the line anywhere is
+left as it is, so archiving twice changes nothing, and the
 closing line says the same both times: how many markdown files of the round carry the notice,
 not how many were given it. CSV, JSON
 and every other kind of file are copied byte for byte, because a line added to one would break
@@ -103,6 +104,12 @@ what it reads as and how far it got, and each that has turns on record and no tr
 secret is known, and a "leak_terms" entry in a question, a card or an answer is for
 check_runs.py to say before the round is archived. A usability study that keeps a folder
 interviews/ has every file of it scanned for its secrets with the other kept files.
+
+A review or usability study that held debriefs (interview.py debrief; panel_lib.py, "Debriefs")
+keeps their turn logs and transcripts the same way, in interviews/ and analysis/transcripts/,
+and one line says how many and which have no end record (debrief_lines()). A turn of a debrief
+in flight is refused like a turn of an interview, on its interviewer's entry or on the finished
+run it was put to.
 
 A usability study has no concepts and no key.md. Its archive holds the other kept files and its
 evidence, panel/evidence/<run id>/ as evidence/<run id>/ (panel_lib.run_evidence):
@@ -288,11 +295,14 @@ def refuse_unsettled(sd: Path, held: bool = False):
     A follow-up question that is not settled (launch.unsettled_followups). A turn of an
     interview in flight: an attempt with no end on an entry of a conversation
     (launch.in_flight()), whose process may still be answering, and whose answer the turn log
-    does not have yet. And an interview that a launcher is carrying between two turns, by the
-    one rule for that (pl.carried()): the entry is marked as carried and a launcher has the
-    study, which is what held says. The caller passes it false whenever it has the study
-    itself, since no launcher then has: a mark that a killed launcher left is no reason to
-    refuse, and such an interview is archived as its log stands (interview_lines())."""
+    does not have yet. A turn of a debrief in flight is refused the same way, on its
+    interviewer's entry or on the finished run it is put to, whose persona file is read from a
+    copy until the turn is settled (pl.open_attempt(), pl.TURN_KINDS). And an interview that a
+    launcher is carrying between two turns, by the one rule for that (pl.carried()): the entry is
+    marked as carried and a launcher has the study, which is what held says. The caller passes
+    it false whenever it has the study itself, since no launcher then has: a mark that a killed
+    launcher left is no reason to refuse, and such an interview is archived as its log stands
+    (interview_lines())."""
     if not (sd / "logs").is_dir():  # an archive archived again: it has nothing to settle with
         return
     runs = pl.read_runs(sd) if (sd / "runs.json").exists() else []
@@ -303,12 +313,15 @@ def refuse_unsettled(sd: Path, held: bool = False):
                          "launcher will reject and put back. Nothing was archived. Settle it with: "
                          f"followup.py {sd} list, once any process still answering has ended (launch.py {sd} "
                          "status shows them).")
-    turns = [launch.named(e) for e in runs if "interview" in e and launch.in_flight(e)]
+    turns = [launch.named(e) for e in runs if (pl.open_attempt(e) or {}).get("kind") in pl.TURN_KINDS]
     if turns:
+        goes_on = (f"interview.py {sd} debrief --runs <ids> goes on with the debrief"
+                   if any(e.get("kind") == "debrief" for e in runs) else f"launch.py {sd} resume goes on with the "
+                   "interview")
         raise SystemExit(f"{pl.plural(len(turns), 'turn')} of this study {pl.agree(len(turns), 'is', 'are')} not "
                          f"settled ({'; '.join(turns)}): its process may still be answering, and what it answers is "
                          f"not on the turn log yet. Nothing was archived. launch.py {sd} stop settles it and starts "
-                         f"nothing, and launch.py {sd} resume goes on with the interview.")
+                         f"nothing, and {goes_on}.")
     carried = list(dict.fromkeys(pl.interview_of(e) for e in runs if "interview" in e and pl.carried(e, held)))
     if carried:
         raise SystemExit(f"A launcher is carrying {pl.listed(carried)} between two turns, so "
@@ -487,6 +500,32 @@ def open_kept(sd: Path, f: Path) -> int:
     reason (panel_lib.unread()), when a folder on the way is a link or no folder, the file is a
     link or no regular file, or either may not be read."""
     return pl.open_below(sd, f, most=sys.maxsize)  # copied, not read whole: its size is no matter
+
+
+def debrief_lines(cfg: dict) -> list[str]:
+    """What the archive says of the debriefs of a review or usability study (panel_lib.py,
+    "Debriefs"): how many turn logs and transcripts travel, in interviews/ and
+    analysis/transcripts/ as an interview study's do, and each debrief that has no end record,
+    which is archived as it stands. Nothing for a study that held none. In a usability study
+    they are scanned for its secrets with every other file that is kept."""
+    sd = cfg["_dir"]
+    runs = pl.read_runs(sd) if (sd / "runs.json").exists() else []
+    held = [e["interview"] for e in runs if e.get("kind") == "debrief" and pl.turn_log(sd, e["interview"]).is_file()]
+    if not held:
+        return []
+    shown = [run for run in held if (sd / pl.INTERVIEWS / f"{run}.md").is_file()]
+    turns = {run: pl.read_turns(sd, run) for run in held}
+    lines = [f"Debriefs: {pl.plural(len(held), 'turn log')} and {pl.plural(len(shown), 'transcript')} in "
+             f"{pl.INTERVIEWS}/, with the analysts' copies in {pl.TRANSCRIPTS}/. The interviewers' folders and logs/ "
+             "stay behind."]
+    unended = [run for run in held if not any(r["t"] == "end" for r in turns[run])]
+    if unended:
+        each = [f"{run} ({pl.plural(sum(r['t'] == 'answer' for r in turns[run]), 'exchange')})" for run in unended]
+        lines.append(f"{len(unended)} of the {pl.plural(len(held), 'debrief')} "
+                     f"{pl.agree(len(unended), 'has', 'have')} no end record and "
+                     f"{pl.agree(len(unended), 'is archived as it stands', 'are archived as they stand')}: "
+                     f"{'; '.join(each)}.")
+    return lines
 
 
 def copy_kept(plan: dict, work: Path):
@@ -870,6 +909,8 @@ def main():
                     said = plan["lines"] + copy_evidence(plan, work)
                 if cfg["type"] == "interview":
                     said = interview_lines(cfg)
+                else:
+                    said = said + debrief_lines(cfg)
                 if forms:  # with none known, a record an earlier archive left there stays
                     pl.write_forms(work, forms)
                 left = publish(work, dest, other_kind(plan) if usability else [])

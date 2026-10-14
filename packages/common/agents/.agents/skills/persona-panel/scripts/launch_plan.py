@@ -48,6 +48,12 @@ question, apart from its run limits, so what a follow-up used is taken out of it
 and shown under a role of its own, "follow-up": a finished run measures the same for the estimate
 whether or not it was asked anything afterwards.
 
+A debrief (panel_lib.py, "Debriefs") is outside both too. Each side of one has limits.debrief over
+all its turns: what the finished run's turns used is taken out of that run's figures as a
+follow-up's is (debrief_usage()), and with its interviewer's it is shown under a role of its
+own, "debrief". The plan of a study that can hold one, or has, says so in a section of its own
+(debrief_lines()), none of which stops "run".
+
 A job of the synthesis that is run again. A job is done again by deleting its file and running
 its role again, and every attempt of it spends from the one share of the pool. So a job's row
 shows, once it has an attempt on record, what it has used and what is left of the share
@@ -91,6 +97,7 @@ left out of the mean tokens and cost of its model key, and the plan says how man
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -185,10 +192,15 @@ def size(n: int) -> str:
     return f"{n} bytes"
 
 
-def span(seconds: float) -> str:
+def span(seconds: float, up: bool = False) -> str:
+    """A length of time in the unit that suits it. up: rounded up to the figure shown, for a
+    bound that has to hold as it is printed."""
+    def shown(amount: float, digits: int) -> str:
+        return f"{math.ceil(amount * 10 ** digits) / 10 ** digits if up else amount:.{digits}f}"
+
     if seconds < 90:
-        return f"{seconds:.0f}s"
-    return f"{seconds / 60:.1f} min" if seconds < 5400 else f"{seconds / 3600:.1f} h"
+        return f"{shown(seconds, 0)}s"
+    return f"{shown(seconds / 60, 1)} min" if seconds < 5400 else f"{shown(seconds / 3600, 1)} h"
 
 
 def table(rows: list[list], indent: str = "  ") -> list[str]:
@@ -868,12 +880,21 @@ def followup_usage(entry: dict) -> dict:
     return runners.total_usage([a.get("usage") or {} for a in followup_attempts(entry)])
 
 
+def debrief_usage(entry: dict) -> dict:
+    """What the turns of a debrief put to a finished run used: entry["debrief"]["usage"], summed
+    as each turn was settled (panel_lib.py, "Debriefs"), every figure None for a run that has
+    had none."""
+    return runners.total_usage([(entry.get("debrief") or {}).get("usage") or {}])
+
+
 def unallocated(entry: dict) -> dict | None:
     """What follow-up attempts reported in one total with processes of the run itself that had
     been stopped before reporting (the attempts' "unallocated", in panel_lib.py), summed: tokens
-    and cost, with "run_unreported", the figures the run itself had reported none of. None when
-    the run has no such total."""
+    and cost, with "run_unreported", the figures the run itself had reported none of. A turn of
+    a debrief can report such a total too, and it is kept with the debrief's figures
+    (entry["debrief"]["unallocated"]). None when the run has no such total."""
     shared = [a["unallocated"] for a in followup_attempts(entry) if a.get("unallocated")]
+    shared += [u for u in [(entry.get("debrief") or {}).get("unallocated")] if u]
     if not shared:
         return None
     return {**runners.total_usage(shared), "run_unreported": sorted({f for u in shared for f in u["run_unreported"]})}
@@ -884,24 +905,27 @@ def usage_of(entry: dict) -> dict:
     is unallocated. A follow-up continues the run's session, so the session's total holds it, but
     it has an allowance of its own and never counts against the run's limits. A figure the run
     had reported none of before an unallocated total came is still None, not zero: so a run reads
-    the same before and after a follow-up."""
+    the same before and after a follow-up. The turns of a debrief are taken off the same way
+    (debrief_usage()): they continue the run's session under an allowance of their own."""
     total, asked = runners.total_usage(list((entry.get("sessions") or {}).values())), followup_usage(entry)
-    shared = unallocated(entry) or {"run_unreported": []}
+    shared, held = unallocated(entry) or {"run_unreported": []}, debrief_usage(entry)
     out = {}
     for f in total:
-        apart = (asked[f] or 0) + (shared.get(f) or 0)
+        apart = (asked[f] or 0) + (held[f] or 0) + (shared.get(f) or 0)
         out[f] = total[f] if total[f] is None or not apart else max(0, round(total[f] - apart, 9))
         if f in shared["run_unreported"] and not out[f]:
             out[f] = None
     return out
 
 
-def unreported(entry: dict, followups: bool = False) -> list[int]:
+def unreported(entry: dict, followups: bool = False, debrief: bool = False) -> list[int]:
     """The numbers of the attempts whose spend is in no figure: the launcher stopped the process
     before its harness reported anything, and the session has reported no total since. The
-    run's own attempts, or with followups the ones that put a follow-up question."""
-    return [a["n"] for a in entry.get("attempts") or []
-            if a.get("usage_reported") is False and (a.get("kind") == "followup") == followups]
+    run's own attempts, or with followups the ones that put a follow-up question, or with
+    debrief the ones that were a turn of a debrief of the run."""
+    kinds = ("followup",) if followups else ("debrief",) if debrief else None
+    return [a["n"] for a in entry.get("attempts") or [] if a.get("usage_reported") is False
+            and (a.get("kind") in kinds if kinds else a.get("kind") not in pl.APART_KINDS)]
 
 
 def summed(rows: list[dict], shared: list[dict] = ()) -> dict:
@@ -952,14 +976,30 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
     of the follow-ups that reported one. Those figures are in no row of "runs", "followups" or
     "keys", whose rows for that run list the figures concerned under "unallocated". They are the
     role "unallocated" in "roles", and "total" holds them.
+    "debriefs" has one row for each side of each debrief of a finished run (panel_lib.py,
+    "Debriefs"), there only when one was held: the participant's is the run's debrief attempts
+    and what they used, and the interviewer's that entry's own. Each has "run", the run that
+    was debriefed, "side", and as "state" the debrief's. They are in no row of "runs" or
+    "keys". They are the role "debrief" in "roles", whose "runs" and "done" count debriefs, and
+    "total" holds them. A total that a debrief turn reported for itself and a process of its
+    run is under "unallocated" like a follow-up's, with "debrief" true.
     This is the one reading of the stored usage: the usage record and the plan's estimate both
     come from it, so a session that was resumed counts once in each.
     """
-    rows, asked, shared = [], [], []
+    rows, asked, shared, held = [], [], [], []
     for e in entries:
+        if e.get("kind") == "debrief" and e["role"] == "interviewer":  # the interviewer's side of a debrief
+            used, turns = usage_of(e), len(e.get("attempts") or [])
+            held.append({"run": e["interview"], "key": e.get("key"), "runner": e.get("runner"),
+                         "model": e.get("model"), "state": states[e["run"]], "side": "interviewer",
+                         "interview": e["interview"], "role": "debrief", "attempts": turns,
+                         "seconds": (e.get("seconds_used") or 0) if turns else None,
+                         **{f: used[f] for f in FIGURES}, "unreported_attempts": unreported(e), "unallocated": []})
+            continue
         used, extra, lump = usage_of(e), followup_attempts(e), unallocated(e) or {}
         apart = [f for f in FIGURES if lump.get(f) is not None]
-        attempts = len(e.get("attempts") or []) - len(extra)
+        spoken = e.get("debrief") or {}  # what the turns of a debrief put to this run have used
+        attempts = len([a for a in e.get("attempts") or [] if a.get("kind") not in pl.APART_KINDS])
         who = {"run": e["run"], "key": e.get("key"), "runner": e.get("runner"), "model": e.get("model"),
                "state": states[e["run"]], "side": side_of(e) if "interview" in e else None,
                "interview": e.get("interview")}
@@ -972,9 +1012,17 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
                           "seconds": round(sum(a["seconds"] or 0 for a in extra), 3), **{f: used[f] for f in FIGURES},
                           "unreported_attempts": unreported(e, followups=True), "unallocated": apart,
                           "followups": sorted({a["followup"] for a in extra})})
+        if spoken:
+            used = debrief_usage(e)
+            held.append({**who, "state": states.get(pl.interviewer_id(e["run"]), "-"), "side": "participant",
+                         "interview": e["run"], "role": "debrief", "attempts": spoken.get("turns") or 0,
+                         "seconds": spoken.get("seconds") or 0, **{f: used[f] for f in FIGURES},
+                         "unreported_attempts": unreported(e, debrief=True),
+                         "unallocated": apart if spoken.get("unallocated") else []})
         if lump:
             shared.append({**who, "role": "unallocated", **{f: lump.get(f) for f in FIGURES},
-                           "followups": sorted({a["followup"] for a in extra if a.get("unallocated")})})
+                           "followups": sorted({a["followup"] for a in extra if a.get("unallocated")}),
+                           **({"debrief": True} if spoken.get("unallocated") else {})})
     panel = [r for r in rows if r["role"] == "panellist" or r["side"]]  # the runs, and both sides of a conversation
     keys = list(dict.fromkeys((r["key"], r["runner"], r["model"]) for r in panel))
     own = summed(rows)
@@ -982,16 +1030,20 @@ def usage_figures(entries: list[dict], states: dict) -> dict:
               **summed([r for r in rows + asked if r["role"] == role])}
              for role in dict.fromkeys(r["role"] for r in rows + asked)
              for sides in [{r["side"] for r in rows if r["role"] == role}]]
+    if held:  # both sides of every debrief, counted as debriefs: one is done when its interviewer's row says so
+        talks = {r["run"]: r["state"] for r in held if r["side"] == "interviewer"}
+        roles.append({"role": "debrief", "side": None, **summed(held), "runs": len({r["run"] for r in held}),
+                      "done": sum(state == "done" for state in talks.values())})
     if shared:  # no process of its own: the runs it concerns, and the figures
         lumps = summed([], shared)
         roles.append({"role": "unallocated", **lumps, "runs": len(shared), "started": len(shared)})
     return {
-        "runs": rows, "followups": asked, "unallocated": shared,
+        "runs": rows, "followups": asked, "unallocated": shared, **({"debriefs": held} if held else {}),
         "keys": [{"key": k, "runner": runner, "model": model,
                   **summed([r for r in panel if (r["key"], r["runner"], r["model"]) == (k, runner, model)])}
                  for k, runner, model in keys],
         "roles": roles,
-        "total": {**summed(rows + asked, shared), **{k: own[k] for k in ("runs", "started", "done")}}}
+        "total": {**summed(rows + asked + held, shared), **{k: own[k] for k in ("runs", "started", "done")}}}
 
 
 def usage_markdown(figures: dict) -> str:
@@ -1047,8 +1099,20 @@ def usage_markdown(figures: dict) -> str:
         out.append("- A follow-up question (followup.py) has an allowance of its own, limits.followup, and is "
                    "outside the plan's ceiling. What its processes used is under the role follow-up and under "
                    "Follow-ups, and in no run's own row. Runs, there, are the runs asked.")
+    held = figures.get("debriefs") or []
+    if held:
+        out.append("- A debrief (interview.py debrief) is an interview held in the session of a finished run. Each "
+                   "side of it has an allowance of its own, limits.debrief, outside the plan's ceiling. What its "
+                   "turns used is under the role debrief and under Debriefs, and in no run's own row. Runs, there, "
+                   "are debriefs, and Attempts are turns.")
     shared = figures.get("unallocated") or []
-    if shared:
+    if any(r.get("debrief") for r in shared):
+        out.append('- "unallocated" means a follow-up\'s process, or a turn of a debrief, reported one total for '
+                   "itself and for a process of its run that had been stopped before reporting. Nothing can split "
+                   "it, so it is under the role unallocated and under Unallocated, it is in the total, and it is in "
+                   "neither the run's row nor the follow-up's or the debrief's. The plan leaves such a run out of "
+                   "the mean tokens and cost it estimates from.")
+    elif shared:
         out.append('- "unallocated" means a follow-up\'s process reported one total for itself and for a process '
                    "of its run that had been stopped before reporting. Nothing can split it, so it is under the "
                    "role unallocated and under Unallocated, it is in the total, and it is in neither the run's "
@@ -1056,12 +1120,14 @@ def usage_markdown(figures: dict) -> str:
                    "estimates from.")
     stopped = [f"{r['run']} {attempts_named(r['unreported_attempts'])}" for r in [*figures["runs"], *asked]
                if r["unreported_attempts"]]
+    stopped += [f"{r['run']} (debrief, the {r['side']}'s) {attempts_named(r['unreported_attempts'])}" for r in held
+                if r["unreported_attempts"]]
     if stopped:
         out += ["", f"Stopped before the harness reported anything, and so missing from every figure below: "
                     f"{', '.join(stopped)}."]
     out += block("Total", ["Runs and jobs", "Done"], [line([total["runs"], total["done"]], total, total["started"])])
     out += block("By role", ["Role", "Runs", "Done"],
-                 [line([r.get("side") or r["role"], r["runs"],
+                 [line([r["role"] if r["role"] == "debrief" else r.get("side") or r["role"], r["runs"],
                         "-" if r["role"] in ("follow-up", "unallocated") else r["done"]], r, r["started"])
                   for r in figures["roles"]])
     out += block("By model key", ["Key", "Runner", "Model", "Runs", "Done"],
@@ -1074,9 +1140,15 @@ def usage_markdown(figures: dict) -> str:
         out += block("Follow-ups", ["Run", "Key", "Asked"],
                      [line([r["run"], r["key"] or "-", ", ".join(map(str, r["followups"]))], r, r["attempts"])
                       for r in asked])
+    if held:
+        out += block("Debriefs", ["Run", "Side", "Key", "State"],
+                     [line([r["run"], r["side"], r["key"] or "-", r["state"]], r, r["attempts"]) for r in held])
     if shared:
-        out += block("Unallocated", ["Run", "Key", "Reported by follow-up"],
-                     [line([r["run"], r["key"] or "-", ", ".join(map(str, r["followups"]))], r, True)
+        mixed = any(r.get("debrief") for r in shared)  # a total that a turn of a debrief reported
+        out += block("Unallocated", ["Run", "Key", "Reported by" if mixed else "Reported by follow-up"],
+                     [line([r["run"], r["key"] or "-",
+                            ", ".join([*(f"follow-up {n}" if mixed else str(n) for n in r["followups"]),
+                                       *(["debrief"] if r.get("debrief") else [])])], r, True)
                       for r in shared])
     return "\n".join(out) + "\n"
 
@@ -1214,7 +1286,8 @@ def share_used(entry: dict, limits: dict | None) -> dict:
             "left_usd": None if used is None or share is None else max(0, round(share - used, 6))}
 
 
-def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolded: bool, launcher: dict | None) -> dict:
+def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolded: bool, launcher: dict | None,
+          debrief: dict | None = None) -> dict:
     """The plan as one JSON-ready object. Starts no run and writes nothing to the study: the
     only processes are each runner's check(), shell_check() and model_status(), which make no
     model call. A check or a model status may let a harness refresh its own login.
@@ -1233,6 +1306,15 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
 
     A job's row of any study has what the job has used of its share of the pool
     (share_used()): "attempts", "finished", "used_usd" and "left_usd".
+
+    debrief is given for a review or usability study that has a "debrief" block or has held a
+    debrief (launch.plan()): {"hosts", the entries of the debriefs' interviewers, which are no
+    run of the plan and whose states are in states too; "held", {run id: {"state", "exchanges",
+    "cap", "reason"}} for each debrief on record; "refused", who cannot be debriefed as
+    study.json stands, each a sentence}. The plan then has "debrief" (debrief_lines()), and the
+    row of a run that was debriefed has "debrief", that debrief's state. Nothing of it is a
+    problem of the plan: what it refuses stops a debrief, never "run". With none given the plan
+    has neither key.
     """
     sd, native = cfg["_dir"], all(e["runner"] is None for e in runs)
     runs = sorted(runs, key=lambda e: e["role"] == "interviewer")  # the panel first, as it is without interviewers
@@ -1307,6 +1389,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         models.append(row)
         by_entry[role, name] = row
 
+    spoken = (debrief or {}).get("held") or {}  # the debriefs on record, by the run each was held with
+
     def run_row(e):
         m = by_entry[e["role"], label(e)]
         return {"run": e["run"], "role": e["role"], "persona": e.get("persona"), "name": e.get("name", ""),
@@ -1314,7 +1398,8 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                 "limits": m["limits"], "budget_enforced": m["budget_enforced"],
                 "budget_cap_note": m["budget_cap_note"], "unreported_attempts": unreported(e), "prompt": e["prompt"],
                 "prompt_exists": (sd / e["prompt"]).is_file(), "file": e["file"], "state": states[e["run"]],
-                "extended": e.get("extended") or 0}
+                "extended": e.get("extended") or 0,
+                **({"debrief": spoken[e["run"]]["state"]} if e["run"] in spoken else {})}
 
     # The interviewers' rows are no run of the plan, and a cap of its ceiling each.
     run_rows = [run_row(e) for e in runs if e["role"] != "interviewer"]
@@ -1408,7 +1493,16 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
                              "directory it opens, where it works")})
         providers.append({"provider": provider, "entries": entries})
 
-    usage = usage_figures([*runs, *planned], states)
+    usage = usage_figures([*runs, *planned, *((debrief or {}).get("hosts") or [])], states)
+    talks = None
+    if debrief is not None:  # what the plan says of debriefs: debrief_lines()
+        block, wrong = cfg.get("debrief"), pl.debrief_problems(cfg) if cfg.get("debrief") else ([], [])
+        talks = {"limits": pl.limits_for(cfg, "debrief"), "turn_minutes": pl.limits_for(cfg, "turn")["minutes"],
+                 "interviewer": {k: block["interviewer"][k] for k in ("runner", "model", "effort")} if block else None,
+                 "turns": block["turns"] if block else None,
+                 "held": [{"run": run, **facts} for run, facts in spoken.items()],
+                 "refused": debrief["refused"], "problems": wrong[0], "notes": wrong[1],
+                 "used": summed(usage["debriefs"]) if usage.get("debriefs") else None}
     asked = pl.read_followups(sd)
     followups = {"asked": len(asked), "runs": sum(len(f.get("runs") or []) for f in asked),
                  "limits": None if native or talk else pl.limits_for(cfg, "followup"),  # no interview is asked one
@@ -1447,7 +1541,7 @@ def build(cfg: dict, runs: list[dict], jobs: list[dict], states: dict, scaffolde
         "estimate": forecast,
         "used": summed(usage["runs"]),  # the runs and jobs: follow-ups are apart, under "followups"
         "ceiling": None if native else ceiling(run_rows + host_rows, job_rows, pool),
-        "followups": followups, "earlier_sessions": earlier,
+        "followups": followups, **({"debrief": talks} if talks else {}), "earlier_sessions": earlier,
         "problems": problems, "ok": not problems}
 
 
@@ -1513,10 +1607,11 @@ def render(plan: dict) -> list[str]:
         out += ["", f"Runs ({len(plan['runs'])}):"]
         out += table([["Run", "Persona", "Key", "Runner", "Model", "Effort", "Time limit", "Budget", "State", "Prompt"],
                       *([r["run"], f"{r['persona']} {r['name']}".strip(), r["key"], *entry_cells(r), *limits_of(r),
-                         r["state"], r["prompt"] + ("" if r["prompt_exists"] else " (missing)")]
+                         r["state"] + (f", debrief {r['debrief']}" if r.get("debrief") else ""),
+                         r["prompt"] + ("" if r["prompt_exists"] else " (missing)")]
                         for r in plan["runs"])])
     if native:
-        out += ["", *estimate_lines(plan), *followup_lines(plan["followups"]), ""]
+        out += ["", *estimate_lines(plan), *followup_lines(plan["followups"]), *debrief_lines(plan), ""]
         return out
 
     bare = {x["runner"] for x in talk["tools"] if x["tools"] == "none"} if talk else set()
@@ -1590,7 +1685,7 @@ def render(plan: dict) -> list[str]:
 
     sides = {i[x]["run"]: f"{i['run']} {x}" for i in talk["interviews"] for x in pl.SIDES} if talk else None
     out += ["", *estimate_lines(plan), "", *ceiling_lines(plan["ceiling"], syn, sides),
-            *followup_lines(plan["followups"]), "", LIST_PRICE]
+            *followup_lines(plan["followups"]), *debrief_lines(plan), "", LIST_PRICE]
     if plan["problems"]:
         out += ["", 'Problems, which stop "run" as they stop this plan:', *(f"  {stop(p)}" for p in plan["problems"])]
     out.append("")
@@ -1806,3 +1901,53 @@ def followup_lines(f: dict) -> list[str]:
             f"  Each run asked may use up to {f['limits']['minutes']:g} min and {money(f['limits']['budget_usd'])} "
             "for each question (limits.followup), apart from its run limits. That spend is outside the ceiling "
             f"above.{spent}"]
+
+
+def debrief_lines(plan: dict) -> list[str]:
+    """What the plan says of debriefs, for a review or usability study that has a "debrief"
+    block or has held one (build(), "debrief"): what a debrief is and who interviews, what each
+    side of one may use, which is outside the ceiling, every debrief on record with its state
+    and how far it got, the ones that are not finished with the command that goes on with
+    them, and what stops a debrief as study.json stands. None of that stops "run" or a job,
+    so none of it is among the plan's problems. Nothing for any other study."""
+    d, sd = plan.get("debrief"), plan["dir"]
+    if not d:
+        return []
+    command = f"interview.py {sd} debrief"
+    held = d["held"]
+    out = ["", f"Debriefs ({command} --runs <ids>|all): "
+               + (f"{plural(len(held), 'debrief')} on record." if held else "none held so far.")]
+    if plan["native"]:
+        return [*out, "  Native mode: no debrief can be held. The launcher carries every turn of one through a runner."]
+    who = d["interviewer"]
+    if who:
+        out.append("  A debrief is an interview with a finished run, in the session it worked in, about what it did, "
+                   f"saw and expected. Its interviewer is on {who['runner']}, model {who['model'] or 'default'}, "
+                   'has no tools where its runner can start it without, and is given the guide of study.json '
+                   f'"debrief" and nothing of the run\'s results. A debrief has at most '
+                   f'{plural(d["turns"], "exchange")}.')
+    else:
+        out.append('  study.json has no "debrief" now, so no further debrief can be held: the ones on record stand.')
+    used = d["used"]
+    out.append(f"  Each side of a debrief may use up to {d['limits']['minutes']:g} min and "
+               f"{money(d['limits']['budget_usd'])} over the whole of it (limits.debrief), and one turn up to "
+               f"{d['turn_minutes']:g} min, apart from the run's own limits. A debrief that has used a side's "
+               "allowance is at its end. That spend is outside the ceiling above."
+               + (f" So far debriefs have used {money(used['cost_usd'])}." if used and used["cost_usd"] is not None
+                  else ""))
+    for r in held:
+        went = f"{r['exchanges']} of {plural(r['cap'], 'exchange')}" if r["cap"] else plural(r["exchanges"], "exchange")
+        out.append(f"  {r['run']:<16} {r['state']:<8} {went}" + (f": {stop(r['reason'])}" if r["reason"] else ""))
+    short = [r["run"] for r in held if r["state"] in rules.DEBRIEF_TAKES]
+    if short and who:
+        them = agree(len(short), "it", "them")
+        out.append(f"  Not finished: {', '.join(short)}. {command} --runs {','.join(short)} goes on with {them}. The "
+                   f"analysts and the writer start all the same, and are given what there is of {them}, said to be "
+                   "unfinished.")
+    out += [f"  Cannot be debriefed: {stop(x)}" for x in d["refused"]]
+    out += [f"  Problem, which stops a debrief: {stop(x)}" for x in d["problems"]]
+    out += [f"  Note: {stop(x)}" for x in d["notes"]]
+    if who:
+        out.append(f"  {command} --runs <ids>|all --dry-run says which runs can be debriefed now and the most they "
+                   "can use, and starts nothing.")
+    return out

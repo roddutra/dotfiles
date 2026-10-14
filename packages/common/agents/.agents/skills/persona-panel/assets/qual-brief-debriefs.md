@@ -1,0 +1,2 @@
+After their reviews were finished, some of your panellists were interviewed about them, each in its original session: a debrief. An interviewer asked, one question at a time, what they did, saw and expected. Read the transcripts as product feedback and as qualitative evidence only: quote an answer exactly, cite the run and the exchange number, and say that it was given in a debrief, in answer to a question. They changed no score or ranking, and they are in no table or tally. The transcripts:
+<TRANSCRIPTS>

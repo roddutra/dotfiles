@@ -235,9 +235,70 @@ and written to analysis/quote-check.md, and the command exits with 1 when anythi
 The launcher runs the same check when a writer job of an interview study ends done. Nothing is
 sent back to the writer.
 
+Debriefs (debrief(), cannot_debrief(), choose_debriefs()). A debrief is an interview held with
+a finished run of a review or usability study, in the session that run worked in, about what
+it did, saw and expected: product feedback, where a standalone interview never names a product.
+study.json "debrief" is its guide (panel_lib.py, "Debriefs"), and the loop above carries it
+unchanged, told apart by the "kind" of its log's "start" record: it has no situation card, so
+it begins at the interviewer's opening (fold()), and its participant has a session from the
+start, the run's, so every one of its turns resumes it. The interviewer's prompt is
+assets/interviewer-brief-debrief.md, a second whole brief with the same rules turned on the
+session, and in place of "About" what the run worked through (session()): a usability run's
+product and its tasks by id and goal, or a review's artefact and the neutral labels of its
+concepts. Nothing a run wrote, scored or was checked for is in it.
+
+What the participant is sent. The finished session still holds its run's instructions, to write
+to its persona file and, in a usability study, to drive a browser. So its first question is
+inside assets/debrief-opening.md, which says what a debrief is, that it is spoken, and that
+nothing is to be written or opened, and every later one is under the one line of
+assets/debrief-question.md, which says so again (message()). Whatever it does all the same, the
+launcher puts its persona file back as it was after every turn (launch.py, "Debriefs").
+
+The leak gate stays as it is in a debrief: a question that holds a "leak_terms" entry is sent
+back, since in a review or usability study those are the internal words no panellist may be
+shown, and a debrief speaks to the panellist. A debrief's goals may name the product, and a
+goal that holds a leak term is noted and not refused: a goal is never read out. An opener or an
+area that holds one is refused before a debrief is held (panel_lib.debrief_problems()), since
+the interviewer says both.
+
+The command. "debrief --runs <ids>|all" is built like "followup.py ask". Every refusal comes
+before anything is recorded: an interview study; no "debrief" in study.json; a study in native
+mode; then for each run named what refuses a follow-up (followup.cannot_ask(): not a panellist
+run, not done, a process still running, a session purged, lost, not saved or never recorded, a
+runner that cannot resume), a persona with no topic, a follow-up that is not settled, and a
+debrief that is done (a run is debriefed once) or limited (at its end: limits.debrief is a
+side's whole allowance, and there is no --extend); then the runners and the model entries of
+the runs and of the interviewer (launch.fitness(), which refuses a runner that is not verified
+for interviews or cannot resume). Unless every run named can be debriefed nothing is held,
+or with --skip-unfit the others are. --dry-run prints the same lines and stops: the runs it
+would begin with and go on with, each side's allowance and the most they can use between them,
+taking no lock and writing nothing. Of a debrief whose last turn ended with no launcher alive
+it says that it cannot say, and exits with 1: the command records that turn before it chooses
+(left_in_flight()), so the dry run judges nothing of that run or of a runner for it, unless
+its debrief reads at its end already (choose_debriefs()). Without --dry-run each run gets its
+interviewer's entry, prompt and empty folder (set_up()) and is queued for launch.py's
+supervisor, which holds the debriefs side by side as it holds interviews.
+
+The same command goes on with a debrief that stopped short: one that reads pending or failed is
+begun again, and one that reads partial or blocked is taken up at the turn its log reached,
+with a "resume" record "by": "debrief". "launch.py stop" stops one, and "launch.py status"
+shows each on its run's row and names this command for the ones not finished. launch.py's
+"run" and "resume" go on with no debrief. When one ends, or reaches the end of a side's
+allowance, both transcripts are written, headed "Debrief" (render()).
+
 Usage:
   interview.py <study-dir> render [--runs <ids>]   # write both transcripts again
   interview.py <study-dir> quotes                  # check the quotations of the synthesis
+  interview.py <study-dir> debrief --runs <ids>|all [--dry-run] [--skip-unfit]
+                                                   # interview finished runs of a review or
+                                                   # usability study, each in its own session
+  interview.py <study-dir> debrief --runs <ids>    # the same command again goes on with a
+                                                   # debrief that was stopped or cut short, at
+                                                   # the turn its log reached
+
+debrief stays in the foreground until its debriefs have ended, as launch.py does, and
+"launch.py <study-dir> stop" stops it. Exit code: 0 when every debrief it held is done, 1
+otherwise. It changes no run: every state, score and persona file is as it was.
 
 render takes the study while it writes. When a launcher has it, render says so and writes
 all the same: a transcript is made from the turns on record at that moment, and the launcher
@@ -321,6 +382,10 @@ MARK_NAMES = {"single": ("single quotation marks", "''"), "guillemets": ("guille
 SPEECH_WORDS = 6                                       # a stretch in those marks this long is speech, and no term
 ELLIPSIS = "…"                                    # read as three full stops: the same words, written either way
 SHOWN_WORDS = 12                                       # the words of a quotation that a line about it repeats
+# What both transcripts of a debrief say of themselves, under the recruitment facts: what kind of evidence it is.
+DEBRIEF_NOTE = ("A debrief: an interview held with this run after it had finished, in the session it worked in, about "
+                "what it did, saw and expected. It is product feedback, given from memory in answer to questions, "
+                "and it changed nothing the run had written.")
 
 
 def notices() -> dict[str, str]:
@@ -400,7 +465,9 @@ def interviewer_prompt(cfg: dict, persona: dict, block: str = "interview") -> st
     filled: the guide as that persona's interview has it (pl.guide(): its topics, with the goals
     they leave), what a recruiter would know of the participant, and the reference notes
     (references()). The same for every model entry and replicate of the persona. block is the
-    study.json key the guide is read from.
+    study.json key the guide is read from. With "debrief" the brief is
+    assets/interviewer-brief-debrief.md, for the interviewer of a debrief of a finished run:
+    it has no "About", and in its place what the participant's session was (session()).
 
     Every topic id the brief shows is one of this guide's, so that no example gives the
     interviewer an id to copy that its guide does not have: <FIRST_TOPIC> is the first topic's,
@@ -409,13 +476,38 @@ def interviewer_prompt(cfg: dict, persona: dict, block: str = "interview") -> st
     writes one for this guide (_example_status())."""
     held = pl.guide(cfg, persona["id"], block)
     shown = held["topics"][min(1, len(held["topics"]) - 1)]
-    return pl.fill_brief("interviewer-brief.md", {
-        "ABOUT": held["about"], "NAME": persona["name"], "ROLE": persona["role"],
-        "SEGMENT_LINE": _segment_line(cfg, persona),
-        "GOALS": _goal_lines(held["goals"]),
-        "TOPICS": _topic_lines(cfg, held["topics"]), "TURNS": held["turns"], "REFERENCES": references(),
-        "FIRST_TOPIC": held["topics"][0]["id"], "EXAMPLE_TOPIC": shown["id"],
-        "EXAMPLE_STATUS": _example_status(held, shown)})
+    values = {"NAME": persona["name"], "ROLE": persona["role"], "SEGMENT_LINE": _segment_line(cfg, persona),
+              "GOALS": _goal_lines(held["goals"]),
+              "TOPICS": _topic_lines(cfg, held["topics"]), "TURNS": held["turns"], "REFERENCES": references(),
+              "FIRST_TOPIC": held["topics"][0]["id"], "EXAMPLE_TOPIC": shown["id"],
+              "EXAMPLE_STATUS": _example_status(held, shown)}
+    if block == "debrief":  # a second whole brief: the same rules, turned on a session the participant has had
+        return pl.fill_brief("interviewer-brief-debrief.md", {**values, "SESSION": session(cfg)})
+    return pl.fill_brief("interviewer-brief.md", {**values, "ABOUT": held["about"]})
+
+
+def session(cfg: dict) -> str:
+    """What the interviewer of a debrief is told of the session its participant has had, for
+    <SESSION> of assets/interviewer-brief-debrief.md: what the run worked through, by the names
+    the participant knows it by, and nothing of what any run made of it.
+
+    A usability study: the product as the panellists were introduced to it ("product_phrase",
+    else its name), and each task by its id and its goal, a line each. A review: the artefact
+    and the neutral labels the concepts were shown under. Never a concept's own id or name,
+    which no panellist saw, and never a score, an outcome or a word a run wrote."""
+    if cfg["type"] == "usability":
+        product = (cfg.get("product_phrase") or f"a product called {cfg['product']}").replace("**", "")
+        tasks = cfg["tasks"]
+        return "\n".join([f"They tried to get {pl.plural(len(tasks), 'task')} done in {product}, in a browser. They "
+                          f"know {pl.agree(len(tasks), 'the task', 'each task')} by its label:",
+                          *(f"- Task {t['id']}: {' '.join(t['goal'].split())}" for t in tasks)])
+    labels = [f"Concept {label}" for label in pl.label_map(cfg)]
+    if pl.single_concept(cfg):
+        what = f"one {cfg['artefact']}" if cfg["artefact"] else f"one concept of {cfg['artefact_plural']}"
+        return (f"They reviewed {what}, shown to them as {labels[0]}: they looked through it and wrote what they "
+                "made of it.")
+    return (f"They reviewed {len(labels)} {cfg['artefact_plural']}, shown to them as {pl.listed(labels)}: they looked "
+            "through each, wrote what they made of it and ranked them.")
 
 
 def _goal_lines(goals: list[dict]) -> str:
@@ -783,7 +875,7 @@ def malformed(records: list[dict]) -> str | None:
     return f"its turn log is of the wrong form ({' '.join(wrong).rstrip('.')})" if wrong else None
 
 
-def standing(records: list[dict], guide: dict) -> dict:
+def standing(records: list[dict], guide: dict | None) -> dict:
     """How an interview that no launcher carries stands, for "status", the plan and the line said
     when it is put down: {"awaiting", "side", "reason", "reset_at", "limited_by"}.
 
@@ -795,12 +887,21 @@ def standing(records: list[dict], guide: dict) -> dict:
     (malformed()): no command goes on with it, and the rest is read from what is left of it.
     "side" is the side the reason is about, the one a "resume --extend" extends: the "halt"'s,
     else the "lost" record's, else the side that speaks next. "reset_at" and "limited_by" are
-    the "halt"'s, None when it has none. Nothing of this is written to runs.json."""
+    the "halt"'s, None when it has none. Nothing of this is written to runs.json.
+
+    guide None is for a debrief whose guide was taken out of study.json after it was held: the
+    reason is then the "halt"'s, else the "lost" record's, and never a count, which only a
+    guide has a cap for."""
     pos = fold(records)
-    step, held = _step(pos, guide), ({} if pos["end"] else pos["halt"] or {})
+    held = {} if pos["end"] else pos["halt"] or {}
+    if guide is None:
+        reason = None if pos["end"] else held.get("reason") or (_ended(pos["lost"]) if pos["lost"] else None)
+    else:
+        step = _step(pos, guide)
+        reason = step["reason"] if step["do"] == "stop" else None
     return {"awaiting": pos["awaiting"],
             "side": held.get("side") or (pos["lost"] or {}).get("side") or SPEAKS.get(pos["awaiting"]),
-            "reason": malformed(records) or (step["reason"] if step["do"] == "stop" else None),
+            "reason": malformed(records) or reason,
             "reset_at": held.get("reset_at"), "limited_by": held.get("limited_by")}
 
 
@@ -830,7 +931,8 @@ def taken(pos: dict, guide: dict, side: str, attempt: int, result: dict, leak_te
         ending    None for a process that replied, else why it left no reply: "stop", "time"
                   (limits.turn), "limit" (the side's time), "budget", "usage_limit", "error" or
                   "killed" (its watchdog)
-        reason    what its harness said of an ending, when it said anything
+        reason    what its harness said of an ending, when it said anything. Of "limit" and
+                  "budget" the launcher's own words instead: what the side has none left of
         reset_at  when a usage limit lifts, when the harness said
         seconds   how long the process ran, when known: each record made from it has it
 
@@ -947,6 +1049,12 @@ def message(step: dict, pos: dict, guide: dict) -> str:
 
         say        the words of the last question, and nothing else
         again      assets/participant-again.md around the same words
+                   In a debrief (pos["kind"]) either is inside a frame of its own, since the
+                   participant is a finished run whose session was told to write to its
+                   persona file and, in a usability study, to drive a browser:
+                   assets/debrief-opening.md until it has an answer on record, which says what
+                   a debrief is and that it is spoken, and after that
+                   assets/debrief-question.md, one line that says so again above the words
         turn       assets/interviewer-turn.md: the last answer, status_line() and cap_notices()
         repair     assets/interviewer-repair.md: a sentence a line for each problem of the
                    reply that was sent back
@@ -957,10 +1065,16 @@ def message(step: dict, pos: dict, guide: dict) -> str:
     is not asked for the frame "prompt".
     """
     frame = step["frame"]
-    if frame == "say":
-        return pos["questions"][-1]["say"]
-    if frame == "again":
-        return pl.fill_brief("participant-again.md", {"QUESTION": pos["questions"][-1]["say"]}).strip()
+    if frame in ("say", "again"):
+        said = pos["questions"][-1]["say"]
+        if frame == "again":
+            said = pl.fill_brief("participant-again.md", {"QUESTION": said}).strip()
+        if pos["kind"] != "debrief":
+            return said
+        # The session still holds the instructions of its run, to write to its file and to open things. So every
+        # question says what a debrief is not: whole before its first answer, and in a line from then on.
+        return pl.fill_brief("debrief-question.md" if pos["answers"] else "debrief-opening.md",
+                             {"QUESTION": said}).strip()
     if frame == "turn":
         text = pl.fill_brief("interviewer-turn.md", {"ANSWER": pos["answers"][-1]["text"],
                                                      "STATUS": status_line(pos, guide),
@@ -1020,6 +1134,9 @@ def render(cfg: dict, entry: dict, records: list[dict], analysts: bool = False) 
     is not as a launcher writes one is named there too (malformed()): what a record of it that
     was set aside held is in neither transcript.
 
+    A debrief's transcripts are headed "Debrief" and say under the facts what a debrief is
+    (DEBRIEF_NOTE). It has no situation card, and its topics are those of study.json "debrief".
+
     analysts: the analysts' copy, analysis/transcripts/<run id>.md. The recruitment facts and
     every exchange that has its answer, as "### <n>", "**Q:**", "**A:**", and nothing else: no
     card, no topic, move or reason, and no line in brackets, so nothing of the interviewer's
@@ -1030,7 +1147,8 @@ def render(cfg: dict, entry: dict, records: list[dict], analysts: bool = False) 
     guide = pl.guide(cfg, entry["persona"], "debrief" if debrief else "interview")
     areas = {t["id"]: t["area"] for t in guide["topics"]}
     answers = {r["n"]: r for r in pos["answers"]}
-    out = [f"# {'Debrief' if debrief else 'Interview'} {entry['run']}: {entry['name']}", "", *_facts(cfg, entry)]
+    out = [f"# {'Debrief' if debrief else 'Interview'} {entry['run']}: {entry['name']}", "", *_facts(cfg, entry),
+           *(["", DEBRIEF_NOTE] if debrief else [])]
     if analysts:
         out += ["", "## Exchanges"]
         for q in (q for q in pos["questions"] if q["n"] in answers):
@@ -1922,14 +2040,457 @@ def conversations(runs: list[dict]) -> list[str]:
     return [e["interview"] for e in runs if e["role"] == "interviewer" and "interview" in e]
 
 
+# ---------------------------------------------------------------- debriefs
+
+DEBRIEF_DRY_RUN = "Dry run: no debrief was held and nothing was recorded. Leave out --dry-run to hold them."
+# The states of a debrief that the debrief command goes on from, each with what it says it does. One that reads
+# done has been held, and one that reads limited is at its end: limits.debrief is a side's whole allowance.
+DEBRIEF_TAKES = {"pending": "begin", "failed": "begin again", "partial": "go on with", "blocked": "go on with"}
+
+
+def no_debrief(cfg: dict) -> str | None:
+    """Why no run of a study can be debriefed, whatever its runs are, as a sentence, else None:
+    study.json has no "debrief" block, or the study is in native mode, whose runs have no
+    runner to carry a turn through. An interview study is refused before this is asked
+    (main()): it has nothing to load a guide from."""
+    if "debrief" not in cfg:
+        return ('study.json has no "debrief": the guide of a debrief, an object with '
+                f"{pl.listed(list(pl.DEBRIEF_KEYS))}, as \"interview\" has them in an interview study. Add it, and no "
+                "run or score changes: a debrief is held with runs that are finished")
+    if all(e["runner"] is None for e in pl.model_entries(cfg)):
+        return ("this study is in native mode, and a debrief cannot be held in one: the launcher carries every turn "
+                "between the interviewer and a run's session, each through a runner")
+    return None
+
+
+def unfit_for_debrief(cfg: dict, runs: list[dict]) -> list[str]:
+    """Who cannot be debriefed as study.json stands, each a sentence, with no process started
+    and no CLI asked: what the plan of a review or usability study says of it. runs are its
+    panellist entries. A study with no "debrief" or in native mode (no_debrief()); the
+    interviewer, and then every run, when debrief.interviewer is on a runner that cannot carry
+    an interview; and each model entry on such a runner, with its runs (planning.no_interview():
+    the runner must declare "interview" and be able to resume a session). What only a finished
+    run can say, its state and its session, is "debrief --dry-run"'s."""
+    import launch_plan as planning  # here and never at the top: launch_plan.py imports this module
+    whole = no_debrief(cfg)
+    if whole:
+        return [whole]
+    out = []
+    host = cfg["debrief"]["interviewer"]
+    refused = planning.no_interview(host["runner"])
+    if refused:
+        out.append(f"debrief.interviewer: {refused}. No run can be debriefed until it is")
+    for key in dict.fromkeys(e["key"] for e in runs):
+        mine = [e for e in runs if e["key"] == key]
+        refused = planning.no_interview(mine[0]["runner"]) if mine[0]["runner"] else None
+        if refused:
+            out.append(f"{key} ({pl.plural(len(mine), 'run')}): {refused}. Its runs are reviewed as before, and none "
+                       "of them can be debriefed")
+    return out
+
+
+def at_its_end(cfg: dict, runs: list[dict], e: dict) -> str | None:
+    """Why a run's debrief is at its end, in a clause, or None: its turn log reads done, and a
+    run is debriefed once, or limited, and limits.debrief is the whole of a side's allowance.
+    A launcher only adds to a turn log, and nothing it adds to one that reads done or limited
+    takes that back, a debrief having no --extend. So this is true of a debrief with a turn
+    that is not settled yet, whatever that turn came to."""
+    import launch
+    run, host = e["run"], pl.debrief_of(runs, e["run"])
+    state = launch.state_of(cfg, host) if host else None
+    if state == "done":
+        return f"it has been debriefed: its transcript is {pl.INTERVIEWS}/{run}.md, and a run is debriefed once"
+    if state == "limited":
+        stands = standing(pl.read_turns(cfg["_dir"], run), pl.guide(cfg, e["persona"], "debrief"))
+        return ("its debrief is at its end: " + (stands["reason"] or "a side has used its allowance")
+                + f", and limits.debrief is the whole of a side's allowance, with no --extend. Its transcript is "
+                f"{pl.INTERVIEWS}/{run}.md")
+    return None
+
+
+def cannot_debrief(cfg: dict, runs: list[dict], e: dict, adopted: bool = False) -> str | None:
+    """Why a run cannot be debriefed whatever its runner says of its CLI and its model, in a
+    clause, or None. First what stops a follow-up question, by the same rule
+    (followup.cannot_ask()): a job, a run that is not done or has a process still running, a
+    session that was purged, lost, not saved or never recorded, a runner that cannot resume.
+    Then what is a debrief's own: a persona that the guide's "segments" leave with no topic, a
+    follow-up question that is not settled, and the debrief the run already has, by the state
+    its turn log reads as. One that is done was held, and one that is limited is at its end
+    (at_its_end()). One whose interviewer cannot be resumed with answers on record is left
+    alone, as an interview is. adopted: this command has taken over a turn of it that a
+    launcher left running, and goes on with it. A dry run asks so of a run whose turn, left in
+    flight by a launcher that is gone, is still running (left_in_flight()). One whose left
+    turn has ended is never asked here by a dry run: the settlement of that turn can change
+    or put aside every answer but at_its_end()'s (choose_debriefs())."""
+    import followup  # here and never at the top: both import launch.py, which imports this module
+    import launch
+    sd, run = cfg["_dir"], e["run"]
+    # One whose turn this command adopted was begun by a command that asked all of this, and is at work now:
+    # of such a run cannot_ask() would say only that a process of it is running, which is that turn. A dry run
+    # asks the same way of a turn that has ended and is not settled: its attempt has no end in runs.json yet.
+    why = None if adopted else followup.cannot_ask(cfg, e)
+    if why:
+        return why
+    if not pl.guide(cfg, e["persona"], "debrief")["topics"]:
+        return ('its persona is left with no topic by the "segments" of the debrief\'s topics: every one is limited '
+                "to other segments")
+    if run in launch.unsettled_followups(sd, runs):
+        return f"a follow-up question to it is not settled (followup.py {sd} list settles one that was cut short)"
+    host, records = pl.debrief_of(runs, run), pl.read_turns(sd, run)
+    if host is None:
+        return (f"{pl.INTERVIEWS}/{run}.jsonl is there and runs.json has no debrief of this run to go with it: move "
+                "the file into logs/") if records else None
+    over = at_its_end(cfg, runs, e)
+    if over:
+        return over
+    answers = sum(r["t"] == "answer" for r in records)
+    if launch.state_of(cfg, host) == "running" and not adopted:
+        return "its debrief is being held now, by the launcher that has this study"
+    if malformed(records):
+        return (f"{malformed(records)}. Put {pl.INTERVIEWS}/{run}.jsonl right, or to hold the debrief again from its "
+                "start move that file into logs/")
+    gone = fold(records)["spoke"]["interviewer"] and launch.session_gone(
+        host, runners.get(host["runner"]), "the interviewer's")
+    if gone and answers:
+        return (f"{gone} and its debrief has {pl.plural(answers, 'answer')} on record, so it cannot be continued. To "
+                f"hold it again from the start, move {pl.INTERVIEWS}/{run}.jsonl into logs/")
+    return None
+
+
+def choose_debriefs(cfg: dict, runs: list[dict], named: str | None, skip_unfit: bool,
+                    adopted: frozenset = frozenset(), unsettled: frozenset = frozenset()) -> list[dict]:
+    """The runs to debrief: the ones --runs names, or with "all" every panellist run that is done
+    and can still be debriefed. Says why each run named cannot be debriefed, and exits unless
+    every one can or skip_unfit, as followup.choose() does for a question. A run that could be
+    is then judged with the interviewer's entry as "run" judges the two sides of an interview
+    (launch.fitness(), with interview true): each runner's CLI can be used, each model entry is
+    one its runner can still launch, signed in, and each runner can carry an interview. An
+    interviewer that cannot be used stops every debrief.
+
+    "all" names no run, so a finished run whose debrief is at its end, done or limited, is
+    passed over with one line and stops nothing, where the same run named is refused. With none
+    left to hold that is said, and the list returned is empty: the caller has nothing to do,
+    and nothing went wrong. A finished run that cannot be debriefed for any other reason stops
+    "all" as it stops a list of names, unless skip_unfit.
+
+    unsettled is a dry run's: the runs with a turn that a launcher that is gone left in flight
+    and that has ended since (left_in_flight()). The command settles that turn before it comes
+    here, and a dry run may not. What the turn came to can change what refuses the run, and
+    can leave its debrief at its end, where "all" passes it over and asks nothing of it or of
+    a runner. So one thing is asked of such a run, which no settlement changes: whether its
+    debrief is at its end already (at_its_end()), and then it is passed over or refused as any
+    other. Otherwise it is returned unjudged, in its place among the runs to debrief, for the
+    caller to set apart: cannot_debrief() is not asked of it, its runner is not asked, and the
+    interviewer's is asked only when a run that is judged can be debriefed. What is said of
+    every other run, and each exit here, is true whatever that turn came to."""
+    import launch
+    if not named or not named.strip():
+        raise SystemExit("debrief needs --runs <ids>, comma-separated, or --runs all for every finished panellist run "
+                         "that has not been debriefed.")
+    known, everyone = {e["run"]: e for e in runs}, named.strip() == "all"
+    if everyone:
+        hosts = {e["run"]: pl.debrief_of(runs, e["run"]) for e in runs
+                 if e["role"] == "panellist" and launch.state_of(cfg, e) == "done"}
+        if not hosts:
+            raise SystemExit("No panellist run of this study is done, so there is no one to interview.")
+        ended = {run: launch.state_of(cfg, host) for run, host in hosts.items() if host}
+        ended = {run: state for run, state in ended.items() if state in ("done", "limited")}
+        ids = [run for run in hosts if run not in ended]
+        if ended:
+            launch.say(f"Passed over by --runs all, {pl.agree(len(ended), 'its debrief', 'their debriefs')} being at "
+                       f"{pl.agree(len(ended), 'its end', 'their end')}: "
+                       + ", ".join(f"{run} ({state})" for run, state in ended.items()) + ".")
+        if not ids:
+            launch.say("No debrief is left to hold: every finished run of this study has one at its end.")
+            return []
+    else:
+        ids = list(dict.fromkeys(x.strip() for x in named.split(",") if x.strip()))
+    why_not = {run_id: "this study has no run of that name" if run_id not in known else
+               at_its_end(cfg, runs, known[run_id]) if run_id in unsettled else
+               cannot_debrief(cfg, runs, known[run_id], run_id in adopted) for run_id in ids}
+    unjudged = [i for i in ids if i in unsettled and not why_not[i]]
+    able = [known[i] for i in ids if not why_not[i] and i not in unjudged]
+    host = {"run": "the interviewer", "role": "interviewer", **cfg["debrief"]["interviewer"]}
+    unusable, errors, _ = launch.fitness(cfg, [*able, host] if able else [], interview=True)
+    said = (f"{host['runner']} cannot be used: {unusable[host['runner']].strip().rstrip('.')}"
+            if host["runner"] in unusable else
+            "; ".join(error.strip().rstrip(".") for error in errors.get(host["run"], [])))
+    if able and said:
+        raise SystemExit(f"No debrief was held: the interviewer (debrief.interviewer in study.json) cannot be "
+                         f"started. {said}.")
+    fit, unfit = [], []
+    for run_id in ids:
+        if run_id in unjudged:
+            fit.append(known[run_id])
+            continue
+        runner = known[run_id]["runner"] if run_id in known else None
+        why = why_not[run_id] or (
+            f"{runner} cannot be used: {unusable[runner].strip().rstrip('.')}" if runner in unusable
+            else "; ".join(error.strip().rstrip(".") for error in errors.get(run_id, [])))
+        if why:
+            unfit.append(f"{run_id}: {'skipped' if skip_unfit else 'cannot be debriefed'}: {why}.")
+        else:
+            fit.append(known[run_id])
+    if unfit:
+        launch.say(*unfit)
+    if unfit and not skip_unfit:
+        raise SystemExit("No debrief was held: every finished run has to be one that can be debriefed. Pass "
+                         "--skip-unfit to debrief the others." if everyone else
+                         "No debrief was held: every run named has to be one that can be debriefed. Take the runs "
+                         "above out of --runs, or pass --skip-unfit to debrief the others.")
+    if not fit:
+        raise SystemExit("No debrief was held: no run "
+                         + ("that is left can be debriefed." if everyone else "named can be debriefed."))
+    return fit
+
+
+def left_in_flight(cfg: dict, runs: list[dict]) -> dict[str, str]:
+    """The debriefs with a turn that a launcher that is gone left in flight, for a dry run:
+    {run id: "still running" or "ended since"}, as "status" says it of each. The debrief
+    command takes over a turn that still runs and goes on with its debrief
+    (Supervisor.reconcile()), so a dry run says the same of it and never that a process of
+    the run is at work. A turn that has ended the command settles first, and chooses only
+    then: what the turn came to can leave the debrief at its end, or a side with no session to
+    resume, and nothing reads that without recording it. So a dry run says of such a debrief
+    that it cannot say, and what it turns on (debrief()), and judges its run by nothing that
+    the settlement could change or put aside (choose_debriefs()). Two kinds of turn are left
+    out, since the command is refused for each: every turn while a launcher has the study,
+    which is then that launcher's, and one whose process is alive where this shell cannot
+    look."""
+    import launch
+    if launch.Lock.holder(cfg["_dir"]):
+        return {}
+    known, out = {e["run"]: e for e in runs}, {}
+    for run in launch.unsettled_debriefs(runs):
+        process = launch.debrief_facts(cfg, known[run], pl.debrief_of(runs, run))["process"]
+        if process in ("alive", "gone"):
+            out[run] = "still running" if process == "alive" else "ended since"
+    return out
+
+
+def debrief_opening(cfg: dict, runs: list[dict], fit: list[dict], dry_run: bool = False) -> list[str]:
+    """The lines that name the debriefs a command is about to hold, or with dry_run would: the
+    runs it begins with and the ones it goes on with, by the state each debrief reads as."""
+    import launch
+    began = {e["run"]: pl.debrief_of(runs, e["run"]) for e in fit}
+    how = {run: DEBRIEF_TAKES.get(launch.state_of(cfg, host) if host else "pending", "go on with")
+           for run, host in began.items()}
+    out = []
+    for verb in dict.fromkeys(DEBRIEF_TAKES.values()):
+        ids = [run for run in how if how[run] == verb]
+        if ids:
+            out.append(f"Debrief: {'would ' if dry_run else ''}{verb} {pl.plural(len(ids), 'debrief')} "
+                       f"({', '.join(ids)}).")
+    return out
+
+
+def debrief_unknown(sd: Path, ids: list[str]) -> list[str]:
+    """What a dry run says of the debriefs it cannot speak for: each has a turn that a launcher
+    that is gone left in flight and that has ended since (left_in_flight()). It names what the
+    command does first, what this dry run has therefore not judged (choose_debriefs()), what
+    the outcome turns on, and the command that records the turn and holds no debrief, after
+    which a dry run can say."""
+    n = len(ids)
+    turn = pl.agree(n, "that turn", "each turn")
+    return [f"Debrief: not known for {pl.plural(n, 'debrief')} ({', '.join(ids)}). A launcher that is gone left a "
+            f"turn of {pl.agree(n, 'it', 'each')} in flight, and {turn} has ended since with nothing of it "
+            f"recorded. The command first records what {turn} came to, and only then judges "
+            f"{pl.agree(n, 'the run', 'each run')}, its runner and the interviewer's: this dry run has judged none "
+            f"of them for {pl.agree(n, 'that run', 'those runs')}. A debrief that none of them refuses then goes "
+            "on, unless the turn was its last (it closed the debrief, or used the last of its side's time or "
+            "budget, limits.debrief) or left a side with no session to resume: of such a run the command says why "
+            "it cannot be debriefed, and --runs all passes over a debrief at its end and judges nothing more of "
+            "it.",
+            f"  This dry run cannot say which, so its exit code is 1, and the figures below count "
+            f"{pl.agree(n, 'that debrief', 'those debriefs')}. launch.py {sd} stop records "
+            f"{pl.agree(n, 'the turn', 'the turns')} and holds no debrief: a dry run after it says which."]
+
+
+def debrief_allowance(cfg: dict, fit: list[dict], grace: float) -> list[str]:
+    """What the debriefs about to be held may use between them, and whether each harness
+    enforces it. limits.debrief is the allowance of each side of one debrief over all its
+    turns, so a debrief can use twice the figure, and a side that has had turns already has
+    what is left of it. One turn has limits.turn's default at most.
+
+    The time is a bound, and so counts grace, the seconds of --grace: a turn is started while
+    its side has any time left, and its watchdog stops it at the end of that time and gives it
+    the grace to finish (run_watchdog.py). Its real duration is what the side is charged, so
+    only a side's last turn can run past the allowance, by the grace."""
+    import launch_plan as planning
+    limits, turn = pl.limits_for(cfg, "debrief"), pl.limits_for(cfg, "turn")["minutes"]
+    host, n = cfg["debrief"]["interviewer"], len(fit)
+    most = (limits["minutes"] * 60 + grace) * 2 * n
+    sides = [*((e["runner"], "participant") for e in fit), *((host["runner"], "interviewer") for _ in fit)]
+    capped = [x for x in sides if runners.get(x[0]).capabilities()["budget_cap"]]
+    loose = [x for x in sides if x not in capped]
+    out = [f"  Each side of {pl.agree(n, 'it', 'each')} has up to {limits['minutes']:g} min and "
+           f"{planning.money(limits['budget_usd'])} over the whole debrief (limits.debrief), apart from the run's own "
+           f"limits, and one turn up to {turn:g} min. So {pl.agree(n, 'it', 'each')} can use twice that, and a "
+           f"side that is stopped at its limit gets {grace:g}s more to finish (--grace): at most "
+           f"{planning.span(most, up=True)} of process time" + pl.agree(n, ".", " between them."),
+           f"  The interviewer is on {host['runner']}, model {host['model'] or 'default'}, with the guide of "
+           f"study.json \"debrief\": at most {pl.plural(cfg['debrief']['turns'], 'exchange')} a debrief."]
+    if capped:
+        names = list(dict.fromkeys(name for name, _ in capped))
+        out.append(f"  At most {planning.money(limits['budget_usd'] * len(capped))} for the "
+                   f"{pl.plural(len(capped), 'side')} on {planning.listed(names)}, whose harness enforces the cap.")
+        noted = [f"  On {name}, {planning.stop(note)}" for name in names
+                 for note in [runners.get(name).capabilities()["budget_cap_note"]] if note]
+        out += [*noted, *([f"  In {pl.agree(len(noted), 'that line', 'those lines')}, \"run\" and \"turn\" are the "
+                           "harness's words: a run is one process, which here is one turn of a debrief, and a turn "
+                           "is one request of that process to the model."] if noted else [])]
+    if loose:
+        names = list(dict.fromkeys(name for name, _ in loose))
+        out.append(f"  No budget cap for the {pl.plural(len(loose), 'side')} on {planning.listed(names)}: the harness "
+                   f"enforces none, so the time limit is what bounds {pl.agree(len(loose), 'it', 'them')}.")
+    out.append("  This is outside the plan's ceiling. A debrief that has used a side's allowance is at its end: "
+               "there is no --extend.")
+    return out
+
+
+def set_up(cfg: dict, runs: list[dict], e: dict):
+    """Give a finished run the interviewer of its debrief, in runs (the caller saves): the entry
+    (pl.interviewer_entry()), its prompt in prompts/, filled from
+    assets/interviewer-brief-debrief.md, and its folder, interviewer/<run id>, which holds
+    nothing. A debrief whose interviewer has had no turn yet is set up again each time, so a
+    change to study.json reaches it, as it reaches a job that is still pending. One that has
+    spoken keeps its entry and its prompt: its session holds that brief."""
+    import init_study  # here and never at the top, as launch.py is
+    sd, host = cfg["_dir"], pl.debrief_of(runs, e["run"])
+    if host and host.get("attempts"):
+        return
+    planned = pl.interviewer_entry(cfg, e, "debrief")
+    if host:
+        host.update(planned)
+    else:
+        at = next(i for i, x in enumerate(runs) if x is e)
+        runs.insert(at + 1, planned)  # beside its run, as an interview's two entries are
+        init_study.empty_folder(sd / planned["workdir"])
+    persona = next(p for p in cfg["personas"] if p["id"] == e["persona"])
+    (sd / "prompts").mkdir(exist_ok=True)
+    pl.write_atomic(sd / planned["prompt"], interviewer_prompt(cfg, persona, "debrief"))
+    (sd / pl.INTERVIEWS).mkdir(exist_ok=True)
+
+
+def debrief(args, cfg: dict) -> int:
+    """The debrief command: interview finished runs of a review or usability study, each in the
+    session it worked in, through launch.py's supervisor, as followup.py puts a question to
+    them. Every refusal comes before anything is recorded. Returns the exit code: 0 when every
+    debrief it held is done."""
+    import launch
+    sd = cfg["_dir"]
+    whole = no_debrief(cfg)
+    if whole:
+        raise SystemExit(f"No debrief was held: {whole}.")
+    problems, notes = pl.debrief_problems(cfg)
+    if problems:
+        raise SystemExit("No debrief was held. study.json: " + " ".join(problems))
+    if not (sd / "runs.json").exists():
+        raise SystemExit(f"No debrief was held: this study has no runs yet. A debrief is held with a finished run: "
+                         f"init_study.py {sd}, then launch.py {sd} run.")
+    if args.dry_run:  # the same choice and the same lines as below, with no lock, no supervisor and no record
+        runs, held = pl.read_runs(sd), launch.Lock.holder(sd)
+        left = left_in_flight(cfg, runs)  # what reconcile() would settle or adopt, which nothing here may do
+        # A turn that has ended is settled before the command chooses, and may leave its run one that cannot be
+        # debriefed, or one that "all" passes over with nothing asked of it. Settling is what reads that, and it
+        # records as it reads: such a run is not known here. So it is set apart before anything is asked that the
+        # settlement could change or put aside, and comes back from the choice unjudged.
+        running, ended = (frozenset(run for run in left if left[run] == how)
+                          for how in ("still running", "ended since"))
+        fit = choose_debriefs(cfg, runs, args.runs, args.skip_unfit, running, ended)
+        if not fit:
+            return 0
+        unknown = [e["run"] for e in fit if e["run"] in ended]
+        sure = [e for e in fit if e["run"] not in unknown]
+        adrift = [f"{e['run']} ({left[e['run']]})" for e in sure if e["run"] in left]
+        launch.say(*debrief_opening(cfg, runs, sure, dry_run=True),
+                   *([f"  A launcher that is gone left a turn in flight in {pl.listed(adrift)}: the command takes "
+                      "over a turn that is still running, and goes on with "
+                      f"{pl.agree(len(adrift), 'its debrief', 'each debrief')} from there."] if adrift else []),
+                   *(debrief_unknown(sd, unknown) if unknown else []),
+                   *debrief_allowance(cfg, fit, args.grace), *(f"  Note: {note}" for note in notes),
+                   *([f'  A launcher is running "{held.get("command")}" on this study (pid {held["pid"]}): '
+                      '"debrief" is refused until it has ended.'] if held else []), DEBRIEF_DRY_RUN)
+        return 1 if unknown else 0
+    stop = launch.StopSignal()
+    stop.listen()
+    lock = launch.Lock(sd)
+    lock.acquire("debrief", args.grace)
+    try:
+        runs = pl.read_runs(sd)
+        sup = launch.Supervisor(cfg, runs, args.grace, args.poll, retry=True, stop=stop, by="debrief")
+        sup.reconcile()  # a turn an earlier launcher left is settled first, or adopted while it still runs
+        fit = choose_debriefs(cfg, runs, args.runs, args.skip_unfit, frozenset(sup.interviews))
+        if not fit:  # "all", with every finished run's debrief at its end: said, and nothing to hold
+            return 0
+        launch.say(*debrief_opening(cfg, runs, fit), *debrief_allowance(cfg, fit, args.grace),
+                   *(f"  Note: {note}" for note in notes))
+        for e in fit:
+            set_up(cfg, runs, e)
+        sup.save()
+        for e in fit:
+            if e["run"] in sup.interviews:  # its turn was adopted: this command goes on with it when that ends
+                sup.interviews[e["run"]]["own"] = True
+            else:
+                sup.queue.append((e, "interview"))
+        sup.supervise()
+        states = {e["run"]: launch.state_of(cfg, pl.debrief_of(runs, e["run"])) for e in fit}
+        launch.say("Debriefs: " + ", ".join(f"{s} {list(states.values()).count(s)}" for s in launch.STATES
+                                            if s in states.values()) + ".")
+        ended = [run for run, state in states.items() if state in ("done", "limited")]
+        if ended:
+            launch.say(f"  Transcripts of the {pl.plural(len(ended), 'debrief')} at "
+                       f"{pl.agree(len(ended), 'its end', 'their end')} ({', '.join(ended)}): {sd / pl.INTERVIEWS}"
+                       f"/<run id>.md, and the analysts' copies in {pl.TRANSCRIPTS}/.")
+        again = [run for run, state in states.items() if state in DEBRIEF_TAKES]
+        if again:
+            launch.say(f"  Not finished: {', '.join(f'{run} ({states[run]})' for run in again)}. Next: interview.py "
+                       f"{sd} debrief --runs {','.join(again)}, which goes on with each at the turn its log reached"
+                       + (". launch.py status says why each stopped." if not sup.left_alone else
+                          ", once what is said above is put right."))
+        at_end = [run for run, state in states.items() if state == "limited"]
+        if at_end:
+            launch.say(f"  At its end with a side's allowance used: {', '.join(at_end)}. A debrief has no --extend.")
+        launch.say("No run's state, score or persona file was changed. The analysts' and the writer's briefs name "
+                   f"the transcripts as product feedback, so debrief before launch.py {sd} run --role analyst.")
+        return 0 if set(states.values()) <= {"done"} and not (sup.left_alone or sup.refused) else 1
+    finally:
+        lock.release()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("study_dir", type=Path)
-    ap.add_argument("cmd", choices=["render", "quotes"])
-    ap.add_argument("--runs", help="render: comma-separated run ids (default: every interview with a turn on record)")
+    ap.add_argument("cmd", choices=["render", "quotes", "debrief"])
+    ap.add_argument("--runs", help="render: comma-separated run ids (default: every interview with a turn on record). "
+                                   'debrief: comma-separated panellist run ids, or "all" for every finished run '
+                                   "whose debrief is not at its end")
+    ap.add_argument("--skip-unfit", action="store_true",
+                    help="debrief: leave out the runs named that cannot be debriefed, and debrief the others")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="debrief: print the runs it would debrief and the most they can use, and stop. No process is "
+                         "started and nothing is written to the study")
+    ap.add_argument("--grace", type=float, default=10.0, metavar="SECONDS",
+                    help="debrief: how long a process gets to finish after SIGTERM, before SIGKILL (default 10)")
+    ap.add_argument("--poll", type=float, default=1.0, metavar="SECONDS",
+                    help="debrief: how often to look for a request to stop (default 1). A turn that has ended is "
+                         "seen within 0.2 seconds whatever this says")
     args = ap.parse_args()
     import launch  # here and never at the top: launch.py imports this module
     cfg = pl.load_study(args.study_dir)
+    if args.cmd == "debrief":
+        if cfg["type"] == "interview":
+            raise SystemExit("A debrief is held with a finished run of a review or usability study, which has seen "
+                             "the product, and this is an interview study: its interviews are its runs. To ask more, "
+                             "put the question in the next round's guide.")
+        try:
+            code = debrief(args, cfg)
+            sys.stdout.flush()
+        except BrokenPipeError:  # whoever read the output stopped reading: that is no traceback
+            code = 1
+        raise SystemExit(code)
+    if args.dry_run or args.skip_unfit:
+        raise SystemExit("--dry-run and --skip-unfit go with debrief.")
     if args.cmd == "quotes":
         if cfg["type"] != "interview":
             raise SystemExit("quotes checks the synthesis of an interview study, where every quotation names its "
@@ -1940,12 +2501,15 @@ def main():
         print("\n".join(lines), flush=True)
         raise SystemExit(1 if wrong else 0)
     sd, held = cfg["_dir"], conversations(pl.read_runs(cfg["_dir"]))
+    talk = "interview" if cfg["type"] == "interview" else "debrief"  # what the conversations of this study are
     if not held:
-        raise SystemExit("This study has no interview, so it has no transcript to write.")
+        raise SystemExit("This study has no interview, so it has no transcript to write." if talk == "interview" else
+                         f"No debrief has been held in this study, so it has no transcript to write. interview.py {sd} "
+                         "debrief --runs <ids>|all holds one with each finished run named.")
     wanted = [r.strip() for r in args.runs.split(",") if r.strip()] if args.runs else held
     unknown = [r for r in wanted if r not in held]
     if unknown:
-        raise SystemExit(f"No interview of this study has the run id {pl.listed(unknown, 'or')}. Its interviews: "
+        raise SystemExit(f"No {talk} of this study has the run id {pl.listed(unknown, 'or')}. Its {talk}s: "
                          f"{', '.join(held)}.")
     lock = launch.Lock(sd)
     mine = lock.acquire("interview render", 0, must=False)
@@ -1954,7 +2518,7 @@ def main():
             launch.say("A launcher has this study." if launch.Lock.holder(sd) else
                        "This study could not be taken from this shell.",
                        "The transcripts are written all the same, from the turns on record now. A launcher writes "
-                       "an interview's again when it ends.")
+                       f"{pl.a_type(talk)}'s again when it ends.")
         written = {run: write_transcripts(cfg, run) for run in wanted}
     finally:
         lock.release()
@@ -1962,9 +2526,9 @@ def main():
         if not paths and args.runs:
             launch.say(f"{run}: no turn on record yet, so no transcript was written.")
     done = [run for run, paths in written.items() if paths]
-    launch.say(f"Wrote the transcripts of {pl.plural(len(done), 'interview')} to {sd / pl.INTERVIEWS}/ and the "
+    launch.say(f"Wrote the transcripts of {pl.plural(len(done), talk)} to {sd / pl.INTERVIEWS}/ and the "
                f"analysts' copies to {sd / pl.TRANSCRIPTS}/." if done else
-               "No interview of this study has a turn on record yet, so no transcript was written.")
+               f"No {talk} of this study has a turn on record yet, so no transcript was written.")
 
 
 if __name__ == "__main__":

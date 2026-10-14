@@ -141,7 +141,11 @@ at its name is removed, never followed. Without --force the scaffold is refused 
 a runs.json or a turn log, and says how many interviews have one. A review or a usability
 study's --force leaves logs/ and those two reports where they are, as it always has: a launcher
 makes the files of an attempt anew when it starts it, and the reports are written again by
-the next command that makes them.
+the next command that makes them. What it does move is what a debrief left
+("interview.py <study-dir> debrief", panel_lib.py "Debriefs"): the turn logs and transcripts
+in interviews/ and analysis/transcripts/, the files of each debrief's interviewer in logs/ and
+a turn log that a fresh start had moved there, to logs/interviews-<epoch seconds>/ in the same
+way. A new run has the id of the run it replaces, so a debrief of it must find no log.
 
 Whatever the plan would refuse about study.json alone, the scaffold refuses too, before it
 writes anything: what panel_lib.load_study() refuses, said here with "Nothing was written.",
@@ -750,6 +754,10 @@ def scaffold(cfg, force):
                 model_notes=notes)
             pp.write_text(prompt)
             runs.append(entry)
+    aside = set_aside(sd, debriefs=True) if force else None  # the debriefs of the runs that are replaced
+    if aside:
+        print(f"The turn logs and transcripts of the debriefs held before are in {aside.relative_to(sd)}/: the runs "
+              "they were held with are replaced.")
     earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0
     pl.write_runs(sd, runs)
     pl.write_forms(sd, pl.file_forms(cfg))
@@ -955,6 +963,10 @@ def scaffold_usability(cfg, force):
                 the_tasks=the_tasks, attempt_step=attempt_step, run_id=rid,
                 account_line=ACCOUNT_LINE[told].format(run_id=rid), model_notes="".join(f"- {x}\n" for x in found)))
             runs.append(entry)
+    aside = set_aside(sd, debriefs=True) if force else None  # the debriefs of the runs that are replaced
+    if aside:
+        print(f"The turn logs and transcripts of the debriefs held before are in {aside.relative_to(sd)}/: the runs "
+              "they were held with are replaced.")
     earlier = keep_sessions(sd) if (sd / "runs.json").exists() else 0
     pl.write_runs(sd, runs)
     for record in (pl.MODIFICATIONS, pl.FOLLOWUPS):  # what was recorded of the runs just replaced
@@ -987,7 +999,7 @@ def scaffold_usability(cfg, force):
 MANY_GOALS = 5  # more learning goals than this draw a warning: an interview cannot follow each of them far
 
 
-def set_aside(sd):
+def set_aside(sd, debriefs=False):
     """Before --force starts every interview again: move the turn logs and transcripts of the
     interviews held so far, and the analysts' copies of the transcripts, to a folder of their
     own under logs/ (module docstring). Returns that folder, or None when no interview had a
@@ -999,20 +1011,31 @@ def set_aside(sd):
     process of each side left (<entry id>.<attempt>.in, .out and the rest) and a turn log that
     a fresh start had moved there. The new entries have the same ids and count their attempts
     from 1 again, so a file left behind would read as theirs. Under analysis/: usage.md and
-    checks.md, which were written from the interviews that are replaced."""
+    checks.md, which were written from the interviews that are replaced.
+
+    debriefs: the same for a review or usability study, whose turn logs are those of the
+    debriefs held with the runs that --force replaces. A new run has the id of the one it
+    replaces, and a debrief of it would otherwise go on with the old one's log. Of logs/ only
+    what belongs to a debrief goes: the files of each debrief's interviewer, and a turn log
+    that a fresh start had moved there. The runs' own files and the two reports stay, as they
+    always have in these studies."""
     held = {sd / pl.INTERVIEWS: "", sd / pl.TRANSCRIPTS: Path(pl.TRANSCRIPTS).name}  # folder -> where under it
     files = {folder: sorted(f for f in folder.iterdir() if not f.is_dir()) if folder.is_dir() else []
              for folder in held}
     if not any(files.values()):
         return None
     try:
-        replaced = [e["run"] for e in pl.read_runs(sd)] if (sd / "runs.json").exists() else []
+        entries = pl.read_runs(sd) if (sd / "runs.json").exists() else []
     except ValueError:  # not valid JSON: it names no entry whose files to look for
-        replaced = []
+        entries = []
+    hosts = [e for e in entries if e.get("kind") == "debrief"]  # the interviewers of the debriefs
+    replaced = ([f"{e['run']}." for e in hosts] + [f"{e['interview']}.interview-" for e in hosts] if debriefs
+                else [f"{e['run']}." for e in entries])  # how the files of what is replaced are named
     logs = sd / "logs"
     files[logs] = sorted(f for f in logs.iterdir() if not f.is_dir()
-                         and any(f.name.startswith(f"{run}.") for run in replaced)) if logs.is_dir() else []
-    files[sd / "analysis"] = [f for f in (sd / "analysis" / name for name in ("usage.md", "checks.md")) if f.is_file()]
+                         and any(f.name.startswith(name) for name in replaced)) if logs.is_dir() else []
+    reports = () if debriefs else ("usage.md", "checks.md")
+    files[sd / "analysis"] = [f for f in (sd / "analysis" / name for name in reports) if f.is_file()]
     held.update({logs: "logs", sd / "analysis": "analysis"})
     stamp, aside = int(time.time()), None
     while aside is None or aside.exists():  # a second --force within the same second gets the next one

@@ -10,6 +10,7 @@ You are writing the final synthesis of a simulated customer research study for <
 <EXTRA_CONTEXT_FILES>
 - You may spot-check persona files in `panel/personas/` to confirm a quote.
 <FOLLOWUPS>
+<DEBRIEFS>
 
 ## Output: `<STUDY_DIR>/analysis/SYNTHESIS.md`
 Open the file with a `#` title and, directly under it, this line on its own, word for word:

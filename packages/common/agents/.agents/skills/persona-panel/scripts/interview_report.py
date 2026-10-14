@@ -103,6 +103,24 @@ notes.csv does not have as a note, is in no table and is listed under "Problems 
 its notes then read as notes no theme took. A note that two themes list is counted under the
 first that lists it, and listed there too.
 
+quant.json keeps each of those problems as what is wrong and never as where ("themes_problems"),
+one for a theme, or for a note listed twice: {"theme", "name", "kind", "notes"}. "theme" and
+"name" are the id and the name of the theme's heading, None when the heading is not of the form,
+and "kind" is one of:
+    form            the theme does not fit the form: "heading" is its heading as written, without
+                    the marks, and "why" what is wrong, as extract_notes.read_form() says it
+                    (a line it numbers is counted from under the heading, not in the file)
+    id_taken        an earlier theme has its id
+    unknown_notes   "notes" are the ids it names that notes.csv does not have as notes
+    listed_twice    "notes" is the one note, which "counted_under", the id of an earlier theme,
+                    lists first
+"notes" is empty for the first two. The line of themes.md a theme's heading is on is in the
+sentence quant.md gives the lead (problem_line()) and nowhere in quant.json, which reads the same
+from any folder and inside an archive: archive.py puts the notice into a themes.md that lacks
+it, every line under it moves, and analyze.stale_tallies() would then take tallies that have not
+changed for ones that have. For the same reason nothing in quant.json is a path or a line
+number of a file: the study directory is named in quant.md alone.
+
 The filters of analyze.py all work, by the run: --exclude-model, --exclude-persona and
 --segment leave an interview out of everything, with its notes and its critique. A theme stays
 in the tables with whatever notes the interviews that are left gave it.
@@ -152,32 +170,55 @@ def rows_of(sd: Path, name: str) -> list[dict] | None:
         return None
 
 
-def read_themes(text: str, notes: set[str]) -> tuple[list[dict], list[str]]:
+def read_themes(text: str, notes: set[str]) -> tuple[list[dict], list[tuple[int, dict]]]:
     """The themes of themes.md that can be counted, in its order, each {"id", "name",
-    "definition", "notes"}, and what is wrong with the file, a sentence each (module docstring).
-    notes are the ids notes.csv has as notes. A note is given to the first theme that lists
-    it."""
+    "definition", "notes"}, and what is wrong with the file: for each problem, (the line of
+    themes.md the theme's heading is on, the problem as quant.json keeps it), which the module
+    docstring sets out. The two are apart because only quant.md may say where (problem_line()):
+    the line moves when one is put above it, and quant.json must not. notes are the ids
+    notes.csv has as notes. A note is given to the first theme that lists it."""
     themes, wrong, taken = [], [], {}
     for line, _, block in forms.blocks(text, ("theme",)):
         got, why = forms.read_form(block, THEME_FORM)
-        at = f"Line {line}, {block.splitlines()[0].lstrip('# ')[:60]}"
+        heading = block.split("\n")[0]
+        named = THEME_FORM[0].fullmatch(heading)  # a theme whose lines do not fit may have a heading that does
+        theme = {"theme": named["id"] if named else None, "name": named["name"] if named else None}
         ids = list(dict.fromkeys(x.strip() for x in got["notes"].split(","))) if got else []
         unknown = [i for i in ids if i not in notes]
         if not got:
-            wrong.append(f"{at}: its {why}. It is in no table.")
+            wrong.append((line, {**theme, "kind": "form", "notes": [], "heading": heading.lstrip("# "), "why": why}))
         elif got["id"] in {t["id"] for t in themes}:
-            wrong.append(f"{at}: its id is taken by an earlier theme. It is in no table.")
+            wrong.append((line, {**theme, "kind": "id_taken", "notes": []}))
         elif unknown:
-            wrong.append(f"{at}: it names {pl.listed(unknown)}, which notes.csv does not have as "
-                         f"{pl.agree(len(unknown), 'a note', 'notes')}. It is in no table.")
+            wrong.append((line, {**theme, "kind": "unknown_notes", "notes": unknown}))
         else:
             twice = [i for i in ids if i in taken]
-            wrong += [f"{i} is listed under {taken[i]} and under {got['id']}: it is counted under {taken[i]}, which "
-                      "lists it first." for i in twice]
+            wrong += [(line, {**theme, "kind": "listed_twice", "notes": [i], "counted_under": taken[i]})
+                      for i in twice]
             taken.update({i: got["id"] for i in ids if i not in taken})
             themes.append({"id": got["id"], "name": got["name"], "definition": got["definition"].rstrip("."),
                            "notes": [i for i in ids if i not in twice]})
     return themes, wrong
+
+
+def problem_line(line: int, problem: dict) -> str:
+    """A problem of themes.md as quant.md says it, in one sentence: what quant.json keeps of it
+    (module docstring) and, for a theme that is in no table, the line of themes.md its heading
+    is on, so that the lead finds it. The line is given here and kept nowhere: it is where the
+    theme sits in the file as it is read now, which is not what is wrong with it. A note listed
+    twice is named by its id and its two themes, and needs no line."""
+    if problem["kind"] == "listed_twice":
+        first = problem["counted_under"]
+        return (f"{problem['notes'][0]} is listed under {first} and under {problem['theme']}: it is counted under "
+                f"{first}, which lists it first.")
+    if problem["kind"] == "form":  # the one kind whose heading may not give an id and a name
+        heading, what = problem["heading"], f"its {problem['why']}"
+    else:
+        heading, unknown = f"Theme {problem['theme']}: {problem['name']}", problem["notes"]
+        what = ("its id is taken by an earlier theme" if problem["kind"] == "id_taken" else
+                f"it names {pl.listed(unknown)}, which notes.csv does not have as "
+                f"{pl.agree(len(unknown), 'a note', 'notes')}")
+    return f"Line {line}, {heading[:60]}: {what}. It is in no table."
 
 
 def report(cfg: dict, filters: dict, held: bool | None = None) -> tuple[list[str], dict]:
@@ -328,7 +369,9 @@ def report(cfg: dict, filters: dict, held: bool | None = None) -> tuple[list[str
                     "no_notes": count(bare["qual"]), "no_critique": count(bare["critique"])},
            "notes": {"counted": len(notes), "in_themes": len(themed), "unparsed": len(unparsed_notes),
                      "unverified": unverified, "from_incomplete": [n["note"] for n in early]},
-           "themes": themes, "themes_problems": wrong, "no_theme": [n["note"] for n in loose]}
+           "themes": themes, "themes_problems": [problem for _, problem in wrong],  # what, and never where
+           "no_theme": [n["note"] for n in loose]}
+    said = [problem_line(line, problem) for line, problem in wrong]  # with the line, which only the report gives
     head = [*(column for column, _ in GROUPS.values()), "Unprompted", "With an incident", "Effort"]
     analysts = sorted({n["analyst"] for n in notes})
     md = ["## Key numbers", "",
@@ -350,7 +393,7 @@ def report(cfg: dict, filters: dict, held: bool | None = None) -> tuple[list[str
     if wrong:
         md += [f"- themes.md has {plural(len(wrong), 'problem')}. Put the file right by hand, or delete it and run the "
                f"themes job again (launch.py {sd} run --role themes), then analyze.py again:",
-               *(f"  - {problem}" for problem in wrong)]
+               *(f"  - {problem}" for problem in said)]
     for stem, lacks in (
             ("qual", "notes: no analyst's file has a section for {them}, so nothing {they} said is coded"),
             ("critique", "critique: no critic's file has a section for {them}, so no mark is counted for {them} and "
@@ -566,7 +609,7 @@ def report(cfg: dict, filters: dict, held: bool | None = None) -> tuple[list[str
                ["None: every note is in a theme."])
         md.append("")
         if wrong:
-            md += ["## Problems in themes.md", "", *(f"- {problem}" for problem in wrong), ""]
+            md += ["## Problems in themes.md", "", *(f"- {problem}" for problem in said), ""]
 
         # Every verified quote, ready to use. One with a double quotation mark inside cannot be given in the form.
         usable = [n for n in notes if n["quote_verified"] == "1"]

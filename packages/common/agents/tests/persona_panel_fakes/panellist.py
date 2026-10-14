@@ -15,7 +15,10 @@ run <pid>-<key>). A prompt with a "## Produce `<file>`" or "## Output: `<file>`"
 job's brief instead: .../analysis/qual-<n>.md is the job analyst-<n>, .../analysis/SYNTHESIS.md
 the job writer and, in an interview study, .../analysis/critique-<n>.md the job critic-<n> and
 .../analysis/themes.md the job themes, and that file is what the job writes. A resume message names no file, so a
-resumed process finds its run by its session id, which the fake recorded at launch. A resume of
+resumed process finds its run by its session id, which the fake recorded at launch. That is how
+a turn of a debrief reaches a finished run too: a run the plan leaves out answers one with
+"Answer <k>." and writes nothing, k being the number in a "Question <k>?" or else how many
+processes it has had. A resume of
 a session it has no record of ends as the real CLI ends one: its own message on stderr, nothing
 on stdout, exit code 1. A test loses a session by deleting sessions/<session id>.json.
 
@@ -55,6 +58,8 @@ Steps, in the order given:
                     rewrote its file and lost the end of it
     reply           end with DOCUMENT as the final reply, in place of the recorded one: what a
                     job that could not write its file returns
+    say:<text>      end with the text as the final reply and write nothing: what a finished run
+                    answers a question of its debrief with. "say:" alone is an empty reply
     wait:<gate>     block until the test creates go/<gate>
     starts:<n>      block until n runs have started in all (two runs holding here overlap for sure)
     stubborn        from now on, SIGTERM does not end the process: it appends one more section
@@ -105,6 +110,8 @@ PERSONA_FILE = re.compile(r"(\S+/personas/([^/\s-]+)-[^/\s]*--([^/\s]+)\.md)")
 JOB_OUTPUT = re.compile(r"^## (?:Produce|Output:) `(\S+/analysis/(qual|critique|themes|SYNTHESIS)(?:-(\d+))?\.md)`",
                         re.M)
 JOBS = {"qual": "analyst", "critique": "critic", "themes": "themes", "SYNTHESIS": "writer"}  # a job, by its file
+DEBRIEF = re.compile(r"\binterviewer\b")  # a message to a finished run that speaks of one is a turn of its debrief
+NUMBERED = re.compile(r"Question (\d+)\?")
 DOCUMENT = "I could not write the file, so here is the document.\n\n# Findings\n\n- From the reply.\n```"
 
 
@@ -296,7 +303,9 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
     attempt = len(counter.read_text()) if counter.exists() else 0
     counter.write_text("x" * (attempt + 1))
     plan = json.loads((home / "plan.json").read_text()) if (home / "plan.json").exists() else {}
-    steps = (plan.get(run) or [["write:all"]])
+    asked = NUMBERED.search(prompt)
+    spoken = [[f"say:Answer {asked.group(1) if asked else attempt}."]] if resumed and DEBRIEF.search(prompt) else None
+    steps = (plan.get(run) or spoken or [["write:all"]])
     steps, file = steps[min(attempt, len(steps) - 1)], Path(file)
 
     lent = file.parents[1] / "scratch" / run / "account.json"
@@ -370,6 +379,8 @@ def play(cli, session, resumed, prompt, recording, modes, lost):
             file.write_text(whole[:whole.rindex("### Concept ")])
         elif verb == "reply":
             said.append(DOCUMENT)
+        elif verb == "say":
+            said.append(arg)
         elif verb == "stubborn":
             signal.signal(signal.SIGTERM, on_term)
         elif not process_step(verb, arg, home, run, cut_off, end):
