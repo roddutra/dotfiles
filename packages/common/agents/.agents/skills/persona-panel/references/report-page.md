@@ -6,12 +6,14 @@ Every study ends with one page of its findings that the user can skim, print and
 
 `assets/report-kit/` holds a baseline to build from:
 
-- `kit.css`: the styles. Light by default, a dark theme behind a button on the page, and print styles.
+- `kit.css`: the styles. Light and dark themes on screen, light on paper, and print styles.
 - `kit.js`: the helpers under `PP`: tables, charts (drawn with Chart.js), the panel fold, the contents row, tooltips and the screenshot viewer.
 - `kit.html`: the kit's documentation page. The rules, the colour tokens, every part with its markup or call, the usual sections of each study type (Recipes), the helpers with their inputs, and the mapping from `study.json` and `runs.json` to `PP.panel`. Open it in a browser: it sits beside `kit.css` and `kit.js`.
 - `example-interview.html`, `example-usability.html` and `example-review-specimen.html`: finished pages. The review page is a specimen, with invented data.
 
 Read `kit.html` before writing a page, then the example of the study's type.
+
+**The theme is the kit's.** A page opens in the reader's earlier choice with its theme button, else the host's `data-theme`, else the system's setting, and `kit.js` always sets `data-pp-theme` to `light` or `dark`. `kit.css` already holds the dark-mode rules a published page needs, for before the script runs too. So write no dark-mode block, `prefers-color-scheme` rule or theme script of your own: style the page with the `--pp-*` tokens and it follows. A rule that must differ by theme keys on `:root[data-pp-theme="dark"]`.
 
 ## Fixed and free
 
@@ -55,7 +57,7 @@ In a usability study, `archive.py` scans the page's text for a test account's se
 Bundle, open `standalone.html`, and look at it:
 
 - at desktop width and at phone width (about 390 px): no sideways scroll and no clipped table
-- in light and in dark, with the button at the top
+- in light and in dark: with the system set to dark, the page opens dark and its button switches it to light and back
 - in print preview: every fold opens and the charts print in light colours
 
 A headless browser screenshot at each width is one way to see it. Check every figure against `analysis/quant.md` and every quotation against its source.

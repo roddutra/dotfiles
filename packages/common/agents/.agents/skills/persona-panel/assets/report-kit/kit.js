@@ -512,7 +512,7 @@
     shut = Array.from(document.querySelectorAll("details:not([open])"));
     shut.forEach((d) => (d.open = true));
     kept = root.dataset.ppTheme || null;
-    if (kept) delete root.dataset.ppTheme;
+    root.dataset.ppTheme = "light"; /* light, never unset: unset, the host's or the system's dark would apply */
     charts.forEach((c) => c.draw());
   };
   const toScreen = () => {
@@ -520,7 +520,7 @@
     printing = false;
     shut.forEach((d) => (d.open = false));
     shut = [];
-    if (kept) root.dataset.ppTheme = kept;
+    if (kept) root.dataset.ppTheme = kept; else delete root.dataset.ppTheme;
     kept = null;
     charts.forEach((c) => c.draw());
   };
@@ -529,21 +529,39 @@
   const paper = window.matchMedia && window.matchMedia("print");
   if (paper && paper.addEventListener) paper.addEventListener("change", (e) => { if (e.matches) { toPaper(); charts.forEach((c) => c.chart && c.chart.resize()); } else toScreen(); });
 
-  /* Theme: light unless the reader chose dark with the button, which is remembered on this device. */
-  const stored = () => { try { return localStorage.getItem("pp-theme"); } catch (e) { return null; } };
-  const setTheme = (dark) => {
-    if (dark) root.dataset.ppTheme = "dark"; else delete root.dataset.ppTheme;
-    try { localStorage.setItem("pp-theme", dark ? "dark" : "light"); } catch (e) { /* not remembered, still works */ }
-    document.querySelectorAll(".pp-theme").forEach((b) => (b.textContent = dark ? "Light theme" : "Dark theme"));
+  /* Theme: the reader's choice with the button, remembered on this device; else the host's data-theme; else the
+     system's setting. Always set to "light" or "dark", never unset, so the button, kit.css and any page rule keyed
+     on data-pp-theme agree. Until the reader chooses, the page follows the host and the system as they change. */
+  const stored = () => {
+    try { const t = localStorage.getItem("pp-theme"); return t === "dark" || t === "light" ? t : null; } catch (e) { return null; }
+  };
+  const system = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  const preferred = () => {
+    const host = root.getAttribute("data-theme");
+    return stored() || (host === "dark" || host === "light" ? host : system && system.matches ? "dark" : "light");
+  };
+  const label = (theme) => (theme === "dark" ? "Light theme" : "Dark theme");
+  const apply = (theme) => {
+    if (printing || root.dataset.ppTheme === theme) return;
+    root.dataset.ppTheme = theme;
+    document.querySelectorAll(".pp-theme").forEach((b) => (b.textContent = label(theme)));
     charts.forEach((c) => c.draw()); /* canvas colours are read from the tokens, so draw again */
   };
-  if (stored() === "dark") root.dataset.ppTheme = "dark";
+  apply(preferred());
+  if (system && system.addEventListener) system.addEventListener("change", () => apply(preferred()));
+  if (window.MutationObserver) {
+    new MutationObserver(() => apply(preferred())).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  }
   const head = document.querySelector(".pp-head");
   if (head) {
-    const b = h("button", "pp-theme", root.dataset.ppTheme === "dark" ? "Light theme" : "Dark theme");
+    const b = h("button", "pp-theme", label(root.dataset.ppTheme));
     b.type = "button";
     b.id = "pp-theme-button";
-    b.addEventListener("click", () => setTheme(root.dataset.ppTheme !== "dark"));
+    b.addEventListener("click", () => {
+      const next = root.dataset.ppTheme === "dark" ? "light" : "dark";
+      try { localStorage.setItem("pp-theme", next); } catch (e) { /* not remembered, still works */ }
+      apply(next);
+    });
     head.appendChild(b);
   }
 

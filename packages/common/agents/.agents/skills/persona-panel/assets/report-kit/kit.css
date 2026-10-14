@@ -1,7 +1,8 @@
 /* Panel report kit: baseline styles for persona-panel HTML reports.
    Layout: one reading column (68ch prose); tables and charts use the full 1040px measure.
-   Light is the default and the only theme on paper. Dark applies when the reader picks it with the
-   page's own button (kit.js), never from the system setting.
+   Two themes on screen, light only on paper. kit.js always sets data-pp-theme to "light" or "dark": the
+   reader's choice with the page's button, else the host's data-theme, else the system's. Until it runs, the
+   host's data-theme and then the system's setting decide, so a page needs no dark-mode rules of its own.
    A project with its own design system overrides the BRAND block below and leaves the rest,
    or drops this file and styles the same class names itself (kit.html, "Using a project's own design system"). */
 
@@ -47,8 +48,29 @@
   --pp-seq-5: #0d366b; --pp-seq-ink-5: #ffffff;
   --pp-radius: 6px;
 }
+/* Dark: chosen by kit.js, or before it runs by the host (data-theme="dark") or the system. The two blocks
+   hold the same tokens: change both together. */
 @media screen {
-  :root[data-pp-theme="dark"] {
+  :root[data-pp-theme="dark"], :root[data-theme="dark"]:not([data-pp-theme]) {
+    color-scheme: dark;
+    --pp-bg: #0e1014; --pp-surface: #171a21; --pp-sunk: #222630;
+    --pp-ink: #f1f3f7; --pp-ink-2: #c4cad5; --pp-ink-3: #99a0ae;
+    --pp-line: #2d323c; --pp-line-2: #4d5361;
+    --pp-accent: #a3b0f2; --pp-accent-wash: #1d2242;
+    --pp-s1: #3987e5; --pp-s2: #d95926; --pp-s3: #199e70;
+    --pp-s4: #c98500; --pp-s5: #d55181; --pp-s6: #008300;
+    --pp-n1: #c4cad5; --pp-n2: #8f97a5; --pp-n3: #5f6674; --pp-n4: #3d434f;
+    --pp-good-wash: #12290f; --pp-warn-wash: #33290d; --pp-crit-wash: #371615;
+    /* In dark the scale runs from the page outwards: the high end is the one that stands out most. */
+    --pp-seq-1: #0d366b; --pp-seq-ink-1: #ffffff;
+    --pp-seq-2: #1c5cab; --pp-seq-ink-2: #ffffff;
+    --pp-seq-3: #3987e5; --pp-seq-ink-3: #10131a;
+    --pp-seq-4: #86b6ef; --pp-seq-ink-4: #10131a;
+    --pp-seq-5: #cde2fb; --pp-seq-ink-5: #10131a;
+  }
+}
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-pp-theme]) {
     color-scheme: dark;
     --pp-bg: #0e1014; --pp-surface: #171a21; --pp-sunk: #222630;
     --pp-ink: #f1f3f7; --pp-ink-2: #c4cad5; --pp-ink-3: #99a0ae;
