@@ -1,0 +1,13 @@
+[Unit]
+Description=Restart the Omarchy shell when its Bluetooth panel misses a power-on
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/bluetooth-shell-resync
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

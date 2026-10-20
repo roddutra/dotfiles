@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Restart the Omarchy shell when its Bluetooth panel misses an adapter powering
+# on. See "Bluetooth shows off after waking" in docs/omarchy.md.
+#
+# Waking from S3 resets the USB Bluetooth dongle, so BlueZ removes and re-adds
+# the adapter. Quickshell builds the new adapter from BlueZ's first snapshot,
+# taken while it is still powering up, and never re-reads it. When the power-on
+# signal lands before Quickshell subscribes, the panel shows Bluetooth off for
+# the rest of the shell's life and its toggle does nothing. A fresh shell reads
+# the live state, so restart it, but only when it really missed the change.
+set -uo pipefail
+
+shell_config_dir="${OMARCHY_PATH:-/usr/share/omarchy}/shell/"
+
+log() { printf '%s\n' "$*"; }
+
+shell_instance_id() {
+  quickshell list -a -j 2>/dev/null |
+    jq -r --arg dir "$shell_config_dir" \
+      'first(.[] | select(.config_path | startswith($dir)) | .id) // empty' 2>/dev/null
+}
+
+# Quickshell writes debug output to its log file even when the console hides
+# it, so the last Powered value logged for the adapter is what the panel holds.
+# Prints true, false, or nothing when the shell has not tracked the adapter.
+shell_powered() {
+  local adapter=$1 id
+
+  id=$(shell_instance_id)
+  [[ -n $id ]] || return 0
+
+  quickshell log -i "$id" -r 'quickshell.dbus.properties.debug=true' 2>/dev/null |
+    grep -F "org.bluez$adapter/org.bluez.Adapter1:Powered to " |
+    tail -n 1 |
+    grep -oE 'to (true|false)' |
+    cut -d' ' -f2
+}
+
+bluez_powered() {
+  [[ $(busctl get-property org.bluez "$1" org.bluez.Adapter1 Powered 2>/dev/null) == "b true" ]]
+}
+
+# omarchy-hyprland-session-locked exits 2 when it cannot tell, and Omarchy's
+# own callers treat that as unlocked. `omarchy restart shell` refuses to run
+# while a live lock screen holds the session anyway.
+session_locked() {
+  omarchy-hyprland-session-locked
+}
+
+check_adapter() {
+  local adapter=$1 deadline
+
+  # BlueZ powers a re-added adapter up within a couple of seconds. One that
+  # stays off was turned off on purpose or failed, and the panel is right.
+  deadline=$((SECONDS + 15))
+  until bluez_powered "$adapter"; do
+    ((SECONDS < deadline)) || return 0
+    sleep 1
+  done
+
+  # Leave room for a power-on signal that is still on its way to the shell.
+  sleep 2
+  [[ $(shell_powered "$adapter") == false ]] || return 0
+
+  # The lock screen lives in the shell, so wait for the user to unlock.
+  if session_locked; then
+    log "Shell missed power-on for $adapter; waiting for the session to unlock"
+    while session_locked; do sleep 5; done
+  fi
+
+  # Bluetooth may have been turned off, or the shell restarted, meanwhile.
+  bluez_powered "$adapter" || return 0
+  [[ $(shell_powered "$adapter") == false ]] || return 0
+
+  log "Shell missed power-on for $adapter; restarting it"
+  omarchy restart shell || log "omarchy restart shell failed with status $?"
+}
+
+# Also covers the same race at login, and a shell left stale before this
+# service started. Give a starting shell time to track the adapters first.
+check_existing_adapters() {
+  local adapter deadline=$((SECONDS + 60))
+
+  while IFS= read -r adapter <&3; do
+    until [[ -n $(shell_powered "$adapter") ]]; do
+      ((SECONDS < deadline)) || return 0
+      sleep 2
+    done
+    check_adapter "$adapter"
+  done 3< <(busctl --list tree org.bluez 2>/dev/null | grep -E '^/org/bluez/hci[0-9]+$')
+}
+
+check_existing_adapters
+
+# gdbus prints one line per signal and follows bluetoothd restarts. Device
+# paths extend past hciN, so the pattern only matches adapters. The stream is
+# on fd 3 so nothing run from the loop can read it.
+adapter_pattern="InterfacesAdded \(objectpath '(/org/bluez/hci[0-9]+)',"
+while IFS= read -r line <&3; do
+  [[ $line =~ $adapter_pattern ]] && check_adapter "${BASH_REMATCH[1]}"
+done 3< <(gdbus monitor --system --dest org.bluez --object-path /)
+
+log "gdbus monitor stopped"
+exit 1

@@ -30,6 +30,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 
 - `1password/` makes the 1Password autostart wait for the bar's tray. See [1Password has no tray icon](#1password-has-no-tray-icon).
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
+- `bluetooth-resync/` restarts the shell when its Bluetooth panel misses a power-on. See [Bluetooth shows off after waking](#bluetooth-shows-off-after-waking).
 - `claude-desktop/` contains Claude Desktop launch flags. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `ghostty/` contains the Linux Ghostty configuration.
 - `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
@@ -120,6 +121,31 @@ The list should contain a `/StatusNotifierItem` entry whose owner (`busctl --use
 `packages/omarchy/1password/` adds a drop-in to `app-com.onepassword.OnePassword@autostart.service`, the unit systemd generates from 1Password's autostart entry. It waits up to 30 seconds for the tray, then launches 1Password whether or not it appeared. The drop-in leaves `~/.config/autostart/com.onepassword.OnePassword.desktop` alone, because 1Password rewrites that file every time it launches.
 
 After restoring the dotfiles, run `systemctl --user daemon-reload`. The drop-in takes effect at the next login.
+
+## Bluetooth shows off after waking
+
+Symptom: after a resume, the bar's Bluetooth panel says "Turned off" and its toggle does nothing, but paired devices still connect and play. `bluetoothctl show` reports `Powered: yes`.
+
+Cause: this machine sleeps in S3, which resets every USB device on wake, including the TP-Link (RTL8761BU) dongle. BlueZ removes `hci0` and adds it back while it is still powering up. Quickshell builds the new adapter from that first snapshot (`Powered=false`) and never re-reads it. When BlueZ's power-on signal lands before Quickshell subscribes, the panel keeps the stale value until the shell restarts. The toggle then sends `omarchy-bluetooth-power on` to an adapter that is already on. Upstream reports: [omacom/omarchy#9561](https://github.com/omacom/omarchy/issues/9561) and the open fix [quickshell-mirror/quickshell#1156](https://github.com/quickshell-mirror/quickshell/pull/1156).
+
+Confirm it from the shell's saved debug log. The last line reading `false` while BlueZ says `Powered: yes` is this bug:
+
+```sh
+quickshell log -p /usr/share/omarchy/shell -r 'quickshell.dbus.properties.debug=true' | grep 'hci0/org.bluez.Adapter1:Powered to' | tail -1
+```
+
+`omarchy restart shell` fixes it by hand and keeps Bluetooth connections. Tray icons, including 1Password's, register again with the new shell.
+
+`bluetooth-shell-resync.service` in `packages/omarchy/bluetooth-resync/` automates that. It watches BlueZ for adapters being added, and checks every adapter once at login. When BlueZ reports an adapter powered but the shell's log still says `false`, it waits for the session to unlock and restarts the shell. It does nothing when Bluetooth was turned off on purpose. It costs one idle `gdbus monitor` and a bash loop. Watch its decisions with `journalctl --user -u bluetooth-shell-resync`.
+
+After restoring the dotfiles, enable it once:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now bluetooth-shell-resync.service
+```
+
+Remove the package once Omarchy ships a Quickshell with the upstream fix.
 
 ## Type Portuguese accents
 
