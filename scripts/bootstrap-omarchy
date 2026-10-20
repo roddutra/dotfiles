@@ -86,6 +86,20 @@ if $include_hardware; then
   install_packages repo "$manifest_root/hardware-packages.txt"
 fi
 
+# 1Password's desktop app only connects to browser binaries it recognises, and
+# Zen's is not one of them. Without this entry the Zen extension cannot share
+# the app's unlock state. 1Password ignores the file unless root owns it.
+one_password_allowlist=/etc/1password/custom_allowed_browsers
+if [[ -f $one_password_allowlist ]] && grep -qx 'zen-bin' "$one_password_allowlist"; then
+  echo "  Zen already allowed in 1Password"
+else
+  echo "Allowing Zen to connect to the 1Password desktop app..."
+  run sudo install -d -o root -g root -m 755 /etc/1password
+  run sudo sh -c 'printf "%s\n" zen-bin >> "$1"' _ "$one_password_allowlist"
+  run sudo chown root:root "$one_password_allowlist"
+  run sudo chmod 755 "$one_password_allowlist"
+fi
+
 echo "Restoring Omarchy plugins..."
 while IFS='|' read -r plugin_id plugin_url || [[ -n ${plugin_id:-} ]]; do
   [[ -z ${plugin_id:-} || $plugin_id == \#* ]] && continue

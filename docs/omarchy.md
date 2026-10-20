@@ -94,6 +94,16 @@ Do not use a `~/.local/share/applications/com.anthropic.Claude.desktop` override
 
 Any Electron application on Hyprland can hit this. Pass the same flag through that app's flags file or desktop entry.
 
+## Zen asks to unlock 1Password separately
+
+The 1Password desktop app only connects to browser binaries on its built-in list, and Zen's `/opt/zen-browser-bin/zen-bin` is not on it. The extension still works but needs its own unlock. 1Password logs the rejection:
+
+```sh
+grep -h "isn't a supported browser" ~/.config/1Password/logs/*.log | tail -1
+```
+
+`bootstrap-omarchy` adds `zen-bin` to `/etc/1password/custom_allowed_browsers`. 1Password ignores the file unless root owns it. Quit 1Password from its tray menu, start it again, then restart Zen. Check that the extension shows the app as connected in its settings.
+
 ## Type Portuguese accents
 
 `packages/omarchy/hypr/.config/hypr/input.lua` maps Right Ctrl as the Compose key. Tap each key in sequence rather than holding them together.
