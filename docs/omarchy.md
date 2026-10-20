@@ -28,6 +28,7 @@ Use `--dry-run` to inspect bootstrap commands. Omit `--hardware` on a machine wi
 
 Tracked Omarchy packages live under `packages/omarchy/`:
 
+- `1password/` makes the 1Password autostart wait for the bar's tray. See [1Password has no tray icon](#1password-has-no-tray-icon).
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `claude-desktop/` contains Claude Desktop launch flags. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `ghostty/` contains the Linux Ghostty configuration.
@@ -103,6 +104,22 @@ grep -h "isn't a supported browser" ~/.config/1Password/logs/*.log | tail -1
 ```
 
 `bootstrap-omarchy` adds `zen-bin` to `/etc/1password/custom_allowed_browsers`. 1Password ignores the file unless root owns it. Quit 1Password from its tray menu, start it again, then restart Zen. Check that the extension shows the app as connected in its settings.
+
+## 1Password has no tray icon
+
+1Password registers its tray icon once at launch and never retries. At login, the autostart can run before the Omarchy shell has started its tray (`org.kde.StatusNotifierWatcher`), so 1Password runs without an icon. Relaunching 1Password brings the icon back.
+
+Check whether 1Password registered an icon:
+
+```sh
+busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems
+```
+
+The list should contain a `/StatusNotifierItem` entry whose owner (`busctl --user list`) is the `1password` process.
+
+`packages/omarchy/1password/` adds a drop-in to `app-com.onepassword.OnePassword@autostart.service`, the unit systemd generates from 1Password's autostart entry. It waits up to 30 seconds for the tray, then launches 1Password whether or not it appeared. The drop-in leaves `~/.config/autostart/com.onepassword.OnePassword.desktop` alone, because 1Password rewrites that file every time it launches.
+
+After restoring the dotfiles, run `systemctl --user daemon-reload`. The drop-in takes effect at the next login.
 
 ## Type Portuguese accents
 
