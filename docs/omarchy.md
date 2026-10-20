@@ -31,7 +31,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `1password/` makes the 1Password autostart wait for the bar's tray. See [1Password has no tray icon](#1password-has-no-tray-icon).
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `bluetooth-resync/` restarts the shell when its Bluetooth panel misses a power-on. See [Bluetooth shows off after waking](#bluetooth-shows-off-after-waking).
-- `claude-desktop/` contains Claude Desktop launch flags. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
+- `claude-desktop/` contains Claude Desktop launch flags and its login autostart entry. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `ghostty/` contains the Linux Ghostty configuration.
 - `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
 - `hypr/` contains personal Hyprland overrides.
@@ -88,7 +88,17 @@ busctl --user list | grep org.freedesktop.secrets
 
 `backend=basic_text` alongside a live `org.freedesktop.secrets` means desktop detection failed, not the keyring.
 
-Force the backend in `~/.config/claude-desktop-flags.conf`, tracked as the `claude-desktop` package. The packaged `/usr/bin/claude-desktop` wrapper reads this file on every launch, so the flag applies however the app is started.
+Force the backend in `~/.config/claude-desktop-flags.conf`, tracked as the `claude-desktop` package. Only the packaged `/usr/bin/claude-desktop` wrapper reads this file. Anything that runs `/usr/lib/claude-desktop/claude-desktop` directly skips it.
+
+The app's "Launch at login" setting is one of those. Turning it on writes `~/.config/autostart/claude-desktop.desktop` with the real binary in `Exec`, so every boot starts without the flag and signs you out. The `claude-desktop` package tracks that entry pointing at the wrapper instead. The app treats an existing entry as "on" and leaves it alone until the setting changes.
+
+Turning the setting off deletes the link, and `apply-dotfiles` restores it. Turning it back on in the app replaces the link with the broken entry, and `apply-dotfiles` then reports a conflict. Delete the file and run `apply-dotfiles` again. Check what boot will run:
+
+```sh
+systemctl --user cat 'app-claude\x2ddesktop@autostart.service' | grep ExecStart
+```
+
+It must show `/usr/bin/claude-desktop --startup`. Run `systemctl --user daemon-reload` after changing the entry.
 
 Quit the app and relaunch it, then sign in once more. A fixed session logs no `safeStorage` warnings.
 

@@ -1,0 +1,9 @@
+# Claude Desktop writes this entry when "Launch at login" is turned on, but
+# points it at /usr/lib/claude-desktop/claude-desktop, which skips the wrapper
+# that reads ~/.config/claude-desktop-flags.conf. Launch through the wrapper so
+# the sign-in survives a reboot. See docs/omarchy.md.
+[Desktop Entry]
+Type=Application
+Name=Claude
+Exec=/usr/bin/claude-desktop --startup
+X-GNOME-Autostart-enabled=true
