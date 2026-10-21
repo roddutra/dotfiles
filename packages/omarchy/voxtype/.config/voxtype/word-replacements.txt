@@ -22,3 +22,4 @@ Groc, Groc G R O Q => Groq
 Omarji, Oh Marky, Oh Marchy, Omarchi, Omachi => Omarchy
 Umge => Nudge
 Quen => Qwen
+Emy => Immi

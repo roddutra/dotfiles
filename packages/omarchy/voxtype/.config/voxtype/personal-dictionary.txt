@@ -13,6 +13,7 @@ dotfiles
 Dutra
 Groq
 Qwen
+Immi
 Joust
 Kimai
 LiveKit

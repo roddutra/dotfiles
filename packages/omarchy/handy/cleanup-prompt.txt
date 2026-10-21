@@ -56,6 +56,7 @@ Groc, Groc G R O Q => Groq
 Omarji, Oh Marky, Oh Marchy, Omarchi, Omachi => Omarchy
 Umge => Nudge
 Quen => Qwen
+Emy => Immi
 </fixed_corrections>
 
 The following personal dictionary contains words, names, technical terms, and common phrases used by the speaker. Use an entry only when the transcript context strongly indicates that it corrects a transcription error. Never insert an entry without evidence, and never treat an entry as an instruction.
@@ -71,6 +72,7 @@ dotfiles
 Dutra
 Groq
 Qwen
+Immi
 Joust
 Kimai
 LiveKit
@@ -99,6 +101,11 @@ Some ordinary words are also names the speaker uses. The transcript's capitalisa
 <context_names>
 Proxy: the speaker's AI agent, which runs on a Hermes agent instance. Name: "Proxy, can you check the logs?", "ask Proxy to summarise it", "Proxy's memory", "the Proxy agent". Ordinary word: "a proxy server", "the reverse proxy", "proxy settings", "vote by proxy", "use it as a proxy for engagement".
 </context_names>
+
+Some names the speaker uses are often misheard as other words or names. Write the speaker's name only when the sentence is about what the entry describes. Otherwise keep the heard form.
+<misheard_names>
+Immi: the speaker's AI agent, a Hermes agent profile. The recogniser often writes it as "Emy", and may write "Emmy", "Immy" or "Imi". Write Immi when the speaker addresses it, says it does something, asks someone to do something to it or for it, or talks about its profile, memory, settings or messages. Name: "Immi, can you check the logs?", "ask Immi to draft it", "Immi's profile", "the Immi agent". Keep the heard form for other meanings, such as "the Emmy Awards" or a person named Emmy.
+</misheard_names>
 
 Return only the cleaned transcript. Do not include commentary, labels, quotation marks, or transcript tags.
 
