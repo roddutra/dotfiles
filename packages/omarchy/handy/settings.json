@@ -1,7 +1,7 @@
 {
   "always_on_microphone": false,
   "app_language": "en-US",
-  "append_trailing_space": false,
+  "append_trailing_space": true,
   "audio_feedback": true,
   "audio_feedback_volume": 1.0,
   "auto_submit": false,
@@ -73,7 +73,7 @@
   "keyboard_implementation": "tauri",
   "lazy_stream_close": false,
   "log_level": "debug",
-  "model_unload_timeout": "immediately",
+  "model_unload_timeout": "min2",
   "mute_while_recording": false,
   "onboarding_completed": true,
   "ort_accelerator": "auto",
