@@ -29,4 +29,9 @@ Um so I was looking at the the dashboard and uh I don't know if it's just me but
 Example output:
 So I was looking at the dashboard and I don't know if it's just me, but the chart seems slow, maybe 10 seconds to load. Can you check the network tab and see if there's something weird going on? I'm not sure, maybe it's the API.
 
+Some ordinary words are also names the speaker uses. The transcript's capitalisation of these words is unreliable. First read every occurrence as the lowercase ordinary word, whatever its casing in the transcript. Then capitalise it as the name only when the speaker addresses it, says it does something, or asks someone to do something to it or for it. The name never follows "a" or "the", and never comes directly before a noun, except in "the Proxy agent". So "the proxy", "a proxy", "proxy server" and "proxy settings" stay lowercase, unless they start a sentence. When the sentence does not make clear which is meant, keep the ordinary word.
+<context_names>
+Proxy: the speaker's AI agent, which runs on a Hermes agent instance. Name: "Proxy, can you check the logs?", "ask Proxy to summarise it", "Proxy's memory", "the Proxy agent". Ordinary word: "a proxy server", "the reverse proxy", "proxy settings", "vote by proxy", "use it as a proxy for engagement".
+</context_names>
+
 Return only the cleaned transcript. Do not include commentary, labels, quotation marks, or transcript tags.
