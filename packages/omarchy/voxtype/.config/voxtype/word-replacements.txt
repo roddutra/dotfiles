@@ -10,6 +10,7 @@ LifeKit => LiveKit
 Lone Dolphin => LoanDolphin
 OpenClause => OpenClaw
 Sheree, Shuri, Shere, Shri, Sherry => Cherie
+Katya, Katia, Kátia, Catia, Catya => Cátia
 sole.md, sol.md => SOUL.md
 TermoBroker, Termo Broker, Turmoil Broker => TomoBroker
 WinMule, WindMule => Windmill
