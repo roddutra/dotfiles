@@ -81,9 +81,38 @@ install_packages repo "$manifest_root/packages.txt"
 echo "Installing AUR packages..."
 install_packages aur "$manifest_root/aur-packages.txt"
 
+# System files are installed as root-owned copies, never linked: a link into
+# the home directory would let anything running as the user change what root
+# loads. Each path is relative to system/omarchy/ and to /.
+system_files_changed=false
+
+install_system_file() {
+  local path=$1
+  local source="$repo_root/system/omarchy/$path"
+  local target="/$path"
+
+  if cmp -s "$source" "$target"; then
+    echo "  /$path already installed"
+    return
+  fi
+
+  run sudo install -D -m 644 -o root -g root "$source" "$target"
+  system_files_changed=true
+}
+
 if $include_hardware; then
   echo "Installing this desktop's hardware packages..."
   install_packages repo "$manifest_root/hardware-packages.txt"
+
+  echo "Installing this desktop's system files..."
+  install_system_file etc/modprobe.d/no-hid-kysona.conf
+
+  # The initramfs carries its own copy of modprobe.d, and the keyboard hook
+  # includes every HID driver, so rebuild the boot image for the block to
+  # apply from early boot.
+  if $system_files_changed; then
+    run sudo limine-update
+  fi
 fi
 
 # 1Password's desktop app only connects to browser binaries it recognises, and

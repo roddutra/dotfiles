@@ -13,6 +13,8 @@ packages/
 manifests/
 ├── macos/      # Homebrew bundle
 └── omarchy/    # Curated packages, plugins, theme, and hardware profile
+system/
+└── omarchy/    # Root-owned files below /, installed by bootstrap-omarchy
 docs/           # Notes that are never processed by Stow
 scripts/        # Platform-aware apply and bootstrap commands
 ```

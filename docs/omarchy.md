@@ -41,6 +41,8 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration, vocabulary, and Groq cleanup commands. See `docs/voxtype.md`.
 
+`system/omarchy/` mirrors paths below `/`. `bootstrap-omarchy --hardware` installs those files as root-owned copies; Stow never touches them. After editing one, run the bootstrap again to update the live copy.
+
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.
 
 Generated monitor files, backups, secrets, downloaded plugins, and downloaded themes are intentionally excluded. Plugins and the theme are restored from `manifests/omarchy/`.
@@ -156,6 +158,30 @@ systemctl --user enable --now bluetooth-shell-resync.service
 ```
 
 Remove the package once Omarchy ships a Quickshell with the upstream fix.
+
+## Waking from sleep hangs with no display
+
+Symptom: some wakes never finish. The fans and case lighting come on, but the monitor gets no signal, Caps Lock does nothing and only holding the power button recovers. That boot's journal ends at `PM: suspend entry (deep)`.
+
+Cause: the `hid_kysona` driver for the VXE NordicMouse dongle (`3554:f58a`) asks the mouse for its battery level every 5 seconds from a timer that keeps running across sleep. Some wakes reset the USB controller (`xHC error in resume, USBSTS 0x401, Reinit`). If the timer fires while the dongle is still being reset, the request crashes the controller driver with `BUG: kernel NULL pointer dereference` in `xhci_urb_enqueue`, called from `kysona_battery_timer_tick`. Every USB device then stays stuck and the resume never finishes. Caught on 21 October 2026 on kernel 7.2.8 with the crash log steps below. As of that date, the upstream driver still has no sleep handling.
+
+Fix: `system/omarchy/etc/modprobe.d/no-hid-kysona.conf` blocks the driver, so the dongle uses `hid-generic`. The mouse works the same. Only its battery level is lost, and nothing on this system displays it. The initramfs includes every HID driver, so the boot image must be rebuilt (`sudo limine-update`) for the block to apply from early boot. `bootstrap-omarchy --hardware` does both.
+
+Check the dongle is on `hid-generic`:
+
+```sh
+ls /sys/bus/hid/drivers/hid-generic | grep 3554
+```
+
+Ruled out along the way: the NVIDIA 615 driver (its sleep handling is the same as 610's) and the TP-Link Wi-Fi adapter (the hang continued with its driver unloaded before sleep).
+
+`/sys/power/pm_trace` can't name the stalling device on this board: after the forced power-off the BIOS resets the clock to 1 January 2021, wiping the trace.
+
+To catch a kernel log instead:
+
+1. Store crash logs in UEFI memory: put `KERNEL_CMDLINE[default]+=" efi_pstore.pstore_disable=0"` in `/etc/limine-entry-tool.d/pstore.conf`, run `sudo limine-update`, enable `systemd-pstore.service` and reboot.
+2. Before a test sleep, make the kernel panic and reboot when a task, CPU or driver is stuck: `sudo sysctl kernel.hung_task_panic=1 kernel.softlockup_panic=1 kernel.hardlockup_panic=1 kernel.panic_on_oops=1 kernel.panic=10`. These last until the next reboot. Disarm them after a good wake by setting all five to `0`.
+3. After a hang, wait 5 minutes. A reboot on its own means the kernel was alive, and `systemd-pstore` saves the log under `/var/lib/systemd/pstore/`. Its files are readable only by root, and each record is split into parts numbered from the end of the log. Staying frozen means the hang is below the kernel's watchdogs.
 
 ## Type Portuguese accents
 
