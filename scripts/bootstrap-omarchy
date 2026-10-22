@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/bootstrap-omarchy [--dry-run] [--hardware]
 
-Install curated Omarchy packages, plugins, and the saved theme.
+Install curated Omarchy packages, plugins, the shell layout seed, and the saved theme.
 
   --dry-run   Print commands without running them.
   --hardware  Include packages specific to this desktop's AMD CPU and NVIDIA GPU.
@@ -138,6 +138,11 @@ while IFS='|' read -r plugin_id plugin_url || [[ -n ${plugin_id:-} ]]; do
     run omarchy plugin add "$plugin_url" --enable --yes
   fi
 done < "$manifest_root/plugins.txt"
+
+# The shell layout refers to the plugins above. It is seeded once, never
+# linked: see scripts/omarchy-shell-config.
+echo "Seeding the Omarchy shell layout..."
+run "$repo_root/scripts/omarchy-shell-config" install
 
 # The Voxtype OSD plugin's own setup refuses config files that resolve into this
 # repository. Tracked config owns its [osd] settings and keybindings, so install

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Keep a seed copy of the Omarchy shell configuration (bar layout, widgets,
+# plugins and idle timings). The shell rewrites ~/.config/omarchy/shell.json
+# when it saves, which replaces a link with a regular file, and each machine
+# needs its own devices and timings. So the file is copied, never linked.
+#
+#   omarchy-shell-config install   Copy the seed to this machine when it has
+#                                  no shell.json yet. An existing file is
+#                                  left alone.
+#   omarchy-shell-config export    Copy this machine's shell.json over the
+#                                  seed, to record a change. Review the diff
+#                                  before committing.
+#   omarchy-shell-config check     Print a notice when this machine's
+#                                  shell.json differs from the seed. It never
+#                                  fails, so callers can run it as a reminder.
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+seed_file=$repo_root/manifests/omarchy/shell.json
+live_file=${XDG_CONFIG_HOME:-"$HOME/.config"}/omarchy/shell.json
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+install_seed() {
+  [[ -r "$seed_file" ]] || fail "Seed not found at $seed_file."
+
+  # A link left from when this file was stowed no longer resolves. Replace it.
+  if [[ -L "$live_file" && ! -e "$live_file" ]]; then
+    rm "$live_file"
+  fi
+  if [[ -e "$live_file" ]]; then
+    printf '  shell.json already present, leaving it\n'
+    return 0
+  fi
+
+  install -D -m 600 "$seed_file" "$live_file"
+  printf '  Installed shell.json from the seed\n'
+}
+
+export_live() {
+  [[ -r "$live_file" ]] || fail "No shell.json at $live_file."
+  [[ ! -L "$live_file" ]] || fail "$live_file is a link, not this machine's own file."
+
+  cp "$live_file" "$seed_file"
+  chmod 644 "$seed_file"
+  printf 'Exported %s to %s\n' "$live_file" "${seed_file#"$repo_root"/}"
+  git -C "$repo_root" diff --stat -- "$seed_file"
+}
+
+check_drift() {
+  [[ -r "$seed_file" && -r "$live_file" ]] || return 0
+  cmp -s "$live_file" "$seed_file" && return 0
+  printf 'Note: %s differs from the seed in %s.\n' "$live_file" "${seed_file#"$repo_root"/}"
+  printf '  To carry this layout to new machines, run ./scripts/omarchy-shell-config export and review the diff.\n'
+}
+
+case ${1:-} in
+  install) install_seed ;;
+  export) export_live ;;
+  check) check_drift ;;
+  *) fail "Usage: omarchy-shell-config install|export|check" ;;
+esac

@@ -175,6 +175,12 @@ if [[ $platform == macos && -e $watcher_plist ]] \
   fi
 fi
 
+# shell.json is copied, not linked, so remind when this machine's layout has
+# moved on from the seed new machines receive.
+if [[ $platform == omarchy ]]; then
+  "$repo_root/scripts/omarchy-shell-config" check
+fi
+
 if $dry_run; then
   echo "Dry run complete. No links were changed."
 else

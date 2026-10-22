@@ -115,11 +115,11 @@
       ]
     },
     "position": "top",
-    "transparent": true
+    "transparent": false
   },
   "idle": {
     "lock": 604800,
-    "screensaver": 900
+    "screensaver": 600
   },
   "plugins": [
     {

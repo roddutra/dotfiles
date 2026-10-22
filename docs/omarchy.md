@@ -37,7 +37,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
 - `hypr/` contains personal Hyprland overrides.
 - `nvim/` contains the Linux-specific Neovim override.
-- `omarchy/` contains selected shell and plugin preference files.
+- `omarchy/` contains the dock preference files.
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
@@ -50,11 +50,19 @@ Generated monitor files, backups, secrets, downloaded plugins, and downloaded th
 
 `~/.config/omarchy/sandman.json` is also untracked: its sleep setting changes too often to be worth recording.
 
-The Omarchy shell can replace the `shell.json` link with a regular file when it saves. `apply-dotfiles` then reports a conflict. Adopt the live file with `stow --dir packages/omarchy --target ~ --no-folding --adopt omarchy` and review the diff.
+`~/.config/omarchy/shell.json` (bar layout, widgets, plugins and idle timings) is copied, not linked. The shell replaces a link with a regular file when it saves, which made `apply-dotfiles` stop with a conflict, and each machine needs its own devices, tray order and timings. `manifests/omarchy/shell.json` is the seed: `bootstrap-omarchy` installs it only when a machine has no `shell.json`. To record a change made on this machine, run `./scripts/omarchy-shell-config export` and review the diff before committing. `apply-dotfiles` prints a notice whenever this machine's `shell.json` differs from the seed.
+
+Export from the machine whose layout new machines should get. Before committing, check the values that belong to one machine rather than to the layout:
+
+- the webcam widget's `device`, such as `/dev/video0`
+- tray `order` entries, some of which carry IDs that change between sessions, such as `tray-icon tray app 47890-1`
+- monitor widgets (`omarchy.monitor`, `crmne.hyprmoncfg`) and the `idle` timings
+
+When a change suits only the machine it came from, drop that hunk with `git restore -p manifests/omarchy/shell.json` and keep the rest.
 
 ## Alt+Tab switcher
 
-`manifests/omarchy/plugins.txt` restores [omalt-tab](https://github.com/Codesmith28/omalt-tab). The tracked `shell.json` enables its overlay, and the tracked Hyprland bindings load the plugin's own shortcuts when it is installed. `socat` supports its socket client; the binding calls the bundled client directly, so no `make prod` step or helper symlinks are needed.
+`manifests/omarchy/plugins.txt` restores [omalt-tab](https://github.com/Codesmith28/omalt-tab). The seeded `shell.json` enables its overlay, and the tracked Hyprland bindings load the plugin's own shortcuts when it is installed. `socat` supports its socket client; the binding calls the bundled client directly, so no `make prod` step or helper symlinks are needed.
 
 Alt+Tab selects the previously focused window in recent-use order, which may move left on the workspace display. Shift+Alt+Tab reverses that order. With the switcher open, the arrow keys navigate spatially.
 

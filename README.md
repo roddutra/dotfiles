@@ -81,7 +81,7 @@ Local files remain untracked:
 
 ### Omarchy packages
 
-Restore curated packages, plugins, and the saved theme:
+Restore curated packages, plugins, the shell layout, and the saved theme. The shell layout is seeded only on a machine that has none:
 
 ```sh
 ./scripts/bootstrap-omarchy
