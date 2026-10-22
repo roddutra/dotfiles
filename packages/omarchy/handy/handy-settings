@@ -6,10 +6,11 @@
 #   handy-settings export   Refresh settings.json and cleanup-prompt.txt from
 #                           the running configuration, without secrets or
 #                           machine-specific device choices.
-#   handy-settings apply    Apply both files to this machine, download the
-#                           selected model if it is missing, copy the Groq key
-#                           from Voxtype's secret file when Handy has none,
-#                           and restart Handy hidden.
+#   handy-settings apply    Apply both files to this machine, point Handy's
+#                           paste step at handy-paste, download the selected
+#                           model if it is missing, copy the Groq key from
+#                           Voxtype's secret file when Handy has none, and
+#                           restart Handy hidden.
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)
@@ -26,6 +27,24 @@ key_file=${VOXTYPE_GROQ_API_KEY_FILE:-"$data_home/voxtype/secrets/groq-api-key"}
 # built-in prompts (ids starting with "default_") are not exported.
 prompt_id=voxtype_minimal_cleanup
 prompt_marker=@cleanup-prompt.txt
+
+# The word replacements and personal dictionary live in the dictation
+# package, shared with Voxtype. The cleanup prompt holds these markers inside
+# its <fixed_corrections> and <personal_dictionary> sections, and apply fills
+# them in with the shared parser, so Handy's prompt lists the same entries
+# Voxtype sends to Groq.
+dictation_dir=${XDG_CONFIG_HOME:-"$HOME/.config"}/dictation
+prepare_transcript=$HOME/.local/bin/dictation-prepare-transcript
+replacements_file=$dictation_dir/word-replacements.txt
+dictionary_file=$dictation_dir/personal-dictionary.txt
+replacements_marker=@word-replacements.txt
+dictionary_marker=@personal-dictionary.txt
+
+# Handy pastes through handy-paste beside this file. Handy needs its absolute
+# path, which depends on where the repository is checked out, so the snapshot
+# holds this marker instead.
+paste_script=$here/handy-paste
+paste_marker=@handy-paste
 
 # Pinned download for the model the snapshot selects. Handy also finds a model
 # dropped into its models directory, so no in-app download is needed.
@@ -66,6 +85,28 @@ create_default_settings() {
   stop_handy
 }
 
+# Prints cleanup-prompt.txt with both markers replaced by the shared lists.
+render_prompt() {
+  local lists corrections dictionary
+  lists=$("$prepare_transcript" --replacements "$replacements_file" \
+    --dictionary "$dictionary_file" < /dev/null) \
+    || fail "Could not read $replacements_file or $dictionary_file. Run scripts/apply-dotfiles to install the dictation package."
+  corrections=$(grep -v -E '^[[:space:]]*(#|$)' "$replacements_file" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+  dictionary=$(jq -r '.dictionary | join("\n")' <<< "$lists")
+
+  jq -n -r --rawfile prompt "$prompt_file" \
+    --arg corrections "$corrections" --arg dictionary "$dictionary" \
+    --arg replacements_marker "$replacements_marker" --arg dictionary_marker "$dictionary_marker" '
+    def marker_line($m): "\n" + $m + "\n";
+    if ($prompt | [indices(marker_line($replacements_marker)), indices(marker_line($dictionary_marker))] | map(length)) != [1, 1]
+    then error("cleanup-prompt.txt must hold each list marker once, on its own line")
+    else $prompt
+      | sub(marker_line($replacements_marker); "\n" + $corrections + "\n")
+      | sub(marker_line($dictionary_marker); "\n" + $dictionary + "\n")
+    end
+  ' || fail "Could not fill in the lists in $prompt_file."
+}
+
 export_settings() {
   [[ -r "$settings_file" ]] || fail "Handy settings not found at $settings_file."
 
@@ -74,9 +115,24 @@ export_settings() {
     '.settings.post_process_prompts[] | select(.id == $id) | .prompt' \
     "$settings_file")
   [[ -n "$prompt" ]] || fail "Prompt '$prompt_id' not found in Handy's settings."
-  printf '%s\n' "$prompt" > "$prompt_file"
 
-  jq -S --arg id "$prompt_id" --arg marker "$prompt_marker" '
+  # Put the markers back, so the lists stay in the dictation package. Entries
+  # added in Handy's settings window would be lost here, so say so.
+  jq -n -r --arg prompt "$prompt" \
+    --arg replacements_marker "$replacements_marker" --arg dictionary_marker "$dictionary_marker" '
+    $prompt
+    | sub("(?s)<fixed_corrections>\n.*?\n</fixed_corrections>";
+        "<fixed_corrections>\n" + $replacements_marker + "\n</fixed_corrections>")
+    | sub("(?s)<personal_dictionary>\n.*?\n</personal_dictionary>";
+        "<personal_dictionary>\n" + $dictionary_marker + "\n</personal_dictionary>")
+  ' > "$prompt_file"
+  if [[ "$(render_prompt)" != "$prompt" ]]; then
+    printf 'Handy'\''s prompt lists differ from the dictation package. Edit %s or %s instead.\n' \
+      "$replacements_file" "$dictionary_file" >&2
+  fi
+
+  jq -S --arg id "$prompt_id" --arg marker "$prompt_marker" \
+    --arg script "$paste_script" --arg script_marker "$paste_marker" '
     .settings
     | del(
         .post_process_api_keys,
@@ -86,6 +142,7 @@ export_settings() {
       )
     | .post_process_prompts |= map(select(.id | startswith("default_") | not))
     | (.post_process_prompts[] | select(.id == $id) | .prompt) = $marker
+    | if .external_script_path == $script then .external_script_path = $script_marker else . end
   ' "$settings_file" > "$snapshot_file"
 
   printf 'Exported %s and %s\n' "${snapshot_file##*/}" "${prompt_file##*/}"
@@ -111,6 +168,11 @@ ensure_model() {
 apply_settings() {
   command -v handy > /dev/null || fail "Handy is not installed."
   [[ -r "$snapshot_file" && -r "$prompt_file" ]] || fail "settings.json or cleanup-prompt.txt is missing in $here."
+  [[ -x "$paste_script" ]] || fail "$paste_script is missing or not executable."
+
+  # Render first, so a broken list fails before Handy is stopped.
+  local prompt
+  prompt=$(render_prompt)
 
   stop_handy
   [[ -s "$settings_file" ]] || create_default_settings
@@ -122,11 +184,16 @@ apply_settings() {
   merged=$(mktemp "$settings_file.XXXXXX")
   chmod 600 "$merged"
   jq --slurpfile snapshot "$snapshot_file" \
-    --rawfile prompt "$prompt_file" \
+    --arg prompt "$prompt" \
     --rawfile key "$key_source" \
-    --arg id "$prompt_id" '
+    --arg id "$prompt_id" \
+    --arg script "$paste_script" --arg script_marker "$paste_marker" '
     .settings = ((.settings // {}) * $snapshot[0])
     | (.settings.post_process_prompts[] | select(.id == $id) | .prompt) = ($prompt | sub("\\s+$"; ""))
+    | if .settings.external_script_path == $script_marker
+      then .settings.external_script_path = $script
+      else .
+      end
     | ($key | gsub("\\s"; "")) as $groq_key
     | if $groq_key != "" and ((.settings.post_process_api_keys.custom // "") == "")
       then .settings.post_process_api_keys.custom = $groq_key

@@ -57,13 +57,10 @@ def load_dictionary(path: Path, replacement_terms):
     entries = []
     seen = set()
 
-    for entry in replacement_terms:
-        key = entry.casefold()
-        if key not in seen:
-            seen.add(key)
-            entries.append(entry)
-
-    for _, entry in meaningful_lines(path):
+    # Dictionary entries come first, so their casing wins over a replacement
+    # that differs only in case, such as "Coconut Bowls" and "coconut bowls".
+    dictionary_terms = [entry for _, entry in meaningful_lines(path)]
+    for entry in dictionary_terms + replacement_terms:
         key = entry.casefold()
         if key not in seen:
             seen.add(key)

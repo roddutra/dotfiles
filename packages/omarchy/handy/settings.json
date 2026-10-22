@@ -31,7 +31,7 @@
     }
   },
   "chinese_script": "as_transcribed",
-  "clipboard_handling": "copy_to_clipboard",
+  "clipboard_handling": "dont_modify",
   "custom_filler_words": null,
   "custom_words": [
     "TomoBroker",
@@ -66,7 +66,7 @@
   ],
   "debug_mode": false,
   "experimental_enabled": false,
-  "external_script_path": null,
+  "external_script_path": "@handy-paste",
   "extra_recording_buffer_ms": 0,
   "filler_word_removal_enabled": true,
   "history_limit": 5,
@@ -82,7 +82,7 @@
   "overlay_style": "live",
   "paste_delay_after_ms": 60,
   "paste_delay_ms": 60,
-  "paste_method": "ctrl_v",
+  "paste_method": "external_script",
   "post_process_enabled": true,
   "post_process_models": {
     "anthropic": "",

@@ -37,9 +37,10 @@ reasoning_effort=${VOXTYPE_GROQ_REASONING_EFFORT:-"none"}
 fallback_model=${VOXTYPE_GROQ_FALLBACK_MODEL:-"openai/gpt-oss-120b"}
 fallback_reasoning_effort=${VOXTYPE_GROQ_FALLBACK_REASONING_EFFORT:-"low"}
 prompt_file=${VOXTYPE_GROQ_PROMPT_FILE:-"$HOME/.config/voxtype/groq-cleanup-prompt.txt"}
-replacements_file=${VOXTYPE_REPLACEMENTS_FILE:-"$HOME/.config/voxtype/word-replacements.txt"}
-dictionary_file=${VOXTYPE_DICTIONARY_FILE:-"$HOME/.config/voxtype/personal-dictionary.txt"}
-prepare_command=${VOXTYPE_PREPARE_COMMAND:-"$HOME/.local/bin/voxtype-prepare-transcript"}
+dictation_dir=${XDG_CONFIG_HOME:-"$HOME/.config"}/dictation
+replacements_file=${VOXTYPE_REPLACEMENTS_FILE:-"$dictation_dir/word-replacements.txt"}
+dictionary_file=${VOXTYPE_DICTIONARY_FILE:-"$dictation_dir/personal-dictionary.txt"}
+prepare_command=${VOXTYPE_PREPARE_COMMAND:-"$HOME/.local/bin/dictation-prepare-transcript"}
 
 if [[ ! -r "$key_file" ]]; then
   fail 2 "Groq API key is not readable at $key_file"

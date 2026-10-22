@@ -26,7 +26,7 @@ The `groq_cleanup` profile follows this path:
 
 1. Voxtype records audio and transcribes it locally with Parakeet.
 2. Voxtype pipes the current transcript to `voxtype-groq-cleanup`.
-3. `voxtype-prepare-transcript` applies deterministic word replacements and builds the dictionary context.
+3. `dictation-prepare-transcript` applies deterministic word replacements and builds the dictionary context.
 4. `voxtype-groq-cleanup` sends the cleanup prompt, dictionary, and prepared transcript to Groq.
 5. The cleaned text is pasted into the focused application.
 
@@ -121,7 +121,8 @@ Setup. Handy's own files are not linked from this repository:
 How the Voxtype configuration was carried over:
 
 - Groq cleanup uses Handy's Custom provider pointed at `https://api.groq.com/openai/v1` with `qwen/qwen3.8-27b`. The built-in Groq provider does not send `reasoning_effort: none`; Custom does. Handy sets no temperature.
-- The cleanup prompt is `groq-cleanup-prompt.txt` with the rules from `word-replacements.txt` and the entries from `personal-dictionary.txt` embedded, because Handy has no replacement table. Exact replacements therefore apply only on `F8`. Its self-correction rule is expanded with six examples and a guard for ordinary uses of "sorry", "actually" and "I mean". Across 55 test cases run four times each, that fixed 94% of self-corrections against 85% for the original rule, with no loss of kept content.
+- The cleanup prompt is `groq-cleanup-prompt.txt` with the rules from `word-replacements.txt` and the entries from `personal-dictionary.txt` embedded, because Handy has no replacement table. `cleanup-prompt.txt` holds the markers `@word-replacements.txt` and `@personal-dictionary.txt` in place of the lists, and `handy-settings apply` fills them in from the dictation package. Edit the lists there, never in Handy's settings window: `handy-settings export` warns when Handy's copy differs.
+- Handy pastes through `handy-paste` (paste method External script), which applies `word-replacements.txt` to the final text and then presses `Ctrl+V`. Handy runs it after Groq cleanup, so the replacements fix what the model missed: across 120 runs on one real transcript, the prompt alone wrote "Katya" or "Catya" instead of Cátia about 1 time in 12. This step is final, unlike Voxtype's, where replacements run before cleanup. It applies on `SHIFT + F8` raw dictation too. `clipboard_handling` is `dont_modify` because Handy would otherwise copy its uncorrected text over the pasted one; the script leaves the corrected text on the clipboard. Handy's history still shows the text before replacement. Problems are logged with `journalctl --user -t handy-paste`. Its self-correction rule is expanded with six examples and a guard for ordinary uses of "sorry", "actually" and "I mean". Across 55 test cases run four times each, that fixed 94% of self-corrections against 85% for the original rule, with no loss of kept content.
 - Handy's fuzzy custom word list holds 28 distinctive terms with `word_correction_threshold` lowered from 0.18 to 0.08. At 0.18 it rewrote "just" to "Joust" 77 times across two weeks of transcripts, "cloud" to "Claude", and "part" to "PRD". "Joust", "Groq", "Nudge" and "Windmill" are left out because they collide with ordinary words or with "Grok".
 
 Known limits found during setup:
@@ -136,7 +137,8 @@ Known limits found during setup:
 |---|---|
 | `settings.json` | Every Handy setting except the API key, the microphone, output and GPU device choices, and Handy's built-in prompt |
 | `cleanup-prompt.txt` | The cleanup prompt. `${output}` is Handy's transcript placeholder. `settings.json` refers to it as `@cleanup-prompt.txt` |
-| `handy-settings` | `export` refreshes both files from the running configuration. `apply` writes them into Handy |
+| `handy-paste` | The paste step. `settings.json` refers to it as `@handy-paste`, and `apply` writes its absolute path |
+| `handy-settings` | `export` refreshes `settings.json` and `cleanup-prompt.txt` from the running configuration. `apply` writes them into Handy |
 
 Run `packages/omarchy/handy/handy-settings export` after changing anything in Handy's settings window, then commit the result.
 
@@ -202,10 +204,10 @@ The plugin's `bin/setup` and `bin/uninstall` are not used. Setup refuses `config
 | File | Responsibility |
 |---|---|
 | `packages/omarchy/voxtype/.config/voxtype/config.toml` | Voxtype and `groq_cleanup` profile configuration |
-| `packages/omarchy/voxtype/.config/voxtype/word-replacements.txt` | Deterministic transcription corrections |
-| `packages/omarchy/voxtype/.config/voxtype/personal-dictionary.txt` | Terms supplied to Groq as constrained context |
+| `packages/omarchy/dictation/.config/dictation/word-replacements.txt` | Deterministic transcription corrections, shared with Handy |
+| `packages/omarchy/dictation/.config/dictation/personal-dictionary.txt` | Terms supplied to Groq as constrained context, shared with Handy |
 | `packages/omarchy/voxtype/.config/voxtype/groq-cleanup-prompt.txt` | Cleanup behavior and output contract |
-| `packages/omarchy/voxtype/.local/bin/voxtype-prepare-transcript` | Local replacement and dictionary preparation |
+| `packages/omarchy/dictation/.local/bin/dictation-prepare-transcript` | Local replacement and dictionary preparation, shared with Handy |
 | `packages/omarchy/voxtype/.local/bin/voxtype-groq-cleanup` | Groq request, validation, and cleaned output |
 | `packages/omarchy/voxtype/.local/bin/voxtype-progress` | Progress notification watcher, stage markers, and recording cap warning |
 | `packages/omarchy/voxtype/.config/systemd/user/voxtype-progress.service` | User unit that runs the watcher alongside Voxtype |
@@ -226,6 +228,8 @@ Do not move `voxtype` into the normal `--no-folding` package list. Changes made 
 
 ## Word replacements
 
+The word replacements and personal dictionary belong to the `dictation` package, installed to `~/.config/dictation/`, so Voxtype and Handy read the same files. Voxtype applies replacements before Groq cleanup. Handy lists them in its cleanup prompt and applies them again after cleanup.
+
 Add observed transcription mistakes to `word-replacements.txt`:
 
 ```text
@@ -240,7 +244,7 @@ Rules:
 - One pass is performed, so replacements never cascade.
 - The replacement is emitted with its configured spelling and casing.
 - A repeated alias with a different target is a configuration error.
-- Replacement targets are added to the dictionary before explicit dictionary entries, so replacement casing wins.
+- Replacement targets are added to the dictionary after explicit dictionary entries, so a dictionary entry's casing wins, as with "Coconut Bowls" over "coconut bowls".
 
 Use replacements for deterministic mistakes with an unambiguous correction. Do not use them where the same spoken form can legitimately mean different things.
 
@@ -298,7 +302,7 @@ chmod 600 "$data_home/voxtype/secrets/groq-api-key"
 On an Omarchy workstation:
 
 1. Run `./scripts/bootstrap-omarchy` to install `voxtype-bin`, the other curated packages, the OSD plugin, and its HUD files.
-2. Run `./scripts/apply-dotfiles` to link the managed Voxtype directory and helper commands.
+2. Run `./scripts/apply-dotfiles` to link the managed Voxtype directory, the shared dictation lists, and helper commands.
 3. Restore the Groq key at the machine-local path above.
 4. Run `voxtype setup --download --model parakeet-tdt-0.6b-v3 --no-post-install` to fetch the model (2.4 GB).
 5. Run `systemctl --user enable --now voxtype.service voxtype-progress.service`.
@@ -310,9 +314,9 @@ Validate replacements and inspect the prepared dictionary without contacting Gro
 
 ```sh
 printf '%s' 'check voice ink and lone dolphin' | \
-  ~/.local/bin/voxtype-prepare-transcript \
-  --replacements ~/.config/voxtype/word-replacements.txt \
-  --dictionary ~/.config/voxtype/personal-dictionary.txt
+  ~/.local/bin/dictation-prepare-transcript \
+  --replacements ~/.config/dictation/word-replacements.txt \
+  --dictionary ~/.config/dictation/personal-dictionary.txt
 ```
 
 Exercise the complete cloud path:

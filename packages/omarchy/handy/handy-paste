@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Handy's paste step (paste method "External script"). Handy runs it after
+# transcription and any Groq cleanup, with the final text as the only
+# argument. It applies the shared dictation word replacements, the same list
+# Voxtype uses, so exact fixes such as "Katya => Cátia" hold even when the
+# cleanup model misses them, then pastes with Ctrl+V and leaves the text on
+# the clipboard.
+#
+# Handy discards this script's output, so problems go to the journal:
+#   journalctl --user -t handy-paste
+set -uo pipefail
+
+text=${1-}
+[[ -n "$text" ]] || exit 0
+
+prepare=$HOME/.local/bin/dictation-prepare-transcript
+replacements=${XDG_CONFIG_HOME:-"$HOME/.config"}/dictation/word-replacements.txt
+
+log() {
+  logger -t handy-paste -- "$1"
+}
+
+# A failed replacement pastes the text unchanged rather than losing it. The
+# trailing "x" keeps command substitution from stripping trailing newlines.
+if json=$(printf '%s' "$text" | "$prepare" --replacements "$replacements" --dictionary /dev/null 2>&1) &&
+  replaced=$(jq -j '.transcript' <<< "$json" && printf x); then
+  text=${replaced%x}
+else
+  log "Word replacements failed, pasting the text unchanged: $json"
+fi
+
+printf '%s' "$text" | wl-copy || {
+  log "wl-copy failed"
+  exit 1
+}
+# Same pause Handy leaves between writing the clipboard and pressing Ctrl+V.
+sleep 0.06
+wtype -M ctrl -k v -m ctrl || {
+  log "wtype failed to press Ctrl+V"
+  exit 1
+}

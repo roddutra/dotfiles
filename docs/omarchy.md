@@ -32,6 +32,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `bluetooth-resync/` restarts the shell when its Bluetooth panel misses a power-on. See [Bluetooth shows off after waking](#bluetooth-shows-off-after-waking).
 - `claude-desktop/` contains Claude Desktop launch flags and its login autostart entry. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
+- `dictation/` contains the word replacements and personal dictionary that Voxtype and Handy share, and the parser both use. See `docs/voxtype.md`.
 - `ghostty/` contains the Linux Ghostty configuration.
 - `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
 - `hypr/` contains personal Hyprland overrides.
@@ -39,7 +40,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `omarchy/` contains selected shell and plugin preference files.
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
-- `voxtype/` contains managed dictation configuration, vocabulary, and Groq cleanup commands. See `docs/voxtype.md`.
+- `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
 
 `system/omarchy/` mirrors paths below `/`. `bootstrap-omarchy --hardware` installs those files as root-owned copies; Stow never touches them. After editing one, run the bootstrap again to update the live copy.
 
