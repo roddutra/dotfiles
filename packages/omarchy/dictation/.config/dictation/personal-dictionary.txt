@@ -12,6 +12,7 @@ Coconut Bowls
 Codex
 dotfiles
 Dutra
+FreeCAD
 Groq
 Qwen
 Immi

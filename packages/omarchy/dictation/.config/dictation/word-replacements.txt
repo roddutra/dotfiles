@@ -5,6 +5,7 @@
 Altus C, Autus CPTY LTD => Altus Sea
 can-ban => kanban
 coconut balls => coconut bowls
+Freakhead, Freak Head, Free CAD => FreeCAD
 Jast, Jost, JASU => Joust
 LifeKit => LiveKit
 Lone Dolphin => LoanDolphin
