@@ -27,3 +27,7 @@ ignore = ["~/.claude/skills"]
 disabled = []
 server_skill_dirs = []
 bundled_skill_dirs = []
+
+[mcp_servers.fusion]
+url = "http://127.0.0.1:27182/mcp"
+enabled = true
