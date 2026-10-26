@@ -23,6 +23,15 @@ The VM lives in `~/vmware/Fusion-Win11/` and is not tracked. `~/vmware` has copy
 - No vTPM: `managedVM.autoAddVTPM = "software"` is experimental and has encrypted VMs with an unknown password. Setup bypasses the TPM check through `LabConfig` instead. Add an encrypted vTPM from VM Settings if BitLocker is ever needed.
 - VMs can't be started from Claude Desktop: the app runs with `NoNewPrivs`, which blocks the set-UID `vmware-vmx`. Start them from a terminal or the launcher.
 
+## Windows account
+
+Windows signs in automatically to a local administrator account created by the answer file. Its password lives in `~/vmware/Fusion-Win11/guest-password` (mode 600, untracked, outside snapper's snapshots), with a copy in 1Password. It's needed:
+
+- after locking Windows, signing out, or for Remote Desktop
+- for `vmrun` guest commands (`-gu <user> -gp "$(cat ~/vmware/Fusion-Win11/guest-password)"`)
+
+Admin prompts (UAC) only ask for consent for this account. Auto sign-in keeps its own copy of the password: after changing it in Windows, re-enter it with `netplwiz` (untick and re-tick "Users must enter a user name and password") or Sysinternals Autologon, then update `guest-password` and 1Password.
+
 ## Shared folders
 
 VMware Shared Folders (in VMware Tools) expose two host folders to Windows, both writable:
@@ -61,7 +70,7 @@ Steps:
 
 1. Download the Windows 11 x64 ISO from Microsoft and check its SHA-256 against the list on the download page.
 2. Create the disk: `vmware-vdiskmanager -c -s 128GB -a lsilogic -t 0 Fusion-Win11.vmdk`.
-3. Put `autounattend.xml` at the root of a disc image and the three scripts under `setup/`, then build it with `bsdtar --format iso9660 --options 'volume-id=UNATTEND,joliet,rockridge' -cf autounattend.iso -C <dir> .`.
+3. Generate a random password, save it to `~/vmware/Fusion-Win11/guest-password` (mode 600) and 1Password, and fill in the answer file. Put `autounattend.xml` at the root of a disc image and the three scripts under `setup/`, then build it with `bsdtar --format iso9660 --options 'volume-id=UNATTEND,joliet,rockridge' -cf autounattend.iso -C <dir> .`.
 4. Start the VM and press a key at "Press any key to boot from CD or DVD". The rest runs unattended.
 5. Sign in to Fusion with the Autodesk account.
 6. With the VM off, drop the install discs (keep one empty `sata0:0` with `startConnected = "FALSE"`), set `ethernet0.virtualDev = "vmxnet3"` and `bios.bootOrder = "hdd"`. The answer file and its disc hold the password in plain text, so delete them.
