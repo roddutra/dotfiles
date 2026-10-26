@@ -1,0 +1,8 @@
+[Unit]
+Description=Fusion MCP tunnel connection to the Windows VM
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/bin/ssh -F %h/.config/fusion-mcp/ssh_config -W 127.0.0.1:27183 fusion-vm
+StandardInput=socket
+StandardError=journal

@@ -1,0 +1,16 @@
+# SSH settings for the Fusion MCP tunnel to the Windows VM (docs/windows-vm.md).
+# Used with -F, so ~/.ssh/config and the 1Password agent are not involved.
+# host.conf (untracked) sets this machine's HostName and User for the VM.
+Host fusion-vm
+  Include ~/.config/fusion-mcp/host.conf
+  HostKeyAlias fusion-vm
+  UserKnownHostsFile ~/.config/fusion-mcp/known_hosts
+  StrictHostKeyChecking yes
+  IdentityFile ~/.ssh/fusion-vm_ed25519
+  IdentitiesOnly yes
+  IdentityAgent none
+  BatchMode yes
+  ConnectTimeout 3
+  ServerAliveInterval 15
+  ServerAliveCountMax 3
+  LogLevel ERROR

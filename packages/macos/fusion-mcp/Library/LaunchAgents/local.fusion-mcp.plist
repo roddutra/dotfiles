@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Fusion's MCP server in the Omarchy Windows VM, reachable at
+     http://127.0.0.1:27183/mcp (Fusion in the VM uses port 27183,
+     so it never clashes with Fusion on this Mac at 27182).
+     launchd starts one ssh per connection, so nothing runs while idle and a
+     connection simply closes when the VM is off. ssh errors go to
+     ~/Library/Logs/fusion-mcp.log rather than into the connection. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.fusion-mcp</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec /usr/bin/ssh -F "$HOME/.config/fusion-mcp/ssh_config" -W 127.0.0.1:27183 fusion-vm 2>>"$HOME/Library/Logs/fusion-mcp.log"</string>
+  </array>
+  <key>inetdCompatibility</key>
+  <dict>
+    <key>Wait</key>
+    <false/>
+  </dict>
+  <key>Sockets</key>
+  <dict>
+    <key>Listener</key>
+    <dict>
+      <key>SockNodeName</key>
+      <string>127.0.0.1</string>
+      <key>SockServiceName</key>
+      <string>27183</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockFamily</key>
+      <string>IPv4</string>
+    </dict>
+  </dict>
+</dict>
+</plist>

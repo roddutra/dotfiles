@@ -57,6 +57,29 @@ Copy and paste of text works both ways through VMware Tools, on by default (VM S
 
 Add or remove a share while the VM runs with `vmrun -T ws addSharedFolder <vmx> <name> <host path>` (then `setSharedFolderState ... writable`) or `removeSharedFolder <vmx> <name>`.
 
+## Fusion MCP server
+
+Fusion's built-in MCP server (Preferences → General → API) is set to port 27183 in the VM, so it never clashes with Fusion's default 27182 on another machine. It listens on loopback inside Windows only, has no authentication and answers `403 Invalid Host header` unless the `Host` header is `127.0.0.1:27183` (the port must match too). Forwarding the port inside Windows (`netsh portproxy`) therefore fails, and clients reach it through SSH instead, at `http://127.0.0.1:27183/mcp` on every machine.
+
+- `docs/windows-vm/setup-ssh.ps1` installs OpenSSH Server as a tunnel and nothing else: key-only sign-in, `PermitOpen 127.0.0.1:27183`, `ForceCommand exit`, keys marked `restrict,port-forwarding,permitopen=...`, and the firewall rule limited to `LocalSubnet`. It merges the public keys in `C:\Windows\Temp\fusion-mcp-keys.txt` into `administrators_authorized_keys`, so re-run it to add a machine. Change `$port` there if Fusion's port changes.
+- The `fusion-mcp` packages (`packages/common/fusion-mcp`, plus `packages/omarchy/fusion-mcp` or `packages/macos/fusion-mcp`) aren't stowed by `scripts/apply-dotfiles`. Each machine listens on `127.0.0.1:27183` and starts one `ssh -W 127.0.0.1:27183 fusion-vm` per connection, through systemd socket activation or launchd's `inetdCompatibility`. Nothing runs while idle. With the VM off a connection closes after 3 seconds, the client shows the server as failed, and the failed connection units clean themselves up.
+- `~/.config/fusion-mcp/ssh_config` is used with `-F`, so `~/.ssh/config` and the 1Password agent stay out of it. It uses its own key (`~/.ssh/fusion-vm_ed25519`, no passphrase, so connections never wait on an approval) and pins the VM's host key in `~/.config/fusion-mcp/known_hosts`. The untracked `~/.config/fusion-mcp/host.conf` holds the VM's IPv4 address (reserve it on the router) and Windows user. `FUSION-VM.local` resolves over mDNS too, but a lookup takes 10 seconds to fail while the VM is off.
+
+Fusion must be open in the VM. It exposes `fusion_mcp_read`, `fusion_mcp_update`, `fusion_mcp_execute` and `fusion_mcp_electronics_read`, all acting on the active document. ChatGPT on the web can't use it: its connectors run on OpenAI's servers and need a public HTTPS URL. The ChatGPT app on the Mac can.
+
+Set up a machine:
+
+1. Stow the packages: `stow --dir packages/common --target ~ --no-folding fusion-mcp`, then the same with `--dir packages/omarchy` or `--dir packages/macos`.
+2. Create the key: `ssh-keygen -t ed25519 -N '' -C "fusion-mcp@$(hostname -s)" -f ~/.ssh/fusion-vm_ed25519`.
+3. Write `~/.config/fusion-mcp/host.conf` with `HostName <VM address>` and `User <Windows user>`, and copy `~/.config/fusion-mcp/known_hosts` from Omarchy (one line, `fusion-vm ssh-ed25519 ...`). For a rebuilt VM, make that line from the `C:\ProgramData\ssh\ssh_host_ed25519_key.pub` the script copies to `C:\Windows\Temp\`.
+4. Add the key to the VM from Omarchy: copy the `.pub` file into the guest as `C:\Windows\Temp\fusion-mcp-keys.txt`, then copy and run `setup-ssh.ps1` as the comment at its top shows.
+5. Start the listener:
+   - Omarchy: `systemctl --user enable --now fusion-mcp.socket`
+   - Mac: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.fusion-mcp.plist`
+6. Register `http://127.0.0.1:27183/mcp`: `claude mcp add --scope user --transport http fusion <URL>` and `codex mcp add fusion --url <URL>`. Where `fusion` already means that machine's own Fusion (the Mac), name it `fusion-vm`. Claude Desktop's Autodesk Fusion extension takes the port, and the ChatGPT app takes the URL as a connector.
+
+`systemctl --user disable` deletes the stowed unit links along with the enablement links. Re-stow afterwards, then run `systemctl --user daemon-reload`.
+
 ## Start and stop
 
 ```sh

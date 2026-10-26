@@ -1,0 +1,13 @@
+# Fusion's MCP server in the Windows VM, reachable at http://127.0.0.1:27183/mcp.
+# Each connection starts fusion-mcp@.service, so nothing runs while idle and a
+# connection simply closes when the VM is off.
+[Unit]
+Description=Fusion MCP tunnel to the Windows VM
+
+[Socket]
+ListenStream=127.0.0.1:27183
+Accept=yes
+MaxConnections=16
+
+[Install]
+WantedBy=sockets.target
