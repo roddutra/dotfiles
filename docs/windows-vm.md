@@ -11,7 +11,7 @@ The VM lives in `~/vmware/Fusion-Win11/` and is not tracked. `~/vmware` has copy
 | Disk | 128 GB NVMe, growable |
 | Graphics | 3D on, 4 GB graphics memory |
 | Firmware | UEFI with Secure Boot, no vTPM |
-| Network | NAT, `vmxnet3` (`e1000e` until VMware Tools is installed) |
+| Network | Bridged to `enp5s0`, `vmxnet3` (NAT and `e1000e` until VMware Tools is installed) |
 | Audio | HD Audio through PipeWire |
 | Removed | Floppy |
 
@@ -31,6 +31,12 @@ Windows signs in automatically to a local administrator account created by the a
 - for `vmrun` guest commands (`-gu <user> -gp "$(cat ~/vmware/Fusion-Win11/guest-password)"`)
 
 Admin prompts (UAC) only ask for consent for this account. Auto sign-in keeps its own copy of the password: after changing it in Windows, re-enter it with `netplwiz` (untick and re-tick "Users must enter a user name and password") or Sysinternals Autologon, then update `guest-password` and 1Password.
+
+## Network and Remote Desktop
+
+The VM is bridged, so it gets its own LAN address from the router (192.168.1.148 on 26 October 2026; reserve it by the MAC in `ethernet0.generatedAddress`). `/etc/vmware/networking` has `add_bridge_mapping enp5s0 0`, so `vmnet0` always bridges the wired port rather than `tailscale0` or `lerd0`. The vmx then has no `ethernet0.connectionType` line, because bridged is the default. UFW on the host doesn't see bridged traffic, so Windows Firewall is the only filter.
+
+Remote Desktop is on, with Network Level Authentication, and its three firewall rules are limited to `LocalSubnet`. Bridged Windows also takes public IPv6 addresses from the router, so rules open to `Any` would rely on the router to block inbound IPv6. The Windows App on macOS connects to the LAN address.
 
 ## Shared folders
 
