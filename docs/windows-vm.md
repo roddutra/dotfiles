@@ -30,7 +30,9 @@ Windows signs in automatically to a local administrator account created by the a
 - after locking Windows, signing out, or for Remote Desktop
 - for `vmrun` guest commands (`-gu <user> -gp "$(cat ~/vmware/Fusion-Win11/guest-password)"`)
 
-Admin prompts (UAC) only ask for consent for this account. Auto sign-in keeps its own copy of the password: after changing it in Windows, re-enter it with `netplwiz` (untick and re-tick "Users must enter a user name and password") or Sysinternals Autologon, then update `guest-password` and 1Password.
+Admin prompts (UAC) only ask for consent for this account. A Windows Hello PIN unlocks the VM's own screen. It doesn't work for Remote Desktop or `vmrun`, and without a TPM its key is stored in software.
+
+Auto sign-in keeps its own copy of the password, as the LSA secret `DefaultPassword`, with `AutoAdminLogon`, `DefaultUserName` and `DefaultDomainName` under `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`. After changing the password, update that copy, `guest-password` and 1Password. In `netplwiz` the checkbox is hidden until `DevicePasswordLessBuildVersion` is 0 under `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device`. Toggling it cleared the Winlogon values on 26 October 2026 and auto sign-in stopped, so prefer `docs/windows-vm/set-autologon.ps1` (it calls `LsaStorePrivateData`, like Sysinternals Autologon).
 
 ## Network and Remote Desktop
 
