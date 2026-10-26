@@ -1,6 +1,6 @@
 # Windows VM for Autodesk Fusion
 
-Fusion has no Linux build. It runs in a Windows 11 Pro guest under VMware Workstation (`vmware-workstation` from the AUR), whose 3D acceleration gives the guest DirectX 11 on the RTX 3070 Ti without passing the GPU through. The Ryzen 7 5800X has no integrated graphics, so passthrough would take the only display away from Hyprland.
+Fusion has no Linux build. It runs in a Windows 11 Pro guest under VMware Workstation (`vmware-workstation` from the AUR), whose 3D acceleration gives the guest DirectX 11 on the host GPU without passing it through. The host has a single GPU, so passthrough would take the only display away from Hyprland.
 
 The VM lives in `~/vmware/Fusion-Win11/` and is not tracked. `~/vmware` has copy-on-write turned off (`chattr +C`, set while empty), and `@home` is outside snapper's snapshots.
 
@@ -36,7 +36,7 @@ Auto sign-in keeps its own copy of the password, as the LSA secret `DefaultPassw
 
 ## Network and Remote Desktop
 
-The VM is bridged, so it gets its own LAN address from the router (192.168.1.148 on 26 October 2026; reserve it by the MAC in `ethernet0.generatedAddress`). `/etc/vmware/networking` has `add_bridge_mapping enp5s0 0`, so `vmnet0` always bridges the wired port rather than `tailscale0` or `lerd0`. The vmx then has no `ethernet0.connectionType` line, because bridged is the default. UFW on the host doesn't see bridged traffic, so Windows Firewall is the only filter.
+The VM is bridged, so it gets its own LAN address from the router. Reserve that address by the MAC in `ethernet0.generatedAddress`. `/etc/vmware/networking` has `add_bridge_mapping enp5s0 0`, so `vmnet0` always bridges the wired port rather than `tailscale0` or `lerd0`. The vmx then has no `ethernet0.connectionType` line, because bridged is the default. UFW on the host doesn't see bridged traffic, so Windows Firewall is the only filter.
 
 Remote Desktop is on, with Network Level Authentication, and its three firewall rules are limited to `LocalSubnet`. Bridged Windows also takes public IPv6 addresses from the router, so rules open to `Any` would rely on the router to block inbound IPv6. The Windows App on macOS connects to the LAN address.
 
@@ -69,7 +69,7 @@ vmrun -T ws stop ~/vmware/Fusion-Win11/Fusion-Win11.vmx soft
 `docs/windows-vm/` holds the VM config and an unattended install:
 
 - `Fusion-Win11.vmx`: VMware doesn't expand `~`, so make the ISO paths absolute.
-- `autounattend.xml.in`: Windows 11 Pro, en-AU with a US keyboard, Brisbane time, and an auto sign-in local admin account. Replace `@@USERNAME@@` and `@@PASSWORD@@`.
+- `autounattend.xml.in`: Windows 11 Pro, en-AU with a US keyboard and an auto sign-in local admin account. Replace `@@USERNAME@@`, `@@PASSWORD@@` and `@@TIMEZONE@@` (a Windows time zone ID from `tzutil /l`).
 - `firstlogon.ps1`: runs elevated at the first sign-in. It installs VMware Tools from `/usr/lib/vmware/isoimages/windows.iso`, runs `debloat.ps1` and `install-fusion.ps1`, then restarts.
 - `debloat.ps1`: removes consumer apps, turns off Widgets, Copilot, search indexing, sleep and hibernation.
 - `install-fusion.ps1`: downloads Autodesk's Fusion Client Downloader, installs it with `--globalinstall --quiet` only if its signature is Autodesk's, and logs to `C:\setup-log.txt`.
