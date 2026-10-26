@@ -44,6 +44,8 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 
 `system/omarchy/` mirrors paths below `/`. `bootstrap-omarchy --hardware` installs those files as root-owned copies; Stow never touches them. After editing one, run the bootstrap again to update the live copy.
 
+The optional Windows VM for Autodesk Fusion, including `system/omarchy/etc/modprobe.d/kvm-virt-on-demand.conf`, is covered in `docs/windows-vm.md`.
+
 Do not edit `/usr/share/omarchy/`. Omarchy owns it and may replace it during updates. Personal configuration belongs under `~/.config/` and is linked from this repository.
 
 Generated monitor files, backups, secrets, downloaded plugins, and downloaded themes are intentionally excluded. Plugins and the theme are restored from `manifests/omarchy/`.

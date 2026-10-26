@@ -11,6 +11,8 @@ linear-bin
 sunshine-bin
 teams-for-linux
 trayscale
+vmware-keymaps
+vmware-workstation
 voxtype-bin
 zapzap
 zen-browser-bin

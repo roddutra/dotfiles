@@ -106,6 +106,7 @@ if $include_hardware; then
 
   echo "Installing this desktop's system files..."
   install_system_file etc/modprobe.d/no-hid-kysona.conf
+  install_system_file etc/modprobe.d/kvm-virt-on-demand.conf
 
   # The initramfs carries its own copy of modprobe.d, and the keyboard hook
   # includes every HID driver, so rebuild the boot image for the block to
