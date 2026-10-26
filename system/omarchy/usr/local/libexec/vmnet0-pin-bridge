@@ -1,0 +1,26 @@
+#!/bin/sh
+# vmnet-bridge treats "add_bridge_mapping <interface> 0" in
+# /etc/vmware/networking as a preference only. When that interface blips (at
+# boot, on a DHCP renewal or a Wi-Fi change) it moves vmnet0 to any other
+# interface, such as lerd0, and stays there. Restart vmnet0's bridge with -i so
+# it only ever uses the mapped interface. Run by vmware-networks.service after
+# it starts; see docs/windows-vm.md.
+set -eu
+
+iface=$(sed -n 's/^add_bridge_mapping \([^ ]*\) 0$/\1/p' /etc/vmware/networking | head -n 1)
+# Automatic bridging (no mapping): leave VMware's bridge alone.
+[ -n "$iface" ] || exit 0
+
+pidfile=/var/run/vmnet-bridge-0.pid
+if [ -r "$pidfile" ]; then
+  pid=$(cat "$pidfile")
+  kill "$pid" 2>/dev/null || true
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 25 ]; do
+    sleep 0.2
+    i=$((i + 1))
+  done
+fi
+
+# -d writes the pid file and daemonises, so vmware-networks --stop still finds it.
+exec /usr/bin/vmnet-bridge -s 6 -d "$pidfile" -n 0 -i "$iface"

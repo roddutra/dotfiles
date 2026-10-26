@@ -114,6 +114,14 @@ if $include_hardware; then
   if $system_files_changed; then
     run sudo limine-update
   fi
+
+  # Pin the Windows VM's bridged network to the mapped wired interface.
+  system_files_changed=false
+  install_system_file etc/systemd/system/vmware-networks.service.d/pin-bridge.conf
+  install_system_file usr/local/libexec/vmnet0-pin-bridge
+  if $system_files_changed; then
+    run sudo systemctl daemon-reload
+  fi
 fi
 
 # 1Password's desktop app only connects to browser binaries it recognises, and
