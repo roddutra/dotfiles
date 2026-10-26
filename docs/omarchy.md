@@ -30,6 +30,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 
 - `1password/` makes the 1Password autostart wait for the bar's tray. See [1Password has no tray icon](#1password-has-no-tray-icon).
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
+- `bambu-studio/` overrides the Bambu Studio launcher to fix a blank Home tab. See [Bambu Studio Home tab is blank](#bambu-studio-home-tab-is-blank).
 - `bluetooth-resync/` restarts the shell when its Bluetooth panel misses a power-on. See [Bluetooth shows off after waking](#bluetooth-shows-off-after-waking).
 - `claude-desktop/` contains Claude Desktop launch flags and its login autostart entry. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
 - `dictation/` contains the word replacements and personal dictionary that Voxtype and Handy share, and the parser both use. See `docs/voxtype.md`.
@@ -359,6 +360,18 @@ Both the repair and lerd's NetworkManager dispatcher prefer `dns.upstream` over 
 ```sh
 git checkout -- packages/omarchy/bash/.bashrc packages/common/agents/.agents/skills/lerd/SKILL.md
 ```
+
+## Bambu Studio Home tab is blank
+
+The Home tab (recent projects, MakerWorld, Print History) is a WebKitGTK page. After the 18 Oct 2026 update to WebKitGTK 2.54.1 and NVIDIA 615, it rendered as a blank white page while the other tabs kept working. Turning off WebKit's DMA-BUF renderer fixes it:
+
+```sh
+WEBKIT_DISABLE_DMABUF_RENDERER=1 bambu-studio
+```
+
+`packages/omarchy/bambu-studio/` stows a `~/.local/share/applications/BambuStudio.desktop` copy of the packaged entry with that variable added. It covers the app launcher and opening `.3mf`/`.stl` files or MakerWorld links. Running `bambu-studio` from a terminal skips it.
+
+The override is a full copy, so compare it with `/usr/share/applications/BambuStudio.desktop` after a package update changes the icon, MIME types or command. If the variable stops helping, try `WEBKIT_DISABLE_COMPOSITING_MODE=1` instead.
 
 ## Symbols render as boxes in Ghostty
 
