@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Control the VMware Workstation Windows VM from the host. See ../SKILL.md.
+set -euo pipefail
+
+vmx=${WINVM_VMX:-$HOME/vmware/Fusion-Win11/Fusion-Win11.vmx}
+vm_dir=$(dirname -- "$vmx")
+tmp_prefix='C:\Windows\Temp\winvm'
+
+usage() {
+  cat <<'EOF'
+Usage: winvm <command> [args]
+
+  status                     Power state, VMware Tools state and IP address
+  screenshot [file.png]      Save the VM's screen as PNG and print the path
+  ps [-c 'command' | file]   Run PowerShell in Windows (script from stdin
+                             when no argument is given) and print its output
+  cmd [-c 'command' | file]  Run a cmd.exe batch the same way
+  push <host-file> <win-path>  Copy a file into Windows
+  pull <win-path> <host-file>  Copy a file out of Windows
+  launch <program> [args]    Start a program visibly on the Windows desktop
+  processes                  List processes in Windows
+  start                      Start the VM with its window (needs a terminal
+                             outside sandboxed apps)
+  stop                       Shut Windows down cleanly
+
+Commands run inside Windows as the auto sign-in administrator, elevated and
+hidden. Exit status is the Windows program's exit code.
+Environment: WINVM_VMX (default ~/vmware/Fusion-Win11/Fusion-Win11.vmx).
+EOF
+}
+
+die() { echo "winvm: $*" >&2; exit 1; }
+
+is_running() { vmrun -T ws list | grep -Fxq -- "$vmx"; }
+
+require_running() {
+  [[ -f $vmx ]] || die "no VM at $vmx (set WINVM_VMX)"
+  is_running || die "the VM is off. Ask the user to start it (winvm start, from a terminal)."
+}
+
+load_credentials() {
+  [[ -r $vm_dir/guest-user && -r $vm_dir/guest-password ]] ||
+    die "missing $vm_dir/guest-user or guest-password"
+  guest_user=$(<"$vm_dir/guest-user")
+  guest_password=$(<"$vm_dir/guest-password")
+}
+
+guest() { vmrun -T ws -gu "$guest_user" -gp "$guest_password" "$@"; }
+
+# Copies a host script into Windows, runs it with output redirected to a file,
+# prints that file and returns the script's exit code.
+run_script() {
+  local kind=$1 local_script=$2 id ext runner rc=0 out
+  id="$tmp_prefix-$$-$RANDOM"
+  case $kind in
+    ps)
+      ext=ps1
+      runner="/c powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $id.$ext > $id.out 2>&1"
+      ;;
+    cmd)
+      ext=cmd
+      runner="/c $id.$ext > $id.out 2>&1"
+      ;;
+  esac
+  guest CopyFileFromHostToGuest "$vmx" "$local_script" "$id.$ext"
+  # vmrun prints "Guest program exited with non-zero exit code" on stdout.
+  guest runProgramInGuest "$vmx" 'C:\Windows\System32\cmd.exe' "$runner" >/dev/null || rc=$?
+  out=$(mktemp)
+  if guest CopyFileFromGuestToHost "$vmx" "$id.out" "$out" 2>/dev/null; then
+    sed 's/\r$//' "$out"
+  fi
+  rm -f -- "$out"
+  guest runProgramInGuest "$vmx" 'C:\Windows\System32\cmd.exe' "/c del /q $id.$ext $id.out" >/dev/null 2>&1 || true
+  return "$rc"
+}
+
+script_from_args() {
+  local kind=$1 dest=$2
+  shift 2
+  {
+    if [[ $kind == ps ]]; then
+      # Windows PowerShell 5.1 reads a script without a BOM as ANSI.
+      printf '\xEF\xBB\xBF'
+      echo '$ProgressPreference = "SilentlyContinue"'
+      echo '[Console]::OutputEncoding = New-Object Text.UTF8Encoding $false'
+    else
+      echo '@echo off'
+      echo 'chcp 65001 >nul'
+    fi
+    if [[ ${1:-} == -c ]]; then
+      shift
+      (($#)) || die "-c needs a command"
+      printf '%s\n' "$*"
+    elif (($#)); then
+      [[ -r $1 ]] || die "cannot read $1"
+      cat -- "$1"
+    else
+      cat
+    fi
+    # Pass the exit code of the last native command through PowerShell.
+    [[ $kind == ps ]] && echo 'if ($LASTEXITCODE) { exit $LASTEXITCODE }'
+    true
+  } | sed 's/\r*$/\r/' >"$dest"
+}
+
+cmd=${1:-}
+(($#)) && shift
+case $cmd in
+  status)
+    [[ -f $vmx ]] || die "no VM at $vmx (set WINVM_VMX)"
+    if is_running; then
+      echo "power: on"
+      echo "tools: $(vmrun -T ws checkToolsState "$vmx")"
+      echo "ip: $(vmrun -T ws getGuestIPAddress "$vmx" 2>/dev/null || echo unknown)"
+    else
+      echo "power: off"
+    fi
+    ;;
+  screenshot)
+    require_running
+    file=${1:-${TMPDIR:-/tmp}/winvm-$(date +%Y%m%d-%H%M%S).png}
+    vmcli "$vmx" MKS captureScreenshot "$file" >/dev/null
+    [[ -s $file ]] || die "screenshot failed"
+    echo "$file"
+    ;;
+  ps | cmd)
+    require_running
+    load_credentials
+    script=$(mktemp)
+    trap 'rm -f -- "$script"' EXIT
+    script_from_args "$cmd" "$script" "$@"
+    run_script "$cmd" "$script"
+    ;;
+  push)
+    (($# == 2)) || die "usage: winvm push <host-file> <win-path>"
+    require_running
+    load_credentials
+    guest CopyFileFromHostToGuest "$vmx" "$1" "$2"
+    ;;
+  pull)
+    (($# == 2)) || die "usage: winvm pull <win-path> <host-file>"
+    require_running
+    load_credentials
+    guest CopyFileFromGuestToHost "$vmx" "$1" "$2"
+    ;;
+  launch)
+    (($#)) || die "usage: winvm launch <program> [args]"
+    require_running
+    load_credentials
+    program=$1
+    shift
+    args=()
+    (($#)) && args=("$*")
+    guest runProgramInGuest "$vmx" -noWait -interactive "$program" "${args[@]}"
+    ;;
+  processes)
+    require_running
+    load_credentials
+    guest listProcessesInGuest "$vmx"
+    ;;
+  start)
+    [[ -f $vmx ]] || die "no VM at $vmx (set WINVM_VMX)"
+    is_running && { echo "already running"; exit 0; }
+    if grep -q '^NoNewPrivs:[[:space:]]*1' /proc/self/status; then
+      die "this process has NoNewPrivs set, which blocks VMware's set-UID helper. Ask the user to run: vmrun -T ws start $vmx gui"
+    fi
+    vmrun -T ws start "$vmx" gui
+    ;;
+  stop)
+    require_running
+    vmrun -T ws stop "$vmx" soft
+    ;;
+  -h | --help | help | '')
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

@@ -29,6 +29,7 @@ Windows signs in automatically to a local administrator account created by the a
 
 - after locking Windows, signing out, or for Remote Desktop
 - for `vmrun` guest commands (`-gu <user> -gp "$(cat ~/vmware/Fusion-Win11/guest-password)"`)
+- by `winvm` (see "Agent skill"), which reads the user name from `guest-user` (mode 600, untracked) in the same folder
 
 Admin prompts (UAC) only ask for consent for this account. A Windows Hello PIN unlocks the VM's own screen. It doesn't work for Remote Desktop or `vmrun`, and without a TPM its key is stored in software.
 
@@ -80,6 +81,27 @@ Set up a machine:
 
 `systemctl --user disable` deletes the stowed unit links along with the enablement links. Re-stow afterwards, then run `systemctl --user daemon-reload`.
 
+## Agent skill
+
+The `windows-vm` skill teaches coding agents to control the VM, and `winvm` is its helper. The commands are:
+
+- `status`
+- `screenshot`
+- `ps` (PowerShell)
+- `cmd`
+- `push` and `pull` (copy files)
+- `launch` (a visible app)
+- `processes`
+- `start` and `stop`
+
+The skill lives in `packages/omarchy/windows-vm/.agents/skills/windows-vm/`. The package links it into `~/.agents/skills` (Grok), `~/.claude/skills` and `~/.codex/skills`, and links `winvm` into `~/.local/bin`. `scripts/apply-dotfiles` doesn't stow it. Stow it on the machine that runs the VM:
+
+```sh
+stow --dir packages/omarchy --target ~ --no-folding windows-vm
+```
+
+`ps` and `cmd` copy a script into `C:\Windows\Temp`, run it through `cmd /c` with its output redirected to a file, copy the output back and delete both files. Each call takes about 4 seconds and returns the Windows exit code. PowerShell scripts are written with a UTF-8 BOM, since Windows PowerShell 5.1 reads a script without one as ANSI. `vmrun -gp` passes the password on the command line, so other local processes can see it in the process list while a guest command runs. Screenshots come from `vmcli <vmx> MKS captureScreenshot` and need no credentials. `runProgramInGuest -activateWindow` is rejected ("Invalid argument"), so `launch` uses `-interactive -noWait`.
+
 ## Start and stop
 
 ```sh
@@ -101,7 +123,7 @@ Steps:
 
 1. Download the Windows 11 x64 ISO from Microsoft and check its SHA-256 against the list on the download page.
 2. Create the disk: `vmware-vdiskmanager -c -s 128GB -a lsilogic -t 0 Fusion-Win11.vmdk`.
-3. Generate a random password, save it to `~/vmware/Fusion-Win11/guest-password` (mode 600) and 1Password, and fill in the answer file. Put `autounattend.xml` at the root of a disc image and the three scripts under `setup/`, then build it with `bsdtar --format iso9660 --options 'volume-id=UNATTEND,joliet,rockridge' -cf autounattend.iso -C <dir> .`.
+3. Generate a random password, save it to `~/vmware/Fusion-Win11/guest-password` (mode 600) and 1Password, save the user name to `guest-user` beside it, and fill in the answer file. Put `autounattend.xml` at the root of a disc image and the three scripts under `setup/`, then build it with `bsdtar --format iso9660 --options 'volume-id=UNATTEND,joliet,rockridge' -cf autounattend.iso -C <dir> .`.
 4. Start the VM and press a key at "Press any key to boot from CD or DVD". The rest runs unattended.
 5. Sign in to Fusion with the Autodesk account.
 6. With the VM off, drop the install discs (keep one empty `sata0:0` with `startConnected = "FALSE"`), set `ethernet0.virtualDev = "vmxnet3"` and `bios.bootOrder = "hdd"`. The answer file and its disc hold the password in plain text, so delete them.
