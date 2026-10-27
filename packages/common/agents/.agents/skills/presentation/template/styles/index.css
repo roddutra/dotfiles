@@ -1,0 +1,77 @@
+/*
+ * Brand tokens: the single source of truth for colour and type.
+ * Replace every value with the project's brand (see BRAND.md).
+ * Keep colours in hex or rgb(): setup/mermaid.ts passes them to Mermaid,
+ * which cannot parse oklch() or other newer colour functions.
+ */
+:root {
+  --brand-bg: #FFFFFF;
+  --brand-surface: #F5F5F4;
+  --brand-text: #111827;
+  --brand-muted: #6B7280;
+  --brand-primary: #2563EB;       /* large type, shapes, borders */
+  --brand-primary-text: #1D4ED8;  /* primary at 4.5:1 or better on --brand-bg, for body-size text */
+  --brand-accent: #F59E0B;
+  --brand-border: #E5E7EB;
+  --brand-radius: 0.5rem;
+  --brand-font-display: 'Inter', system-ui, sans-serif;
+  --brand-font-body: 'Inter', system-ui, sans-serif;
+  --brand-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --slidev-theme-primary: var(--brand-primary);
+  --slidev-slide-container-background: var(--brand-bg);
+  --slidev-code-background: var(--brand-surface);
+  --slidev-code-foreground: var(--brand-text);
+  --slidev-code-font-family: var(--brand-font-mono);
+  --slidev-code-font-size: 14px;
+  --slidev-code-line-height: 22px;
+}
+
+/*
+ * Element rules sit inside :where() so they add no specificity: utility
+ * classes (text-xl) and component classes (.label) on an element still win.
+ */
+.slidev-layout {
+  background: var(--brand-bg);
+  color: var(--brand-text);
+  font-family: var(--brand-font-body);
+}
+
+.slidev-layout :where(h1, h2, h3) {
+  font-family: var(--brand-font-display);
+  color: var(--brand-text);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.slidev-layout h1 + p { color: var(--brand-muted); opacity: 1; }
+.slidev-layout :where(strong) { color: var(--brand-primary-text); }
+.slidev-layout :where(li)::marker { color: var(--brand-accent); }
+.slidev-layout :where(pre, .slidev-code) { border: 1px solid var(--brand-border); border-radius: var(--brand-radius); }
+.slidev-layout.two-columns { column-gap: 2.5rem; }
+
+/* Fact slides: one big number and what it means. */
+.slidev-layout.fact h1 {
+  font-family: var(--brand-font-display);
+  font-size: 8rem;
+  line-height: 1;
+  margin-bottom: 1rem;
+  color: var(--brand-primary);
+  font-variant-numeric: lining-nums;
+}
+.slidev-layout.fact h1 + p { font-size: 1.5rem; color: var(--brand-text); opacity: 1; }
+.slidev-layout.fact p { color: var(--brand-muted); }
+
+/* Dark brand slides: cover, section dividers and the closing slide. */
+.slidev-layout:is(.cover, .section, .end) {
+  background: var(--brand-text);
+  color: var(--brand-bg);
+}
+.slidev-layout:is(.cover, .section, .end) :where(h1, h2, h3) { color: var(--brand-bg); }
+.slidev-layout:is(.cover, .end) h1 + p { color: color-mix(in srgb, var(--brand-bg) 70%, transparent); }
+.slidev-layout.end { display: grid; place-content: center; text-align: center; }
+
+/* Logo on dark slides, where the footer is hidden. */
+.brand-logo-light { height: 2.5rem; margin-bottom: 2.5rem; }
+
+/* Shared components for every deck go below. A <style> block inside a slide is scoped to that slide only. */
