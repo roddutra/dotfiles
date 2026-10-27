@@ -28,11 +28,11 @@ Use `--dry-run` to inspect bootstrap commands. Omit `--hardware` on a machine wi
 
 Tracked Omarchy packages live under `packages/omarchy/`:
 
-- `1password/` makes the 1Password autostart wait for the bar's tray. See [1Password has no tray icon](#1password-has-no-tray-icon).
+- `1password/` makes the 1Password autostart wait for the bar's tray. See [Tray icon missing after login](#tray-icon-missing-after-login).
 - `agents/`, `claude/` and `codex/` contain Omarchy-only agent skills and their libraries, mirroring the common packages. The first is the `op-approval-blocked` skill. See `docs/op-approval.md`.
 - `bambu-studio/` overrides the Bambu Studio launcher to fix a blank Home tab. See [Bambu Studio Home tab is blank](#bambu-studio-home-tab-is-blank).
 - `bluetooth-resync/` restarts the shell when its Bluetooth panel misses a power-on. See [Bluetooth shows off after waking](#bluetooth-shows-off-after-waking).
-- `claude-desktop/` contains Claude Desktop launch flags and its login autostart entry. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring).
+- `claude-desktop/` contains Claude Desktop launch flags, its login autostart entry and a drop-in that makes that autostart wait for the bar's tray. See [Electron apps cannot reach the keyring](#electron-apps-cannot-reach-the-keyring) and [Tray icon missing after login](#tray-icon-missing-after-login).
 - `dictation/` contains the word replacements and personal dictionary that Voxtype and Handy share, and the parser both use. See `docs/voxtype.md`.
 - `ghostty/` contains the Linux Ghostty configuration.
 - `gvfs/` contains the supervised filesystem bridge for network-file playback. See [Network files browse but will not play](#network-files-browse-but-will-not-play).
@@ -130,21 +130,32 @@ grep -h "isn't a supported browser" ~/.config/1Password/logs/*.log | tail -1
 
 `bootstrap-omarchy` adds `zen-bin` to `/etc/1password/custom_allowed_browsers`. 1Password ignores the file unless root owns it. Quit 1Password from its tray menu, start it again, then restart Zen. Check that the extension shows the app as connected in its settings.
 
-## 1Password has no tray icon
+## Tray icon missing after login
 
-1Password registers its tray icon once at launch and never retries. At login, the autostart can run before the Omarchy shell has started its tray (`org.kde.StatusNotifierWatcher`), so 1Password runs without an icon. Relaunching 1Password brings the icon back.
+1Password and Claude Desktop are Electron apps, which look for the tray once at launch and never retry. At login, their autostarts can run before the Omarchy shell has started its tray (`org.kde.StatusNotifierWatcher`), so the app runs without an icon. Relaunching the app brings the icon back. Once registered, Electron re-registers on its own when the shell restarts.
 
-Check whether 1Password registered an icon:
+Without the tray, Electron falls back to a GTK tray icon that the shell cannot show. Claude Desktop's journal then shows a `gtk_widget_get_scale_factor` assertion within a second of launch:
+
+```sh
+journalctl --user -b | grep 'claude-desktop.*gtk_widget_get_scale_factor'
+```
+
+Check which apps registered an icon:
 
 ```sh
 busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher RegisteredStatusNotifierItems
 ```
 
-The list should contain a `/StatusNotifierItem` entry whose owner (`busctl --user list`) is the `1password` process.
+Both apps are Electron and register as `<unique name>/StatusNotifierItem`, such as `:1.110/StatusNotifierItem`. Find the process that owns a unique name with `busctl --user list`.
 
-`packages/omarchy/1password/` adds a drop-in to `app-com.onepassword.OnePassword@autostart.service`, the unit systemd generates from 1Password's autostart entry. It waits up to 30 seconds for the tray, then launches 1Password whether or not it appeared. The drop-in leaves `~/.config/autostart/com.onepassword.OnePassword.desktop` alone, because 1Password rewrites that file every time it launches.
+Both packages add a drop-in to the unit systemd generates from the app's autostart entry:
 
-After restoring the dotfiles, run `systemctl --user daemon-reload`. The drop-in takes effect at the next login.
+- `packages/omarchy/1password/` for `app-com.onepassword.OnePassword@autostart.service`
+- `packages/omarchy/claude-desktop/` for `app-claude\x2ddesktop@autostart.service`
+
+Each waits up to 30 seconds for the tray, then launches the app whether or not it appeared. The drop-ins leave the autostart entries alone: 1Password rewrites its entry every time it launches, and Claude Desktop rewrites its entry when "Launch at login" changes.
+
+After restoring the dotfiles, run `systemctl --user daemon-reload`. The drop-ins take effect at the next login.
 
 ## Bluetooth shows off after waking
 
