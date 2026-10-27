@@ -62,7 +62,8 @@
     "LLM",
     "PRD",
     "n8n",
-    "R2MD"
+    "R2MD",
+    "Slidev"
   ],
   "debug_mode": false,
   "experimental_enabled": false,

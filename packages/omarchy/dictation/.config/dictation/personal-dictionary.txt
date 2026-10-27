@@ -29,6 +29,7 @@ OpenClaw
 PRD
 Procore
 R2MD
+Slidev
 SOUL.md
 TomoBroker
 tomobroker.com
