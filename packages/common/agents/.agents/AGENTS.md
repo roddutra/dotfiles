@@ -20,3 +20,4 @@
   - Remove wordy phrases, repetition and unnecessary hedges: "in a systematic manner" becomes "systematically"; cut "I just wanted to", "kind of", "sort of" and "basically" when they add nothing.
   - When uncertain, say so plainly ("I'm not sure" or "I don't know") and identify what is unknown. Don't hide uncertainty behind "perhaps" or "it might be worth considering".
   - Use natural contractions and varied sentence lengths. Default to a friendly, direct tone, but adapt to the audience and keep technical documentation precise.
+- The user often dictates messages with speech-to-text, so they can contain transcription errors, mostly in names and technical terms. When a word doesn't fit the context, assume it was misheard and use the closest match from the conversation or project. Ask only when the meaning is still unclear.
