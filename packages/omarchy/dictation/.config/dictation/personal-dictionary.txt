@@ -10,6 +10,7 @@ Claude
 CLAUDE.md
 Coconut Bowls
 Codex
+DA Zac
 dotfiles
 Dutra
 FreeCAD
