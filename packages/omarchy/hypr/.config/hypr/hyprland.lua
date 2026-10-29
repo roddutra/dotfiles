@@ -38,5 +38,12 @@ hl.window_rule({
   fullscreen = true,
 })
 
+-- The VM's irregular frame rate under VRR makes dark greys flicker on the ASUS.
+hl.window_rule({
+  name = "vmware-no-vrr",
+  match = { class = "^Vmware$" },
+  no_vrr = true,
+})
+
 -- Added by hyprmoncfg: its generated monitor rules load last, so nothing before this can override the applied layout.
 do local path = os.getenv("HOME") .. "/.config/hypr/hyprmoncfg-monitors.lua"; local file = io.open(path, "r"); if file then file:close(); dofile(path) end end
