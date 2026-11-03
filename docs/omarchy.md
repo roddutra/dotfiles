@@ -122,13 +122,15 @@ Any Electron application on Hyprland can hit this. Pass the same flag through th
 
 ## Zen asks to unlock 1Password separately
 
-The 1Password desktop app only connects to browser binaries on its built-in list, and Zen's `/opt/zen-browser-bin/zen-bin` is not on it. The extension still works but needs its own unlock. 1Password logs the rejection:
+The 1Password desktop app only connects to browser binaries on its built-in list. Zen's `/opt/zen-browser-bin/zen-bin`, the ChatGPT desktop app's `/usr/lib/chatgpt/ChatGPT` and Claude Desktop's `/usr/lib/claude-desktop/claude-desktop` are not on it. The extension still works but needs its own unlock. 1Password's browser helper logs each rejection:
 
 ```sh
-grep -h "isn't a supported browser" ~/.config/1Password/logs/*.log | tail -1
+grep -h "isn't a supported browser" ~/.config/1Password/logs/BrowserSupport/*.log | tail -1
 ```
 
-`bootstrap-omarchy` adds `zen-bin` to `/etc/1password/custom_allowed_browsers`. 1Password ignores the file unless root owns it. Quit 1Password from its tray menu, start it again, then restart Zen. Check that the extension shows the app as connected in its settings.
+A rejected app retries about once a minute, and the helper writes a new log file each time and keeps only the latest 1,000, so older entries are lost within a day.
+
+`bootstrap-omarchy` adds `zen-bin`, `ChatGPT` and `claude-desktop` to `/etc/1password/custom_allowed_browsers`. 1Password ignores the file unless root owns it. Run the bootstrap after changing this list: on 3 Nov 2026 the file was missing because the step had been committed but never run. Then quit 1Password from its tray menu, start it again, and restart the browser. Check that the extension shows the app as connected in its settings, or look for `verified successfully` in the helper log.
 
 ## Tray icon missing after login
 
