@@ -1,0 +1,15 @@
+[Unit]
+Description=wayvnc remote desktop for DP-2 on port 5901
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# certificate_file and private_key_file in the config are relative to this.
+WorkingDirectory=%h/.config/wayvnc
+ExecStart=/usr/bin/wayvnc --config=%h/.config/wayvnc/config --output=DP-2 --socket=%t/wayvnc-dp2.sock --name=omarchy-DP-2 0.0.0.0:5901
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

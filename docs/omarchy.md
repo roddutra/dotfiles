@@ -42,6 +42,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
+- `wayvnc/` contains the VNC server Termix uses for remote desktop. See [Remote desktop with wayvnc](#remote-desktop-with-wayvnc).
 
 `system/omarchy/` mirrors paths below `/`. `bootstrap-omarchy --hardware` installs those files as root-owned copies; Stow never touches them. After editing one, run the bootstrap again to update the live copy.
 
@@ -303,6 +304,37 @@ sudo ufw allow in on <lan-interface> from <lan-subnet> to <workstation-ip> port 
 Both services start when the autologin session reaches `graphical-session.target`. After a reboot, the LUKS passphrase must be typed at the PC before that happens, so a remote reboot leaves Sunshine unreachable.
 
 Capabilities: Sunshine drops all of them after startup (GHSA-fp6g-27w5-489j). The `Failed to gain CAP_SYS_ADMIN` log lines are expected, because only KMS capture needs that capability and both hosts use `wlr` capture.
+
+## Remote desktop with wayvnc
+
+wayvnc (`wayvnc` from `extra`) serves this desktop over VNC to Termix, the browser SSH and remote desktop app in the homelab. Sunshine and Moonlight remain the better choice for interactive work; wayvnc exists so Termix can open a screen beside its terminals.
+
+wayvnc captures one output per process, so each monitor has its own service, matching the Sunshine layout:
+
+| Service | Display | Port |
+| --- | --- | --- |
+| `wayvnc-dp1.service` | ASUS, DP-1 | 5900 |
+| `wayvnc-dp2.service` | Dell, DP-2 | 5901 |
+
+Both read `~/.config/wayvnc/config`, which turns on PAM login (the package's `/etc/pam.d/wayvnc`, so the login is the normal Linux account) and TLS through VeNCrypt. The self-signed certificate and key stay untracked in `~/.config/wayvnc/`. The config names them by relative path, and each service sets `WorkingDirectory` to that folder. Do not use wayvnc's `use_relative_paths`: it resolves paths from the config's real location inside this repository, and wayvnc then crashes on start after `Failed to enable TLS authentication`.
+
+After restoring the dotfiles, create the TLS pair and start both services:
+
+```sh
+cd ~/.config/wayvnc
+(umask 077; openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -keyout tls_key.pem -out tls_cert.pem -days 3650 -subj "/CN=omarchy")
+systemctl --user daemon-reload
+systemctl --user enable --now wayvnc-dp1.service wayvnc-dp2.service
+```
+
+- Tailscale: `ts-input` accepts it ahead of UFW, as for Sunshine.
+- LAN: one UFW rule, commented `wayvnc from Termix`, allows 5900 and 5901 from the Termix host only, not the whole subnet:
+
+```sh
+sudo ufw allow in on <lan-interface> from <termix-host-ip> to <workstation-ip> port 5900,5901 proto tcp comment 'wayvnc from Termix'
+```
+
+Like Sunshine, both services start with `graphical-session.target`, so they are unreachable after a reboot until the LUKS passphrase is typed at the PC.
 
 ## LAN access and UFW
 
