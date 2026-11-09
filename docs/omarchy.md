@@ -348,6 +348,16 @@ A coding app accessed from the Mac required an explicit LAN rule because UFW den
 
 Network addresses and interfaces may change after reinstalling. Confirm the current interface, subnet, host address, listening process, and threat boundary before recreating the rule. Firewall state is documented rather than applied automatically.
 
+### T3 Code from the LAN
+
+T3 Code's server listens on TCP 3773 on all interfaces. Over Tailscale it needs no rule. On the LAN, one UFW rule, commented `t3code LAN`, allows it from the whole subnet rather than a single client IP, because iOS private Wi-Fi addresses change the phone's DHCP lease. Pairing still requires a token.
+
+```sh
+sudo ufw allow in on <lan-interface> from <lan-subnet> to <workstation-ip> port 3773 proto tcp comment 't3code LAN'
+```
+
+Without it, the iOS app's "Add environment" fails with `/.well-known/t3/environment timed out after 10000ms` on the LAN address while the Tailscale address works.
+
 ### SSH to a LAN IP times out with Tailscale running
 
 Before adding a UFW rule, check the listener, firewall, and return route. Replace `<client-lan-ip>` with the Mac or phone's address on the local network:
