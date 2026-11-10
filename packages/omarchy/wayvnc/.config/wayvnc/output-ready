@@ -1,0 +1,12 @@
+#!/bin/sh
+# ExecCondition for the wayvnc services: succeed only when the output named in
+# $1 is plugged in and enabled in Hyprland. Any other exit (1 to 254) makes
+# systemd skip the start cleanly instead of failing and restarting.
+# The sysfs check comes first so an unplugged monitor never touches Hyprland.
+out=$1
+for status in /sys/class/drm/card*-"$out"/status; do
+  [ "$(cat "$status" 2>/dev/null)" = connected ] || continue
+  hyprctl monitors -j | jq -e --arg out "$out" 'any(.[]; .name == $out)' >/dev/null
+  exit $?
+done
+exit 1

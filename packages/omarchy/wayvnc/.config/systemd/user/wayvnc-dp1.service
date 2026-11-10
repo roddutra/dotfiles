@@ -7,6 +7,8 @@ After=graphical-session.target
 Type=simple
 # certificate_file and private_key_file in the config are relative to this.
 WorkingDirectory=%h/.config/wayvnc
+# Skip cleanly while DP-1 is unplugged or disabled; wayvnc-dp1.timer retries.
+ExecCondition=%h/.config/wayvnc/output-ready DP-1
 ExecStart=/usr/bin/wayvnc --config=%h/.config/wayvnc/config --output=DP-1 --socket=%t/wayvnc-dp1.sock --name=omarchy-DP-1 0.0.0.0:5900
 Restart=on-failure
 RestartSec=5
