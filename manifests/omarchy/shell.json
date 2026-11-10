@@ -128,7 +128,78 @@
           "id": "omarchy.keyboard-layout"
         },
         {
-          "id": "omarchy.agents"
+          "id": "omarchy.agents",
+          "providers": {
+            "claude": {
+              "enabled": true
+            },
+            "codex": {
+              "enabled": true
+            },
+            "grok": {
+              "enabled": false
+            },
+            "kimi": {
+              "enabled": false
+            },
+            "cursor": {
+              "enabled": false
+            },
+            "grokbot": {
+              "enabled": false
+            },
+            "copilot": {
+              "enabled": false
+            },
+            "muse": {
+              "enabled": false
+            },
+            "agy": {
+              "enabled": false
+            },
+            "kimchi": {
+              "enabled": false
+            },
+            "hermes": {
+              "enabled": false
+            },
+            "devin": {
+              "enabled": false
+            },
+            "vibe": {
+              "enabled": false
+            },
+            "qwen": {
+              "enabled": false
+            },
+            "opencode": {
+              "enabled": false
+            },
+            "zai": {
+              "enabled": false
+            },
+            "ollama": {
+              "enabled": false
+            },
+            "minimax": {
+              "enabled": false
+            },
+            "openrouter": {
+              "enabled": false
+            },
+            "deepseek": {
+              "enabled": false
+            },
+            "fireworks": {
+              "enabled": false
+            },
+            "synthetic": {
+              "enabled": false
+            },
+            "local": {
+              "enabled": false
+            }
+          }
         },
         {
           "id": "omarchy.tailscale"
