@@ -185,6 +185,29 @@ systemctl --user enable --now bluetooth-shell-resync.service
 
 Remove the package once Omarchy ships a Quickshell with the upstream fix.
 
+## Shell crashes when the second monitor turns on
+
+Symptom: turning on the Dell P3421W (DP-2) makes the shell crash and restart itself, showing Quickshell's "Quickshell has crashed" dialog. Nothing is lost and the bar comes back on its own.
+
+Cause: an open Omarchy bug, [omacom/omarchy#11824](https://github.com/omacom/omarchy/issues/11824). When a monitor is added, the shell tears down and rebuilds its bar, background and dock windows. Qt then deletes an item whose window is already gone and segfaults in `QQuickItemPrivate::derefWindow`. It started after the 5 Nov 2026 upgrade from Omarchy 4.0.6 to 4.5.0-3, and the first crash here was on 10 Nov. This machine's details are in [this comment](https://github.com/omacom/omarchy/issues/11824#issuecomment-6809796025). Versions when muted:
+
+- omarchy 4.5.0-3
+- quickshell 0.3.2.r7.g2b4501a-1
+- qt6-base 6.12.0-3
+- qt6-declarative 6.12.0-2
+
+Workaround: on 12 Nov 2026, Omarchy's crash notification for the shell was muted with `omarchy-crash-mute '/usr/bin/quickshell'`. The mute is machine state (`~/.local/state/omarchy/toggles/crash-ignore/quickshell`) and is not restored by this repository. It hides only Omarchy's "Process crashed" notification. Quickshell's own dialog still appears: `QS_DISABLE_CRASH_HANDLER` would hide it, but probably also stops the shell restarting itself, so it is left on.
+
+Turning the monitor on before logging in probably avoids the hotplug. This is untested.
+
+Check for a fix after Omarchy or Qt updates:
+
+1. `gh issue view 11824 --repo omacom/omarchy --comments` to see whether it is closed and which release has the fix.
+2. `pacman -Q omarchy quickshell qt6-base qt6-declarative` to compare with the versions above.
+3. Turn DP-2 off and on, then check `coredumpctl list /usr/bin/quickshell` and `ls -lt ~/.cache/quickshell/crashes/` for new crashes.
+
+Once the hotplug no longer crashes, unmute with `omarchy-crash-mute '/usr/bin/quickshell' off`, confirm with `omarchy-crash-mute`, and remove this section.
+
 ## Waking from sleep hangs with no display
 
 Symptom: some wakes never finish. The fans and case lighting come on, but the monitor gets no signal, Caps Lock does nothing and only holding the power button recovers. That boot's journal ends at `PM: suspend entry (deep)`.
