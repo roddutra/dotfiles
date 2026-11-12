@@ -39,6 +39,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `hypr/` contains personal Hyprland overrides.
 - `nvim/` contains the Linux-specific Neovim override.
 - `omarchy/` contains the dock preference files.
+- `podman/` makes rootless containers wait for the network at login. See [Containers have no internet after boot](#containers-have-no-internet-after-boot).
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
@@ -442,6 +443,41 @@ Both the repair and lerd's NetworkManager dispatcher prefer `dns.upstream` over 
 ```sh
 git checkout -- packages/omarchy/bash/.bashrc packages/common/agents/.agents/skills/lerd/SKILL.md
 ```
+
+## Containers have no internet after boot
+
+Symptom: after a reboot, Lerd sites load but anything that leaves the machine fails. Laravel throws `could not translate host name "....neon.tech" to address: Try again`, and inside a container `getent hosts google.com` returns nothing while container names such as `lerd-postgres-pgvector` still resolve. `journalctl --user -b | grep aardvark-dns` shows `dns request failed: io error: Network is unreachable`.
+
+Confirm it is the container network rather than DNS:
+
+```sh
+podman unshare --rootless-netns ip -br addr
+podman unshare --rootless-netns ip route
+```
+
+A healthy namespace lists `enp5s0` (or the Wi-Fi interface) with the LAN address and a `default` route. A broken one shows only `lo`, `podman1` and VMware's `vmnet1`, with no default route.
+
+Cause: rootless Podman (pasta) builds one shared network namespace when the first container starts, copying the host's interfaces and routes at that moment. It never picks up a route that appears later. Podman's `podman-user-wait-network-online.service` exists to hold containers back until the network is up, but it polls `network-online.target`, which never activates on Omarchy because `NetworkManager-wait-online.service` is masked. Lerd works around the resulting 90-second stall by writing `10-lerd-no-network-wait.conf`, which replaces the wait with `/bin/true`. The Lerd containers then start at login before DHCP finishes (on 13 Nov 2026 the namespace was built at 20.2 s and `enp5s0` got its IPv4 route at 24.2 s), and stay offline.
+
+Fix: `packages/omarchy/podman/` adds `20-wait-for-default-route.conf`. It sorts after Lerd's drop-in, so its `ExecStart` wins, and it waits up to 30 seconds for an IPv4 default route, then lets the containers start whether or not one appeared. `lerd start` rewrites only its own `10-` file, so the override survives Lerd updates. After restoring the dotfiles, run `systemctl --user daemon-reload`; it takes effect at the next login.
+
+Check the override is active:
+
+```sh
+systemctl --user cat podman-user-wait-network-online.service | grep ExecStart
+```
+
+The last `ExecStart` must be the `timeout 30` line.
+
+Recover a broken session without rebooting. The namespace is only rebuilt once every container has stopped, so restarting one container is not enough:
+
+```sh
+lerd stop
+podman ps -q   # must print nothing
+lerd start
+```
+
+`lerd stop` also stops other projects' workers (such as another site's queue or SSR), so start those again afterwards.
 
 ## Bambu Studio Home tab is blank
 
