@@ -268,6 +268,22 @@ A system-tray application must publish a StatusNotifierItem over D-Bus. Omarchy 
 - Hide removes a tray item from the tray.
 - A separate Omarchy bar widget cannot be moved into the tray drawer.
 
+## iMessage in the bar (Blip)
+
+[Blip](https://github.com/nixfred/blip) shows iMessage in the bar, with a MacBook as the gateway over SSH. `manifests/omarchy/plugins.txt` installs the plugin and the seeded `shell.json` places its widget, but the bridge is per machine and is not tracked: `~/.config/blip/`, the `~/bin` shims, the `~/.ssh/blip_ed25519` key and the Mac's `~/.blip/`.
+
+On a restored machine, with someone at the Mac to click the Messages Automation prompt:
+
+```sh
+~/.config/omarchy/plugins/nixfred.blip/scripts/blip-setup <user>@<mac>.local
+omarchy-restart-shell
+```
+
+- The host is the Mac's mDNS name rather than its Tailscale name, so Blip works on any tailnet while both machines are on the LAN. The Blip key is therefore not pinned to an address.
+- Set `country_code=61` in `~/.config/blip/bridge.conf`; the wizard defaults to `1`.
+- The Mac sleeps normally. Keep it awake (caffeinate) while Blip should be online; asleep, the widget shows offline and catches up later.
+- `inter-font` is in `packages.txt` because Blip prefers SF Pro, then Inter, and otherwise uses the monospace theme font. It has no setting for other families.
+
 ## Network files browse but will not play
 
 On 8 October 2026, `gvfs-daemon.service` was active but `gvfsd-fuse` and its local FUSE mount were absent, matching the earlier playback failure. MPV rejects raw `smb://` URLs; the bridge exposes file-manager mounts as filesystem paths that MPV and VLC can read. The logs did not establish why the helper disappeared, and the package history showed no GVFS upgrade since installation.

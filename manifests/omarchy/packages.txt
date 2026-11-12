@@ -8,6 +8,7 @@ github-cli
 gitleaks
 gnome-keyring
 hermes-desktop
+inter-font
 nordvpn-bin
 omazed
 openai-codex-desktop

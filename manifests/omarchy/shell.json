@@ -227,6 +227,9 @@
         },
         {
           "id": "jankeesvw.notification-center"
+        },
+        {
+          "id": "nixfred.blip"
         }
       ],
       "tray": []
