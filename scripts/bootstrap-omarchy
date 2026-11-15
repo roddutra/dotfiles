@@ -124,6 +124,14 @@ if $include_hardware; then
   fi
 fi
 
+# Keep NetworkManager away from tailscale0 so dispatcher hooks (lerd's DNS hook)
+# never overwrite MagicDNS at boot.
+system_files_changed=false
+install_system_file etc/NetworkManager/conf.d/tailscale-unmanaged.conf
+if $system_files_changed; then
+  run sudo nmcli general reload conf
+fi
+
 # 1Password's desktop app only connects to browser binaries it recognises, and
 # these are not among them. Without an entry, the app's 1Password extension
 # cannot share the desktop app's unlock state, and a rejected app retries about

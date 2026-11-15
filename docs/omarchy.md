@@ -460,6 +460,29 @@ Both the repair and lerd's NetworkManager dispatcher prefer `dns.upstream` over 
 git checkout -- packages/omarchy/bash/.bashrc packages/common/agents/.agents/skills/lerd/SKILL.md
 ```
 
+## Tailnet names fail to resolve after boot
+
+Symptom: after a reboot, the Tailscale widget shows the tailnet connected, but `*.ts.net` hosts give "Server Not Found" until Tailscale is disconnected and reconnected.
+
+Check the DNS on `tailscale0`:
+
+```sh
+resolvectl status tailscale0
+```
+
+Healthy: `100.100.100.100` with `~ts.net` and the tailnet search domain. Broken: `127.0.0.1:5300` with `~test ~.`.
+
+Cause: NetworkManager adopts `tailscale0` as an externally managed device and sends dispatcher hooks an `up` event for it. Lerd's `/etc/NetworkManager/dispatcher.d/99-lerd-dns` then points that interface's DNS at lerd's dnsmasq, about a second after tailscaled sets MagicDNS. A reconnect works because tailscaled pushes its DNS again without a new `up` event.
+
+Fix: `system/omarchy/etc/NetworkManager/conf.d/tailscale-unmanaged.conf`, installed by `scripts/bootstrap-omarchy`, marks `tailscale0` unmanaged, so no dispatcher hook sees it. It uses `unmanaged-devices+=` because lerd's `lerd-dns-link.conf` sets the same key for `lerd0`, and a plain `=` would replace that entry. Lerd rewrites the dispatcher hook on install and repair, but not this file.
+
+Verify:
+
+```sh
+NetworkManager --print-config | grep unmanaged-devices   # lists lerd0 and tailscale0
+nmcli device status                                       # tailscale0 and lerd0 unmanaged
+```
+
 ## Containers have no internet after boot
 
 Symptom: after a reboot, Lerd sites load but anything that leaves the machine fails. Laravel throws `could not translate host name "....neon.tech" to address: Try again`, and inside a container `getent hosts google.com` returns nothing while container names such as `lerd-postgres-pgvector` still resolve. `journalctl --user -b | grep aardvark-dns` shows `dns request failed: io error: Network is unreachable`.
