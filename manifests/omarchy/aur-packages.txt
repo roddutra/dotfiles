@@ -1,7 +1,7 @@
 # Curated packages installed from the AUR or another foreign source.
 brave-bin
 claude-desktop
-dankcalendar-bin
+dux-calendar-bin
 freedownloadmanager
 google-chrome
 grok-build
