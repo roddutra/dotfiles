@@ -86,6 +86,8 @@ Outline first: one line per slide with its headline and purpose. For decks over 
 - Layouts: `cover` to open, `section` between parts, `fact` for a headline number, `two-cols` for comparisons, `end` to close.
 - Diagrams: Mermaid fences take the brand colours from `setup/mermaid.ts`. Keep them to about eight nodes, break long labels with `<br/>`, and enlarge with the fence option `{scale: 1.3}`.
 - Styling: classes used on more than one slide go in `styles/index.css`. A `<style>` block inside a slide only reaches that slide. Wrap element selectors in `:where()`, as the template does, so classes on the element still win.
+- Text inside a shape (pill, number circle, button): padding around the line box centres the line, not the letters, and where the letters sit in the line differs per font. Trim the box to the letters with `text-box: trim-both cap alphabetic` and pad evenly. For a fixed-size circle use `padding-block: calc((<height> - 1cap) / 2)`. It applies to a block or inline-block box, not a flex or grid container. Wrap it in `@supports`: Firefox lacks it.
+- Icons beside text: give the icon a box one text line tall (`width` and `height` equal to the text's `line-height`, in `em`) and align it to the top of the row. Sizing it with `font-size` makes it hang low, because Slidev draws icons at 1.2em.
 - Media: files in `public/<deck>/`, referenced as `/<deck>/file.png`. Use `<SlidevVideo>` for video files and `<Youtube id="..." />` for YouTube.
 - Motion: one deck-wide `transition` in the headmatter, `v-click` to build dense slides, `magic-move` for code that changes. Do not vary transitions slide by slide.
 - Write the copy in the brand's voice.
@@ -105,6 +107,9 @@ Read each `sheet-N.png` contact sheet. Then open the full-size PNG of every slid
 - inconsistent margins, alignment or heading sizes between slides
 - diagrams rendered too small, or Slidev error text in place of a slide
 - a missing or distorted logo, and fallback fonts where brand fonts should be
+- text sitting high or low inside pills, number circles and buttons, and icons off-centre beside their text
+
+A deck whose fonts do not ship with it (system fonts such as Helvetica or Arial, with no web font or `@font-face` file) renders in whatever each machine substitutes, and the review render can pick a different font from the browser the user presents in. Alignment that is right in the PNGs can then be off on their screen. For such a deck, review the slides that have pills, number circles or icon rows a second time under another font: set `--brand-font-display` and `--brand-font-body` to a different family from the stack (on Linux, `fc-match <family>` names what a family resolves to), re-run with `--range`, then restore the tokens.
 
 PNGs show a video's first frame only. Check playback in the dev server when it matters.
 
