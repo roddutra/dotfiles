@@ -165,10 +165,28 @@ def _run_key_command(command: str) -> str:
     return result.stdout.strip()
 
 
+def _inside_skill_dir(directory: Path) -> bool:
+    """True when `directory` is this skill's folder or below it, via any link."""
+    this_file = Path(__file__)
+    for candidate in (directory, *directory.parents):
+        settings_file = candidate / "scripts" / "settings.py"
+        try:
+            if settings_file.exists() and os.path.samefile(settings_file, this_file):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def collect_layers(flags: dict | None = None, environ=None, cwd: Path | None = None):
     """Return (layers, files, notes). Each layer is (source label, values)."""
     environ = os.environ if environ is None else environ
     notes, files, layers = [], [], []
+    if _inside_skill_dir(cwd or Path.cwd()):
+        notes.append(
+            "Running from inside the skill directory, so the project's .env files are not read and the session "
+            "is filed under the wrong project. Run the scripts by path from the project directory instead."
+        )
 
     flag_values = {name: value for name, value in (flags or {}).items() if value}
     layers.append(("flag", flag_values))

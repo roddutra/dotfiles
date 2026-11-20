@@ -9,6 +9,8 @@ Coding agents read text and still images. This skill hands the real video file t
 
 The bundled scripts do the work: resolve configuration, upload, call the model, save the answer. They are plain Python 3 with no dependencies; `ffmpeg` is needed only for `prepare.py`. `<skill-path>` below is this skill's directory.
 
+Run the scripts by path from the user's working directory, for example `python3 <skill-path>/scripts/watch.py ...`. Do not `cd` into the skill directory first: project overrides and the session's project name both come from the directory you run from.
+
 ## This skill or `video-inspector`
 
 - **`video-watcher`**: long recordings, anything where narration and visuals matter together, meeting walkthroughs, "what happened in this video". Another model watches; you read its report.
