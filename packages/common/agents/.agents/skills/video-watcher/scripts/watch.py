@@ -28,6 +28,9 @@ from session_paths import new_subdir, record_call, resolve_session
 DEFAULT_ANSWER_RESERVE = 16000
 # Rough text density for budgeting prompt and context files.
 CHARS_PER_TOKEN = 4
+# Longest window sent at high resolution without --force. Longer stretches of
+# exact text are far cheaper to read from frames (video-inspector).
+MAX_HIGH_RES_SECONDS = 600
 
 
 def log(message: str) -> None:
@@ -141,6 +144,18 @@ def main():
     notes = list(resolved.notes)
 
     try:
+        if args.resolution == "high" and not args.force:
+            span_end = end if end is not None else video.duration
+            if span_end is not None and span_end - (start or 0) > MAX_HIGH_RES_SECONDS:
+                raise PreflightError(
+                    "high_res_window_too_long",
+                    f"{format_timestamp(span_end - (start or 0))} of video at high resolution is about four times "
+                    f"the tokens of default resolution. High resolution is capped at "
+                    f"{MAX_HIGH_RES_SECONDS // 60} minutes per call.",
+                    ["Read exact text from frames with video-inspector at the timestamps you need.",
+                     "Narrow --start/--end to the moments that matter.",
+                     "Drop --resolution high, or pass --force if the user agreed to the cost."],
+                )
         adapter.check_transport(video, options)
         limits = adapter.model_limits()
 
@@ -161,7 +176,10 @@ def main():
                 "sha256": video.sha256,
                 "size_bytes": video.size,
             }
-            save_remote_files(cache)
+            try:
+                save_remote_files(cache)
+            except OSError as exc:
+                notes.append(f"Could not record the upload for reuse ({exc}); a follow-up will upload again.")
 
         duration = handle.get("duration_seconds") or video.duration
         sent_seconds = None

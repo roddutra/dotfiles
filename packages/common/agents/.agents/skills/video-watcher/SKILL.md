@@ -62,7 +62,7 @@ Help the user through this when `show` reports missing settings:
 2. Get the key into the file **without it passing through the conversation**. Never ask the user to paste a key into chat. In order of preference:
    - If your harness has a secret-entry tool that delivers a value as a file or on stdin, pipe it: `python3 <skill-path>/scripts/config.py set-key --scope global < <secret-file>`
    - Otherwise ask the user to run `python3 <skill-path>/scripts/config.py set-key --scope global` in their own terminal (it prompts with hidden input), or to edit the file.
-3. List the provider's models and agree on one with the user. Do not pick from memory; model names go stale quickly.
+3. List the provider's models and agree on one with the user. Do not pick from memory; model names go stale quickly. Do not assume the most expensive tier is worth it: in a test on a one-hour screen-share, a mid-priced current model beat an older top-tier one at under half the cost, and the dearest current model was more accurate again at twice the price.
    `python3 <skill-path>/scripts/list_models.py [--filter <text>]`
    Then `python3 <skill-path>/scripts/config.py init --scope global --model <id>`
 4. Confirm with a live call: `python3 <skill-path>/scripts/config.py check`
@@ -97,7 +97,7 @@ Stdout is one JSON object. On success: `answer_path` (read this file), `session`
 |---|---|
 | `--context-file <path>` | You have a transcript or notes to send alongside |
 | `--start <t>` / `--end <t>` | Only part of the recording matters. Seconds or `[HH:]MM:SS` |
-| `--resolution low\|medium\|high` | `high` to read small on-screen text; about 4x the video tokens |
+| `--resolution low\|medium\|high` | `high` for small text in a short window; about 4x the video tokens. Exact text is usually cheaper from frames |
 | `--fps <n>` | Fast-moving content needs more than the default 1 frame per second |
 | `--max-output-tokens <n>` | Cap or extend the answer length |
 | `--session <session.json>` | Group this call with earlier ones about the same subject |
@@ -107,22 +107,36 @@ Stdout is one JSON object. On success: `answer_path` (read this file), `session`
 | `--timeout <s>` | Default 1800 |
 | `--force` | Send even though the context estimate says it will not fit |
 
-### 2. Work cheap to expensive
+### 2. Plan the passes around cost
 
-Video tokens dominate the cost: on current Gemini models about 95 tokens per second at default resolution (an hour is roughly 340,000 input tokens) and about four times that at `high`. The JSON's `estimate` and `usage` show the real numbers.
+Every call re-sends the whole window of video; only the upload carries over. Video dominates the bill: an hour at default resolution is 330,000 to 370,000 video tokens on current Gemini models, and `--resolution high` is about four times that. The JSON's `estimate` and `usage` show the real numbers.
 
-1. **First pass**: the whole recording at default resolution, with the transcript attached. Ask for a timestamped account of what was shown and said.
-2. **Detail passes**: where the first pass could not read something, or a moment needs more care, ask again with `--start/--end` and `--resolution high`. A narrow window at high resolution costs far less than the whole recording at high.
+Use each tool for what it does best:
 
-Follow-up questions about the same file reuse the upload automatically, so they start at once. Each call is independent: the model does not remember earlier answers. Pass an earlier answer back with `--context-file` when the follow-up depends on it.
+| Need | Tool |
+|---|---|
+| What happened and in what order; what was said versus shown; where to look | `video-watcher`: one full pass at default resolution |
+| Exact text: file names, folder paths, numbers, table headers, field values | `video-inspector`: frames at the timestamps the first pass gave |
+| Checking a claim the video model made | `video-inspector` |
+| Small text across a stretch you have no timestamps for | `video-inspector`: a contact sheet, then frames |
+| Motion or sequence that single frames cannot show, or a question tied to the audio | `video-watcher`: a narrow window, minutes long |
 
-### 3. Read the answer and verify
+In the test that shaped this table, a one-hour screen-share, three high-resolution passes over 39 minutes cost more than the first pass and still got file names and numbers wrong. Reading about 30 frames settled them for a small fraction of those tokens, and you read the pixels yourself at full resolution.
 
-Treat the answer as a report from a capable but fallible observer. Video models misread small text and occasionally describe things that were not there.
+1. **One full pass per recording**, at default resolution, with the transcript attached. Use the first-pass pattern in `references/prompts.md`: it asks the model for an index of exact details, each with the timestamp where it is most legible and a confidence.
+2. **Decide what needs checking.** Only the details that matter for the user's goal: the names, paths and values someone will act on. Leave the rest as the model's reading and say so.
+3. **Verify with `video-inspector`**, in a subagent so the images stay out of your context. Give it the list of claims and timestamps; have it extract a frame a second or two either side of each and return each value as confirmed, corrected or unreadable.
+4. **Ask `video-watcher` again only for what frames cannot settle**, as a narrow window of a few minutes. Tell the user the estimated tokens first. `watch.py` refuses a high-resolution window longer than 10 minutes unless you pass `--force`; needing more than that is a sign the job belongs to frames.
 
-- Cross-check names, numbers and quoted text against the transcript.
-- For a detail that matters, re-ask with a narrow window at high resolution, or extract the frame with `video-inspector` and look yourself.
-- Tell the user which parts came from the video model and what you verified.
+Do not re-run a full pass to fix details. Follow-up questions about the same file reuse the upload, but the model remembers nothing: pass an earlier answer back with `--context-file` when the follow-up depends on it.
+
+### 3. Report what was verified
+
+Treat the answer as a report from a capable but fallible observer. Video models misread small text, tidy typos into what they expected, and occasionally describe screens that were not there.
+
+- Cross-check names and quoted speech against the transcript.
+- Mark which details were checked against frames and which are the model's reading.
+- Tell the user which parts came from the video model.
 
 Answers to broad prompts about long recordings can run to thousands of words. When the answer is an input to a larger task, have a subagent run this skill and return the distilled findings plus `answer_path`, so the full text stays out of your context but remains readable on demand.
 
@@ -141,6 +155,7 @@ Answers to broad prompts about long recordings can run to thousands of words. Wh
 | `unsupported_container` | The provider does not take this file type | `prepare.py` (outputs mp4) |
 | `context_exceeded` | Video plus text plus room for the answer exceeds the model's input limit | A `--start/--end` window per call, or lower `--resolution` |
 | `window_unsupported` | Inline providers cannot select a window | `prepare.py --start/--end` |
+| `high_res_window_too_long` | More than 10 minutes at high resolution | Frames via `video-inspector`, or a narrower window |
 
 Exit code 2 is configuration (missing or invalid; go to setup). Exit code 4 is the provider refusing or failing; report the message, do not retry blindly.
 

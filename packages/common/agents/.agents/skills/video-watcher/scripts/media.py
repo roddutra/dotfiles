@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -80,8 +81,15 @@ def load_remote_files() -> dict:
 
 
 def save_remote_files(entries: dict) -> None:
+    """Replace the cache atomically. Each writer uses its own temp file, so
+    parallel runs never collide; the last writer wins, which only costs a
+    re-upload check later."""
     ensure_store()
-    temp = REMOTE_FILES_PATH.with_suffix(".tmp")
-    temp.write_text(json.dumps(entries, indent=2))
-    os.chmod(temp, 0o600)
-    temp.replace(REMOTE_FILES_PATH)
+    descriptor, temp_name = tempfile.mkstemp(dir=REMOTE_FILES_PATH.parent, prefix=".remote-files-", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(json.dumps(entries, indent=2))
+        os.replace(temp_name, REMOTE_FILES_PATH)
+    except BaseException:
+        Path(temp_name).unlink(missing_ok=True)
+        raise

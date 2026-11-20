@@ -8,9 +8,21 @@ The watching model knows nothing about your conversation. Give it the purpose of
 - **Ask for timestamps in `MM:SS`** (or `H:MM:SS` for recordings over an hour) on every item, so you can window in later.
 - **Separate said from shown.** Ask for them as distinct fields or columns. Otherwise the model paraphrases the audio and skips the screen.
 - **Ask for on-screen text verbatim**: menu paths, field names, button labels, values, URLs, error messages.
+- **Ask for text exactly as shown, mistakes included.** Models tidy typos (a file dated 2029 becomes 2026); say "copy file names and values character for character, including errors".
 - **Give it a way to say it cannot tell.** "Write `[unreadable]` for text you cannot read; do not guess." Without this, small text is invented.
 - **Name the things you care about.** Applications, screens, people. A named target is found; an unnamed one is summarised away.
 - **Attach the transcript** with `--context-file` when you have one, and say how to use it: "The transcript is accurate for speech; use it for wording and speaker names, and the video for everything visual."
+
+## First pass: account plus an index of details to verify
+
+Add this to any first-pass prompt. The table tells you which frames to extract with `video-inspector`, so exact details get checked from pixels instead of another expensive pass.
+
+```
+End with a table titled "Details to verify": every exact detail you reported that
+someone might act on (file names, folder paths, project or record numbers, table
+headers, totals, field values). Columns: detail as you read it | MM:SS where it is
+most legible | confidence (high, medium, low). Include anything you were unsure of.
+```
 
 ## Enrich a transcript with what was shown
 
