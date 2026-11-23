@@ -1,0 +1,38 @@
+#!/bin/bash
+# Start screen-relay under its permission host. Run by the LaunchAgent
+# local.screen-relay.
+#
+# The host is compiled from host.c into
+# ${XDG_STATE_HOME:-$HOME/.local/state}/screen-relay-agent/ only when the
+# source changes. macOS ties the Screen Recording and Accessibility grants to
+# that exact build, so a changed host.c means granting both again.
+set -euo pipefail
+
+dir="$HOME/.local/share/screen-relay-agent"
+build_dir="${XDG_STATE_HOME:-"$HOME/.local/state"}/screen-relay-agent"
+
+die() {
+  printf 'screen-relay-agent: %s\n' "$1" >&2
+  logger -t screen-relay-agent "$1" 2>/dev/null || true
+  exit 1
+}
+
+xcrun --find clang >/dev/null 2>&1 || die "clang not found: install the Xcode Command Line Tools (xcode-select --install)"
+
+hash=$(shasum -a 256 "$dir/host.c" | cut -c 1-16)
+binary="$build_dir/screen-relay-host-$hash"
+
+if [[ ! -x $binary ]]; then
+  umask 077
+  mkdir -p "$build_dir"
+  tmp="$binary.tmp.$$"
+  if ! xcrun --sdk macosx clang -O2 -Wall -o "$tmp" "$dir/host.c" >"$build_dir/build.log" 2>&1 \
+    || ! codesign --force --sign - --identifier local.screen-relay-host "$tmp" >>"$build_dir/build.log" 2>&1; then
+    rm -f "$tmp"
+    die "building the host failed; see $build_dir/build.log"
+  fi
+  mv -f "$tmp" "$binary"
+  find "$build_dir" -maxdepth 1 -name 'screen-relay-host-*' ! -name "screen-relay-host-$hash" -exec rm -f {} + 2>/dev/null || true
+fi
+
+exec "$binary" /bin/bash "$dir/run"

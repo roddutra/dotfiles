@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- screen-relay: stream and control this Mac's display from a browser.
+     Starts when the user logs in to the graphical session and restarts
+     whenever the session ends. launchd does not expand ~ or $HOME, so a
+     shell finds the wrapper and the log in the user's home. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.screen-relay</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/.local/bin/screen-relay-agent" >>"$HOME/Library/Logs/screen-relay.log" 2>&amp;1</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>Umask</key>
+  <integer>63</integer>
+</dict>
+</plist>

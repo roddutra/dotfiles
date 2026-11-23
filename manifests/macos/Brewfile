@@ -16,12 +16,16 @@ brew "gitleaks"
 brew "ghostscript"
 # Tools and libraries to manipulate images in many formats
 brew "imagemagick"
+# Lightweight and flexible command-line JSON processor
+brew "jq"
 # Simple terminal UI for git commands
 brew "lazygit"
 # Package manager for the Lua programming language
 brew "luarocks"
 # Ambitious Vim-fork focused on extensibility and agility
 brew "neovim"
+# JavaScript runtime (screen-relay runs on it)
+brew "node"
 # Fast, disk space efficient package manager
 brew "pnpm"
 # Interpreted, interactive, object-oriented programming language

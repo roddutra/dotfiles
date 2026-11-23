@@ -1,0 +1,24 @@
+#!/bin/bash
+# Print the current screen-relay viewer link with its token. The token
+# changes every time the session starts, and it controls this Mac's desktop:
+# keep it out of chat, notes and screenshots.
+#
+#   screen-relay-link           Tailscale link (https://<MagicDNS name>:8444/#token=...)
+#   screen-relay-link --tunnel  link for an SSH tunnel to 127.0.0.1:8080
+#
+# From another machine: ssh <mac> '~/.local/bin/screen-relay-link'
+set -euo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+token=$(screen-relay status --show-token --json | jq -r '.session.token // empty')
+[[ -n $token ]] || { echo "screen-relay-link: no running session" >&2; exit 1; }
+
+if [[ ${1:-} == --tunnel ]]; then
+  origin="http://127.0.0.1:8080"
+else
+  host=$(tailscale status --json | jq -r '.Self.DNSName // empty' | sed 's/\.$//')
+  [[ -n $host ]] || { echo "screen-relay-link: Tailscale has no DNS name; use --tunnel" >&2; exit 1; }
+  origin="https://$host:8444"
+fi
+printf '%s/#token=%s\n' "$origin" "$token"

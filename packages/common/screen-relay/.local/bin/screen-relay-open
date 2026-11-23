@@ -1,0 +1,46 @@
+#!/bin/bash
+# Open another machine's screen-relay viewer in the browser. The link is
+# fetched over SSH with screen-relay-link on that host and handed straight to
+# the browser, so the token is not printed.
+#
+#   screen-relay-open HOST            Tailscale link
+#   screen-relay-open --tunnel HOST   open an SSH tunnel to its 127.0.0.1:8080 first
+#   screen-relay-open --print HOST    print the link instead of opening it
+#
+# HOST is anything ssh accepts: an alias, user@lan-ip or a Tailscale name.
+set -euo pipefail
+
+usage() { echo "usage: screen-relay-open [--tunnel] [--print] HOST" >&2; exit 64; }
+
+tunnel=0 print=0 host=""
+for arg in "$@"; do
+  case $arg in
+    --tunnel) tunnel=1 ;;
+    --print) print=1 ;;
+    -h|--help) usage ;;
+    -*) usage ;;
+    *) [[ -z $host ]] || usage; host=$arg ;;
+  esac
+done
+[[ -n $host ]] || usage
+
+if ((tunnel)); then
+  # The viewer only accepts a loopback page on the same port the engine uses.
+  if nc -z 127.0.0.1 8080 2>/dev/null; then
+    echo "screen-relay-open: 127.0.0.1:8080 is already in use; reusing it as the tunnel" >&2
+  else
+    ssh -f -N -o ExitOnForwardFailure=yes -L 8080:127.0.0.1:8080 "$host"
+    echo "screen-relay-open: tunnel open; close it with: pkill -f 'ssh -f -N -o ExitOnForwardFailure=yes -L 8080:127.0.0.1:8080 $host'" >&2
+  fi
+  link=$(ssh "$host" '~/.local/bin/screen-relay-link --tunnel')
+else
+  link=$(ssh "$host" '~/.local/bin/screen-relay-link')
+fi
+
+if ((print)); then
+  printf '%s\n' "$link"
+elif [[ $(uname -s) == Darwin ]]; then
+  open "$link"
+else
+  xdg-open "$link" >/dev/null 2>&1 &
+fi

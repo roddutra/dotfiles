@@ -1,0 +1,30 @@
+#!/bin/bash
+# Run one screen-relay session in the foreground for the LaunchAgent
+# local.screen-relay. launchd starts it again whenever it exits, which also
+# covers a display change (the engine stops when the display is resized).
+#
+# The engine stays on 127.0.0.1:8080. Remote browsers reach it through
+# Tailscale Serve at https://<this Mac's MagicDNS name>:8444 (port 443 is
+# taken by lerd's podman proxy), or through an SSH tunnel to 127.0.0.1:8080.
+# One-time route: tailscale serve --bg --https=8444 http://127.0.0.1:8080
+# Every start creates a new token: read the viewer link with
+# `screen-relay-link`.
+set -euo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
+
+# Tailscale can take a while to come up after login. Wait for its MagicDNS
+# name for up to two minutes, then start loopback-only (SSH tunnel access).
+host=""
+for _ in $(seq 1 60); do
+  host=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//') || host=""
+  [[ -n $host ]] && break
+  sleep 2
+done
+
+if [[ -n $host ]]; then
+  exec screen-relay up --public "https://$host:8444"
+fi
+echo "screen-relay-agent: no Tailscale name; serving loopback only" >&2
+exec screen-relay up

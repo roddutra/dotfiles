@@ -45,6 +45,7 @@ common_packages=(
   op-approval-watcher
   pi
   pnpm
+  screen-relay
   tmux
   zed
 )
@@ -53,7 +54,7 @@ platform_folded_packages=()
 case "$(uname -s)" in
   Darwin)
     platform=macos
-    platform_packages=(ghostty karabiner nvim op-approval-watcher zsh)
+    platform_packages=(ghostty karabiner nvim op-approval-watcher screen-relay zsh)
     ;;
   MINGW*|MSYS*|CYGWIN*)
     platform=windows
