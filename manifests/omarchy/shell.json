@@ -96,19 +96,12 @@
             "Claude_status_icon_1",
             "remmina-icon",
             "Sunshine",
-            "io.weirdware.blueferry",
             "omarchy.monitor",
             "sh.lerd.glance",
             "tray-icon tray app 2695-1"
           ],
           "showTrayIcons": true,
           "widgets": [
-            {
-              "entry": {
-                "id": "io.weirdware.blueferry"
-              },
-              "listed": true
-            },
             {
               "entry": {
                 "id": "omarchy.monitor"
@@ -263,9 +256,6 @@
     },
     {
       "id": "io.github.codesmith28.omalt-tab"
-    },
-    {
-      "id": "io.weirdware.blueferry"
     },
     {
       "id": "omarchy.monitor"
