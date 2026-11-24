@@ -44,7 +44,8 @@ Port 8444 is used instead of 443 because lerd's podman proxy (`gvproxy`) already
 
 ### Tokens
 
-- Every session start creates a new token: login, reboot, crash, or a display change.
+- Every session start creates a new token: login, reboot, crash, sleep, or a display change. screen-relay 0.1.5 has no option to keep a token across starts.
+- An open viewer keeps retrying with the token it loaded and then shows "Access token rejected". Open a fresh link (the launcher entry again, or `screen-relay-link` on the host) rather than reconnecting that tab.
 - The token is the only credential. Anyone holding a viewer link controls that desktop. Keep links out of chat, notes and screenshots.
 - `screen-relay-link` on the host prints the current link.
 
@@ -55,7 +56,7 @@ The shared package `packages/common/screen-relay` installs two commands on every
 - `screen-relay-open HOST [SESSION]`: runs `screen-relay-link` on `HOST` over SSH and opens the viewer in the default browser, without printing the token.
 - `screen-relay-link [SESSION]`: prints this machine's own current links. `screen-relay-open` calls it on the host.
 
-`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. The SSH aliases in use are `omarchy` on the Mac, and on Omarchy `rfd-mbp` (the Mac's Wi-Fi address) and `rfd-mbp-eth` (its Ethernet address, when the cable is plugged in). These live in `~/.ssh/config`, which is not tracked. `rfd-mbp-eth` sets `HostKeyAlias` to the Wi-Fi address, because the Mac presents the same host keys on both interfaces and the launcher cannot answer a new-host-key prompt. The alias only fetches the link, so one LAN alias serves both routes: the Tailscale link names the host's MagicDNS name itself. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
+`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. The SSH aliases in use are `omarchy` on the Mac, and on Omarchy `rfd-mbp` (the Mac's Wi-Fi address), `rfd-mbp-eth` (its Ethernet address, when the cable is plugged in) and `rfd-mbp-ts` (its MagicDNS name). These live in `~/.ssh/config`, which is not tracked. `rfd-mbp-eth` and `rfd-mbp-ts` set `HostKeyAlias` to the Wi-Fi address, because the Mac presents the same host keys on every interface and the launcher cannot answer a new-host-key prompt. The alias only fetches the link, and the Tailscale link names the host's MagicDNS name itself, so any reachable alias works for the Tailscale route. A LAN alias fails when that interface is down, though, so the Tailscale launcher entry uses `rfd-mbp-ts`. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
 
 | Goal | Command |
 | --- | --- |
@@ -81,7 +82,7 @@ The Omarchy package adds two launcher entries that open the Mac:
 
 | Entry | Runs |
 | --- | --- |
-| Mac Desktop (Tailscale) | `screen-relay-launch rfd-mbp` |
+| Mac Desktop (Tailscale) | `screen-relay-launch rfd-mbp-ts` |
 | Mac Desktop (Wi-Fi) | `screen-relay-launch --tunnel rfd-mbp` |
 | Mac Desktop (Ethernet) | `screen-relay-launch --tunnel rfd-mbp-eth` |
 
@@ -167,6 +168,7 @@ macOS grants Screen Recording and Accessibility to a process's responsible proce
 - FileVault is on, so after a reboot the Mac must be unlocked before any user session exists. The agent starts once that login completes.
 - The stream uses the display's native pixels (3600x2338 on the built-in Retina display).
 - Changing the resolution or connecting a display stops the session. launchd starts a new one with a new token.
+- Sleep stops the session too. This includes a requested sleep (Apple menu, lid, or an app), which `caffeinate` does not block. After the wake, capture fails with "Failed to find any displays or windows to capture (-3815)", the engine exits and launchd starts a new session with a new token. This explained the "Access token rejected" seen on 24 November 2026 after switching from Wi-Fi to Ethernet: the Mac had slept twice in between, not because of the network change.
 - On 24 November 2026, clicks and typing from Omarchy worked over Tailscale and over the SSH tunnel.
 - Lock-screen behaviour and a full reboot have not been tested.
 - If `screen-relay status` reports missing permissions after a change to `host.c`, repeat step 6 for the new `screen-relay-host-<hash>`.

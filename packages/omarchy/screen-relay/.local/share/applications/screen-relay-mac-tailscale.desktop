@@ -3,7 +3,7 @@
 Type=Application
 Name=Mac Desktop (Tailscale)
 Comment=Control the Mac in the browser over Tailscale
-Exec=screen-relay-launch rfd-mbp
+Exec=screen-relay-launch rfd-mbp-ts
 Icon=preferences-desktop-remote-desktop
 Terminal=false
 Categories=Network;RemoteAccess;
