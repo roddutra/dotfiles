@@ -7,7 +7,7 @@ screen-relay is experimental: version 0.1.5, no audio, text-only clipboard.
 | Host | Status | Started by |
 | --- | --- | --- |
 | macOS | Set up and verified | LaunchAgent `local.screen-relay` (package `packages/macos/screen-relay`) |
-| Omarchy | Set up, one session per monitor; input checked locally | systemd user units `screen-relay-dp1` and `screen-relay-dp2` (package `packages/omarchy/screen-relay`) |
+| Omarchy | Set up and verified from the Mac, one session per monitor | systemd user units `screen-relay-dp1` and `screen-relay-dp2` (package `packages/omarchy/screen-relay`) |
 
 ## How a session is reached
 
@@ -128,7 +128,7 @@ macOS grants Screen Recording and Accessibility to a process's responsible proce
 
 ## Omarchy host
 
-Upstream lists Hyprland as **untested** for attaching to a running Wayland session. On Hyprland 0.56 the engine binds `wlr-screencopy` v3, the virtual keyboard, virtual pointer v2 (per output) and `wlr-data-control`, and `screen-relay move` lands on the right monitor for both sessions. Clicks and typing from another machine are still to be checked.
+Upstream lists Hyprland as **untested** for attaching to a running Wayland session. On Hyprland 0.56 the engine binds `wlr-screencopy` v3, the virtual keyboard, virtual pointer v2 (per output) and `wlr-data-control`, and `screen-relay move` lands on the right monitor for both sessions. On 24 November 2026, clicks and typing from the Mac worked on both monitors over Tailscale and over the SSH tunnel.
 
 Each monitor has its own session, like wayvnc. The browser shows one monitor per tab; open both with `screen-relay-open --all HOST`.
 
