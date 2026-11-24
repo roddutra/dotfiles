@@ -54,7 +54,7 @@ platform_folded_packages=()
 case "$(uname -s)" in
   Darwin)
     platform=macos
-    platform_packages=(ghostty karabiner nvim op-approval-watcher raycast-scripts screen-relay zsh)
+    platform_packages=(ghostty karabiner nvim op-approval-watcher raycast-scripts screen-relay upsnap zsh)
     ;;
   MINGW*|MSYS*|CYGWIN*)
     platform=windows

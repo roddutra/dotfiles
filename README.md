@@ -93,7 +93,7 @@ On the workstation with the matching AMD CPU and NVIDIA GPU profile:
 ./scripts/bootstrap-omarchy --hardware
 ```
 
-Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configuration ownership, exclusions, recovery notes, and verified lessons. See `docs/voxtype.md` for the dictation pipeline, vocabulary files, secret storage, and restore procedure. See `docs/op-approval.md` for the 1Password approval alerts. See `docs/screen-relay.md` for browser remote desktop between the Mac and Omarchy.
+Preview either command by adding `--dry-run`. See `docs/omarchy.md` for configuration ownership, exclusions, recovery notes, and verified lessons. See `docs/voxtype.md` for the dictation pipeline, vocabulary files, secret storage, and restore procedure. See `docs/op-approval.md` for the 1Password approval alerts. See `docs/screen-relay.md` for browser remote desktop between the Mac and Omarchy. See `docs/upsnap.md` for UpSnap status, wake and sleep control of the Mac.
 
 ### Windows packages
 
@@ -124,6 +124,7 @@ Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied 
 - `op-approval-watcher`
 - `raycast-scripts`
 - `screen-relay`
+- `upsnap`
 - `zsh`
 
 ### Omarchy

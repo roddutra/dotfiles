@@ -1,0 +1,30 @@
+#!/bin/sh
+# UpSnap status check for this Mac, run as a forced SSH command.
+# Exit 0 (prints "awake") only when the system is fully awake and the
+# displays are on. A locked screen with the display on counts as awake.
+# Exit 1 (prints "display-off") for display sleep or a background (dark) wake.
+# A fully asleep Mac can't run this, so UpSnap sees the SSH failure as offline.
+#
+# Uses WindowServer's CGDisplayIsAsleep, which tracks display power on Apple
+# silicon (built-in, external and clamshell) and works from a non-GUI SSH
+# session. Brightness and backlight values are deliberately not used.
+
+case "$(/usr/bin/pmset -g systemstate 2>/dev/null)" in
+  *Graphics*) ;;
+  *) echo "display-off"; exit 1 ;;
+esac
+
+# macOS sleeps and wakes all displays together, and the main display is the
+# active one (built-in with the lid open, external in clamshell mode).
+result=$(/usr/bin/osascript -l JavaScript -e '
+ObjC.import("CoreGraphics");
+var id = $.CGMainDisplayID();
+id !== 0 && !$.CGDisplayIsAsleep(id) ? "awake" : "display-off";
+' 2>/dev/null)
+
+if [ "$result" = "awake" ]; then
+  echo "awake"
+  exit 0
+fi
+echo "display-off"
+exit 1
