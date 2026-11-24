@@ -6,7 +6,7 @@ screen-relay is experimental: version 0.1.5, no audio, text-only clipboard.
 
 | Host | Status | Started by |
 | --- | --- | --- |
-| macOS | Set up and verified | LaunchAgent `local.screen-relay` (package `packages/macos/screen-relay`) |
+| macOS | Set up and verified from Omarchy | LaunchAgent `local.screen-relay` (package `packages/macos/screen-relay`) |
 | Omarchy | Set up and verified from the Mac, one session per monitor | systemd user units `screen-relay-dp1` and `screen-relay-dp2` (package `packages/omarchy/screen-relay`) |
 
 ## How a session is reached
@@ -43,7 +43,7 @@ The shared package `packages/common/screen-relay` installs two commands on every
 - `screen-relay-open HOST [SESSION]`: runs `screen-relay-link` on `HOST` over SSH and opens the viewer in the default browser, without printing the token.
 - `screen-relay-link [SESSION]`: prints this machine's own current links. `screen-relay-open` calls it on the host.
 
-`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
+`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. The SSH aliases in use are `omarchy` on the Mac and `rfd-mbp` (the Mac's LAN IP) on Omarchy. The alias only fetches the link, so one LAN alias serves both routes: the Tailscale link names the host's MagicDNS name itself. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
 
 | Goal | Command |
 | --- | --- |
@@ -123,6 +123,7 @@ macOS grants Screen Recording and Accessibility to a process's responsible proce
 - FileVault is on, so after a reboot the Mac must be unlocked before any user session exists. The agent starts once that login completes.
 - The stream uses the display's native pixels (3600x2338 on the built-in Retina display).
 - Changing the resolution or connecting a display stops the session. launchd starts a new one with a new token.
+- On 24 November 2026, clicks and typing from Omarchy worked over Tailscale and over the SSH tunnel.
 - Lock-screen behaviour and a full reboot have not been tested.
 - If `screen-relay status` reports missing permissions after a change to `host.c`, repeat step 6 for the new `screen-relay-host-<hash>`.
 
