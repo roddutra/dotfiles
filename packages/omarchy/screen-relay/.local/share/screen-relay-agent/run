@@ -1,0 +1,40 @@
+#!/bin/bash
+# Run one screen-relay session for one monitor in the foreground, attached to
+# the running Hyprland session. Started by screen-relay-dp1.service and
+# screen-relay-dp2.service.
+#
+#   run OUTPUT PORT TAILSCALE_PORT
+#
+# The session is named after the output in lower case (DP-1 -> dp-1). The
+# engine stays on 127.0.0.1:PORT. Remote browsers reach it through Tailscale
+# Serve at https://<MagicDNS name>:TAILSCALE_PORT, or through an SSH tunnel to
+# 127.0.0.1:PORT on the same local port.
+# One-time route: tailscale serve --bg --https=TAILSCALE_PORT http://127.0.0.1:PORT
+# Every start creates a new token: read the viewer link with
+# `screen-relay-link`.
+set -euo pipefail
+
+[[ $# -eq 3 ]] || { echo "usage: run OUTPUT PORT TAILSCALE_PORT" >&2; exit 64; }
+output=$1 port=$2 public_port=$3
+
+# System Node first: lerd's Node shim is for projects, not services.
+PATH="/usr/bin:$HOME/.local/bin:$PATH"
+export PATH
+
+[[ -n ${WAYLAND_DISPLAY:-} ]] || { echo "screen-relay-agent: WAYLAND_DISPLAY is not set" >&2; exit 1; }
+
+# Tailscale can take a while to come up after login. Wait for its MagicDNS
+# name for up to two minutes, then start loopback-only (SSH tunnel access).
+host=""
+for _ in $(seq 1 60); do
+  host=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//') || host=""
+  [[ -n $host ]] && break
+  sleep 2
+done
+
+args=(up --name "${output,,}" --backend wayland --display "$WAYLAND_DISPLAY" --output "$output" --port "$port")
+if [[ -n $host ]]; then
+  exec screen-relay "${args[@]}" --public "https://$host:$public_port"
+fi
+echo "screen-relay-agent: no Tailscale name; serving loopback only" >&2
+exec screen-relay "${args[@]}"

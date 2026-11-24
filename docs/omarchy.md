@@ -41,6 +41,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `omarchy/` contains the dock preference files.
 - `podman/` makes rootless containers wait for the network at login. See [Containers have no internet after boot](#containers-have-no-internet-after-boot).
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
+- `screen-relay/` runs browser remote desktop sessions, one per monitor. See `docs/screen-relay.md`.
 - `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
 - `wayvnc/` contains the VNC server Termix uses for remote desktop. See [Remote desktop with wayvnc](#remote-desktop-with-wayvnc).

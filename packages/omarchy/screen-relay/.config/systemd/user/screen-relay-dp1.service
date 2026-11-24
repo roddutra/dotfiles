@@ -1,0 +1,18 @@
+[Unit]
+Description=screen-relay browser remote desktop for DP-1 on port 8091 (Tailscale 8444)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Skip cleanly while DP-1 is unplugged or disabled; screen-relay-dp1.timer retries.
+ExecCondition=%h/.local/share/screen-relay-agent/output-ready DP-1
+ExecStart=%h/.local/share/screen-relay-agent/run DP-1 8091 8444
+# The session ends when its output changes size or goes away. Start a new
+# one (with a new token) while the monitor is still there.
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

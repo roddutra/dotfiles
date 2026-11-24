@@ -1,0 +1,18 @@
+[Unit]
+Description=screen-relay browser remote desktop for DP-2 on port 8090 (Tailscale 8445)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Skip cleanly while DP-2 is unplugged or disabled; screen-relay-dp2.timer retries.
+ExecCondition=%h/.local/share/screen-relay-agent/output-ready DP-2
+ExecStart=%h/.local/share/screen-relay-agent/run DP-2 8090 8445
+# The session ends when its output changes size or goes away. Start a new
+# one (with a new token) while the monitor is still there.
+Restart=always
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

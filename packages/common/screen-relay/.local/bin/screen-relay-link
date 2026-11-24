@@ -1,24 +1,68 @@
 #!/bin/bash
-# Print the current screen-relay viewer link with its token. The token
-# changes every time the session starts, and it controls this Mac's desktop:
-# keep it out of chat, notes and screenshots.
+# Print screen-relay viewer links with their tokens. A token changes every time
+# its session starts, and it controls this machine's desktop: keep links out
+# of chat, notes and screenshots.
 #
-#   screen-relay-link           Tailscale link (https://<MagicDNS name>:8444/#token=...)
-#   screen-relay-link --tunnel  link for an SSH tunnel to 127.0.0.1:8080
+#   screen-relay-link [SESSION]           Tailscale link (https://<MagicDNS name>:<port>/#token=...)
+#   screen-relay-link --tunnel [SESSION]  link for an SSH tunnel to 127.0.0.1:<engine port>
+#   screen-relay-link --all               one link per running session
 #
-# From another machine: ssh <mac> '~/.local/bin/screen-relay-link'
+# Without SESSION it prints the "default" session (the Mac), or else the first
+# running session by name (dp-1 before dp-2 on Omarchy, one per monitor).
+#
+# From another machine: ssh <host> '~/.local/bin/screen-relay-link'
 set -euo pipefail
 
-PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
-token=$(screen-relay status --show-token --json | jq -r '.session.token // empty')
-[[ -n $token ]] || { echo "screen-relay-link: no running session" >&2; exit 1; }
+usage() { echo "usage: screen-relay-link [--tunnel] [--all | SESSION]" >&2; exit 64; }
 
-if [[ ${1:-} == --tunnel ]]; then
-  origin="http://127.0.0.1:8080"
-else
-  host=$(tailscale status --json | jq -r '.Self.DNSName // empty' | sed 's/\.$//')
-  [[ -n $host ]] || { echo "screen-relay-link: Tailscale has no DNS name; use --tunnel" >&2; exit 1; }
-  origin="https://$host:8444"
+tunnel=0 all=0 name=""
+for arg in "$@"; do
+  case $arg in
+    --tunnel) tunnel=1 ;;
+    --all) all=1 ;;
+    -*) usage ;;
+    *) [[ -z $name ]] || usage; name=$arg ;;
+  esac
+done
+((all)) && [[ -n $name ]] && usage
+
+# Print the link for session $1, or fail quietly when it is not running.
+link() {
+  local status token origin
+  status=$(screen-relay status --name "$1" --show-token --json 2>/dev/null) || return 1
+  token=$(jq -r 'select(.session.running == true) | .session.token // empty' <<<"$status")
+  [[ -n $token ]] || return 1
+  if ((tunnel)); then
+    origin="http://127.0.0.1:$(jq -r '.session.port' <<<"$status")"
+  else
+    origin=$(jq -r '.session.url // empty' <<<"$status")
+    [[ -n $origin ]] || { echo "screen-relay-link: session $1 has no Tailscale URL; use --tunnel" >&2; return 2; }
+  fi
+  printf '%s/#token=%s\n' "$origin" "$token"
+}
+
+if [[ -n $name ]]; then
+  link "$name" || { echo "screen-relay-link: session $name is not running" >&2; exit 1; }
+  exit 0
 fi
-printf '%s/#token=%s\n' "$origin" "$token"
+
+state="${XDG_STATE_HOME:-"$HOME/.local/state"}/screen-relay"
+sessions=(default)
+for dir in "$state"/*/; do
+  [[ -d $dir ]] || continue
+  dir=${dir%/}
+  [[ ${dir##*/} == default ]] || sessions+=("${dir##*/}")
+done
+
+found=0
+for session in "${sessions[@]}"; do
+  rc=0
+  link "$session" || rc=$?
+  ((rc == 2)) && exit 1
+  ((rc == 0)) || continue
+  found=1
+  ((all)) || exit 0
+done
+((found)) || { echo "screen-relay-link: no running session" >&2; exit 1; }

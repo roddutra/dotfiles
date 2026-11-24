@@ -9,6 +9,7 @@ gitleaks
 gnome-keyring
 hermes-desktop
 inter-font
+libwebsockets
 nordvpn-bin
 omazed
 openai-codex-desktop

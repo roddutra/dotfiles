@@ -7,20 +7,28 @@ screen-relay is experimental: version 0.1.5, no audio, text-only clipboard.
 | Host | Status | Started by |
 | --- | --- | --- |
 | macOS | Set up and verified | LaunchAgent `local.screen-relay` (package `packages/macos/screen-relay`) |
-| Omarchy | Not set up yet | See [Omarchy host](#omarchy-host) |
+| Omarchy | Set up, one session per monitor; input checked locally | systemd user units `screen-relay-dp1` and `screen-relay-dp2` (package `packages/omarchy/screen-relay`) |
 
 ## How a session is reached
 
-Each host runs one session that captures its real display. The engine listens only on `127.0.0.1:8080`. A browser on another machine reaches it one of two ways:
+A session captures one real display. Its engine listens only on loopback:
+
+| Host | Session | Display | Engine | Tailscale port |
+| --- | --- | --- | --- | --- |
+| Mac | `default` | built-in display | `127.0.0.1:8080` | 8444 |
+| Omarchy | `dp-1` | DP-1 (ASUS) | `127.0.0.1:8091` | 8444 |
+| Omarchy | `dp-2` | DP-2 (Dell) | `127.0.0.1:8090` | 8445 |
+
+A browser on another machine reaches a session one of two ways:
 
 | Route | Viewer address | Needs |
 | --- | --- | --- |
-| Tailscale Serve (normal) | `https://<host>.<tailnet>.ts.net:8444/#token=...` | Both machines on the tailnet |
-| SSH tunnel (LAN, no Tailscale) | `http://127.0.0.1:8080/#token=...` | SSH to the host's LAN IP |
+| Tailscale Serve (normal) | `https://<host>.<tailnet>.ts.net:<tailscale port>/#token=...` | Both machines on the tailnet |
+| SSH tunnel (LAN, no Tailscale) | `http://127.0.0.1:<engine port>/#token=...` | SSH to the host's LAN IP |
 
-There is no plain `http://<lan-ip>:8080` route. The viewer decodes video with WebCodecs and only sends the token from a secure page (HTTPS or loopback), so it cannot work there.
+There is no plain `http://<lan-ip>:<engine port>` route. The viewer decodes video with WebCodecs and only sends the token from a secure page (HTTPS or loopback), so it cannot work there.
 
-Port 8444 is used instead of 443 because lerd's podman proxy (`gvproxy`) already listens on `*:443` on the Mac. Omarchy uses the same port so links look the same on both.
+Port 8444 is used instead of 443 because lerd's podman proxy (`gvproxy`) already listens on `*:443` on the Mac. Omarchy uses the same port so links look the same on both. Engine ports must be unique across all hosts: a tunnel binds the same port locally, so a port shared with the local engine would collide. The Mac keeps 8080 and Omarchy uses 8091 and 8090 (a lerd container holds 8081 there).
 
 ### Tokens
 
@@ -32,18 +40,20 @@ Port 8444 is used instead of 443 because lerd's podman proxy (`gvproxy`) already
 
 The shared package `packages/common/screen-relay` installs two commands on every machine:
 
-- `screen-relay-open HOST`: runs `screen-relay-link` on `HOST` over SSH and opens the viewer in the default browser, without printing the token.
-- `screen-relay-link`: prints this machine's own current link. `screen-relay-open` calls it on the host.
+- `screen-relay-open HOST [SESSION]`: runs `screen-relay-link` on `HOST` over SSH and opens the viewer in the default browser, without printing the token.
+- `screen-relay-link [SESSION]`: prints this machine's own current links. `screen-relay-open` calls it on the host.
 
-`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name.
+`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
 
 | Goal | Command |
 | --- | --- |
 | Open over Tailscale | `screen-relay-open HOST` |
-| Open over the LAN | `screen-relay-open --tunnel HOST` |
-| Print the link instead | add `--print` |
+| Open one Omarchy monitor | `screen-relay-open HOST dp-2` |
+| Open both Omarchy monitors, one tab each | `screen-relay-open --all HOST` |
+| Open over the LAN | `screen-relay-open --tunnel HOST` (combines with `--all` or `SESSION`) |
+| Print the links instead | add `--print` |
 
-`--tunnel` starts `ssh -f -N -L 8080:127.0.0.1:8080 HOST` in the background, then opens `http://127.0.0.1:8080/#token=...`. The local port must be 8080, because the engine accepts a loopback page only when its origin matches the address it connects to. If something already listens on local port 8080, it is reused as the tunnel. The command prints how to close the tunnel.
+`--tunnel` forwards each session's engine port to the same local port (for Omarchy, `ssh -f -N -L 8091:127.0.0.1:8091 -L 8090:127.0.0.1:8090 HOST` with `--all`), then opens `http://127.0.0.1:<port>/#token=...`. The local port must match, because the engine accepts a loopback page only when its origin matches the address it connects to. If a local port is already listening, the command stops with an error naming it: close the old tunnel or stop whatever holds the port. The command prints how to close the tunnel.
 
 One viewer owns input at a time. A viewer that opens while another one owns input is view-only until you click **Take control**.
 
@@ -118,41 +128,62 @@ macOS grants Screen Recording and Accessibility to a process's responsible proce
 
 ## Omarchy host
 
-Not set up. Upstream lists Hyprland, and so Omarchy, as **untested** for attaching to a running Wayland session. The steps below come from the [Linux docs](https://screen-relay.dev/docs/linux) and have not been run on this machine. Once a manual session works, track it as an Omarchy package with a systemd user unit tied to `graphical-session.target`, like `wayvnc`, and update this section.
+Upstream lists Hyprland as **untested** for attaching to a running Wayland session. On Hyprland 0.56 the engine binds `wlr-screencopy` v3, the virtual keyboard, virtual pointer v2 (per output) and `wlr-data-control`, and `screen-relay move` lands on the right monitor for both sessions. Clicks and typing from another machine are still to be checked.
 
-### Pilot
+Each monitor has its own session, like wayvnc. The browser shows one monitor per tab; open both with `screen-relay-open --all HOST`.
 
-1. Install and build the Wayland backend. The installer also adds sway, XWayland and foot, even though attaching to Hyprland does not start them.
+The package `packages/omarchy/screen-relay` installs:
 
-   ```sh
-   npm install -g screen-relay@0.1.5
-   screen-relay install --backend wayland
-   ```
+- `~/.config/systemd/user/screen-relay-dp1.service` and `screen-relay-dp2.service`: tied to `graphical-session.target`, so they inherit `WAYLAND_DISPLAY` from the Hyprland session. Each runs one session in the foreground and restarts it 5 seconds after it ends, which covers a resolution change.
+- `screen-relay-dp1.timer` and `screen-relay-dp2.timer`: retry the service every 30 seconds while it is not running.
+- `~/.local/share/screen-relay-agent/output-ready`: the `ExecCondition` copied from wayvnc. A service skips cleanly while its monitor is unplugged or disabled, and its timer starts it once the monitor is back.
+- `~/.local/share/screen-relay-agent/run OUTPUT PORT TAILSCALE_PORT`: waits up to two minutes for Tailscale's name, then runs `screen-relay up --name <output in lower case> --backend wayland --display "$WAYLAND_DISPLAY" --output OUTPUT --port PORT --public https://<name>:TAILSCALE_PORT`. It puts `/usr/bin` first on `PATH`, so the system Node runs screen-relay instead of lerd's shim.
 
-2. From a terminal inside the Hyprland session (not an SSH shell, not `sudo`), attach to the running compositor. Pick the monitor with `--output`; `hyprctl monitors` lists the names (`DP-1` is the ASUS, `DP-2` the Dell).
+### Set up
 
-   ```sh
-   screen-relay up -d --backend wayland --display "$WAYLAND_DISPLAY" --output DP-1 \
-     --public "https://$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//'):8444"
-   ```
-
-3. Add the Tailscale route. Running `tailscale serve` without `sudo` needs `sudo tailscale set --operator=$USER` once.
+1. Install the engine's build library and screen-relay with the system npm into `~/.local`. Do not run `screen-relay install`: it adds sway (not needed to attach) with `pacman -Syu`, a full system upgrade outside `omarchy-update`.
 
    ```sh
-   tailscale serve --bg --https=8444 http://127.0.0.1:8080
+   omarchy-pkg-add libwebsockets
+   env PATH=/usr/bin:/bin NPM_CONFIG_PREFIX="$HOME/.local" /usr/bin/npm install -g screen-relay@0.1.5
    ```
 
-4. Apply the dotfiles, which install `screen-relay-link` and `screen-relay-open` from the shared package. Remote Login on the Mac lets `screen-relay-open` reach it from Omarchy. `screen-relay-link` runs in a non-interactive SSH shell, so check from the Mac that it can find its tools: `ssh <omarchy> 'command -v screen-relay jq tailscale'` must print three paths. If `screen-relay` is missing, the npm global bin directory is only on the interactive `PATH`.
-5. From the Mac, run `screen-relay-open <omarchy>` and test:
-   - a real Hyprland window, clicks and typed text
-   - disconnect and reconnect
-   - the locked screen
-   - a monitor off and on cycle
+   The first session start builds the engine into `~/.local/share/screen-relay/engine/<version>/` without sudo.
+
+2. Add the Tailscale routes once. Tailscale keeps them across restarts. `tailscale serve` without `sudo` needs `sudo tailscale set --operator=$USER` once.
+
+   ```sh
+   tailscale serve --bg --https=8444 http://127.0.0.1:8091
+   tailscale serve --bg --https=8445 http://127.0.0.1:8090
+   ```
+
+3. Apply the dotfiles and enable the units:
+
+   ```sh
+   ./scripts/apply-dotfiles
+   systemctl --user daemon-reload
+   systemctl --user enable --now screen-relay-dp1.service screen-relay-dp2.service screen-relay-dp1.timer screen-relay-dp2.timer
+   ```
+
+4. From the Mac, `ssh <omarchy> 'command -v screen-relay jq tailscale'` must print three paths, then run `screen-relay-open --all <omarchy>` and test clicks and typing in a real window, disconnect and reconnect, the locked screen and a monitor off and on cycle.
 
 No UFW rule is needed: Tailscale traffic is accepted by `ts-input` ahead of UFW, and the SSH tunnel uses the existing SSH access.
 
-### What counts as working
+### Operate
 
-`screen-relay doctor` does not test the compositor's protocols. A stream without input, or a blank headless sway desktop, means attach mode is not working on Hyprland. Hyprland must provide `wlr-screencopy` v3, the virtual keyboard protocol and virtual pointer v2. If it does not, keep using wayvnc (see `docs/omarchy.md`) for Omarchy and screen-relay for the Mac.
+| Task | Command |
+| --- | --- |
+| Status | `screen-relay status --name dp-1` (or `dp-2`) |
+| Restart (new token) | `systemctl --user restart screen-relay-dp1` |
+| Stop until next login | `systemctl --user stop screen-relay-dp1.timer screen-relay-dp1` |
+| Service log | `journalctl --user -u screen-relay-dp1` |
+| Engine log | `screen-relay logs engine --name dp-1` |
+| Upgrade | repeat the npm install with the new version, then restart both services |
+| Remove the Tailscale routes | `tailscale serve --https=8444 off` and `--https=8445 off` |
 
-Like wayvnc and Sunshine, an Omarchy session is unreachable after a reboot until the LUKS passphrase is typed at the PC.
+### Notes
+
+- If DP-2 stays inactive, check that nothing else listens on its engine port: `ss -ltnp | grep 8090`.
+- The cursor image is not streamed (upstream limitation); the pointer still moves.
+- wayvnc keeps running alongside on 5900 and 5901. Both capture the same outputs without conflict.
+- Like wayvnc and Sunshine, an Omarchy session is unreachable after a reboot until the LUKS passphrase is typed at the PC.
