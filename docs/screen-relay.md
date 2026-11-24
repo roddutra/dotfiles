@@ -57,6 +57,20 @@ The shared package `packages/common/screen-relay` installs two commands on every
 
 One viewer owns input at a time. A viewer that opens while another one owns input is view-only until you click **Take control**.
 
+### From an iPhone or iPad
+
+`screen-relay-open` needs a desktop browser, so on iOS fetch the link by hand. This worked from an iPhone on 24 November 2026.
+
+1. Install the Tailscale app and join the tailnet. At home it connects directly over the LAN.
+2. SSH into the host with Termius and run `screen-relay-link` (Omarchy: `screen-relay-link --all` for both monitors, one link per line, DP-1 first).
+3. Copy the link into Safari, preferably a private tab, and tap **Take control** if it shows.
+
+Notes:
+
+- Use the Tailscale link. The `--tunnel` route needs a port forward that keeps running while Safari is in front, and iOS suspends Termius in the background.
+- With Handoff on, Universal Clipboard copies the link to your other Apple devices.
+- From the viewer's code: a tap is a left click and a drag works, but touch has no right-click or two-finger scroll (the viewer reads only wheel events), and the on-screen keyboard is unlikely to appear. An iPad keyboard and trackpad send keys, secondary clicks and scrolling. On a touch-only device, paste text with the viewer's **Clipboard** button.
+
 ## macOS host
 
 The package `packages/macos/screen-relay` installs:
