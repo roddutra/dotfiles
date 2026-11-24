@@ -61,7 +61,7 @@ One viewer owns input at a time. A viewer that opens while another one owns inpu
 
 The `raycast-scripts` package adds the Raycast script command **Open Omarchy Screens** (`~/.local/share/raycast-scripts/open-omarchy-screens.sh`). It runs `screen-relay-open --print --all omarchy` and opens one tab per running Omarchy session, so a monitor that is off is skipped. A HUD reports how many screens opened, or the error. Approve the 1Password SSH prompt when it appears.
 
-Raycast needs the folder once: in Raycast Settings > Script Commands, click **+** next to **Script Folders** and choose `~/.local/share/raycast-scripts` (Cmd+Shift+G in the picker). The command then appears under **Script Commands**, where you can assign a hotkey. Run **Reload Script Commands** if it does not appear.
+Raycast needs the folder once: in Raycast Settings > Script Commands, click **+** next to **Script Folders** and choose `~/.local/share/raycast-scripts` (Cmd+Shift+G in the picker). The command then appears under **Script Commands**, where you can assign a hotkey. Run **Reload Script Commands** if it does not appear. Verified on 24 November 2026.
 
 ### From the Omarchy launcher
 

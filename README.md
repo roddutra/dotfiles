@@ -109,8 +109,10 @@ Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied 
 - `grok`
 - `ohmyposh`
 - `omp`
+- `op-approval-watcher`
 - `pi`
 - `pnpm`
+- `screen-relay`
 - `tmux`
 - `zed`
 
@@ -119,23 +121,31 @@ Oh My Posh configuration lives under `packages/common/ohmyposh/` and is applied 
 - `ghostty`
 - `karabiner`
 - `nvim`
+- `op-approval-watcher`
+- `raycast-scripts`
+- `screen-relay`
 - `zsh`
 
 ### Omarchy
 
-- `agents`
+- `1password`
+- `bambu-studio`
 - `bash`
-- `claude`
+- `bluetooth-resync`
 - `claude-desktop`
-- `codex`
 - `dictation`
 - `ghostty`
+- `gvfs`
 - `hypr`
 - `nvim`
 - `omarchy`
 - `op-approval-watcher`
+- `podman`
+- `screen-relay`
 - `starship`
+- `steam`
 - `voxtype`
+- `wayvnc`
 
 ### Windows
 
