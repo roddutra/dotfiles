@@ -57,6 +57,12 @@ The shared package `packages/common/screen-relay` installs two commands on every
 
 One viewer owns input at a time. A viewer that opens while another one owns input is view-only until you click **Take control**.
 
+### From Raycast on the Mac
+
+The `raycast-scripts` package adds the Raycast script command **Open Omarchy Screens** (`~/.local/share/raycast-scripts/open-omarchy-screens.sh`). It runs `screen-relay-open --print --all omarchy` and opens one tab per running Omarchy session, so a monitor that is off is skipped. A HUD reports how many screens opened, or the error. Approve the 1Password SSH prompt when it appears.
+
+Raycast needs the folder once: Raycast Settings > Extensions > **+** > Add Script Directory, then choose `~/.local/share/raycast-scripts` (Cmd+Shift+G in the picker). Assign a hotkey in the same pane if you want one.
+
 ### From the Omarchy launcher
 
 The Omarchy package adds two launcher entries that open the Mac:
