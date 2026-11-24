@@ -42,7 +42,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `podman/` makes rootless containers wait for the network at login. See [Containers have no internet after boot](#containers-have-no-internet-after-boot).
 - `op-approval-watcher/` contains the 1Password approval watcher service. See `docs/op-approval.md`.
 - `screen-relay/` runs browser remote desktop sessions, one per monitor. See `docs/screen-relay.md`.
-- `sunshine/` contains the Sunshine remote desktop hosts. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
+- `sunshine/` contains the Sunshine remote desktop hosts, disabled since 24 November 2026 in favour of screen-relay. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
 - `wayvnc/` contains the VNC server Termix uses for remote desktop. See [Remote desktop with wayvnc](#remote-desktop-with-wayvnc).
 
@@ -314,6 +314,21 @@ Verification: a forced helper failure recovered automatically; restarting GVFS r
 
 Sunshine (`sunshine-bin` from the AUR) serves this desktop to Moonlight. It's set up for remote desktop work, not gaming. The Omarchy repository's `sunshine` package lagged a security release, and its build fell back to software encoding on this NVIDIA GPU (`Couldn't scale frame: Invalid argument`). The upstream build behind `sunshine-bin` 2026.914.233613 encodes with NVENC.
 
+**Disabled since 24 November 2026.** screen-relay (`docs/screen-relay.md`) replaced it for remote work, so both services are stopped and disabled. The packages, configs, pairings and UFW rules stay in place. To turn Sunshine back on:
+
+```sh
+systemctl --user enable --now app-dev.lizardbyte.app.Sunshine.service sunshine-ultrawide.service
+```
+
+To turn it off again, disable the packaged unit, then stop the stow-linked one and remove only its enablement link. `systemctl --user disable` would also delete the stow link in `~/.config/systemd/user/`.
+
+```sh
+systemctl --user disable --now app-dev.lizardbyte.app.Sunshine.service
+systemctl --user stop sunshine-ultrawide.service
+rm ~/.config/systemd/user/graphical-session.target.wants/sunshine-ultrawide.service
+systemctl --user daemon-reload
+```
+
 Sunshine streams one display per process, and apps can't choose a display, so each monitor has its own host:
 
 | Moonlight host | Display | Ports | Service |
@@ -346,9 +361,13 @@ Both services start when the autologin session reaches `graphical-session.target
 
 Capabilities: Sunshine drops all of them after startup (GHSA-fp6g-27w5-489j). The `Failed to gain CAP_SYS_ADMIN` log lines are expected, because only KMS capture needs that capability and both hosts use `wlr` capture.
 
+## Remmina
+
+Remmina (the VNC and RDP client used to reach the Mac before screen-relay) stays installed with its saved connections, but its tray applet no longer starts at login: `~/.config/autostart/remmina-applet.desktop` has `Hidden=true` (untracked, created by Remmina). Open Remmina from the launcher when needed, or set `Hidden=false` to bring the applet back at login.
+
 ## Remote desktop with wayvnc
 
-wayvnc (`wayvnc` from `extra`) serves this desktop over VNC to Termix, the browser SSH and remote desktop app in the homelab. Sunshine and Moonlight remain the better choice for interactive work; wayvnc exists so Termix can open a screen beside its terminals.
+wayvnc (`wayvnc` from `extra`) serves this desktop over VNC to Termix, the browser SSH and remote desktop app in the homelab. screen-relay is the main remote desktop for interactive work; wayvnc exists so Termix can open a screen beside its terminals.
 
 wayvnc captures one output per process, so each monitor has its own service, matching the Sunshine layout:
 

@@ -9,6 +9,18 @@ screen-relay is experimental: version 0.1.5, no audio, text-only clipboard.
 | macOS | Set up and verified from Omarchy | LaunchAgent `local.screen-relay` (package `packages/macos/screen-relay`) |
 | Omarchy | Set up and verified from the Mac, one session per monitor | systemd user units `screen-relay-dp1` and `screen-relay-dp2` (package `packages/omarchy/screen-relay`) |
 
+## Remote desktop choice on Omarchy
+
+Decided on 24 November 2026: screen-relay is the remote desktop for work on and from Omarchy. It's better for work than Sunshine with Moonlight (which suits gaming) and than VNC. To save idle resources, the tools it replaced are off but still installed and configured, so they can come back:
+
+| Tool | Role | State | Turn back on |
+| --- | --- | --- | --- |
+| Sunshine | Host for Moonlight (iOS) | Both services stopped and disabled | `docs/omarchy.md`, [Remote desktop with Sunshine](omarchy.md#remote-desktop-with-sunshine) |
+| Remmina | VNC client for the Mac | Tray applet no longer autostarts | `docs/omarchy.md`, [Remmina](omarchy.md#remmina) |
+| wayvnc | VNC host for Termix | Still running on 5900 and 5901 | Not changed |
+
+A stopped Sunshine or a missing Remmina tray icon is intended, not a fault.
+
 ## How a session is reached
 
 A session captures one real display. Its engine listens only on loopback:
