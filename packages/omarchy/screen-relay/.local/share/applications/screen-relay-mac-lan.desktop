@@ -1,0 +1,10 @@
+# Opens the Mac's screen-relay viewer. See docs/screen-relay.md.
+[Desktop Entry]
+Type=Application
+Name=Mac Desktop (LAN)
+Comment=Control the Mac in the browser through an SSH tunnel over the LAN
+Exec=screen-relay-launch --tunnel rfd-mbp
+Icon=preferences-desktop-remote-desktop
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=screen-relay;remote;desktop;vnc;mac;macbook;

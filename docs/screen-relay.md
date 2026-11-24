@@ -57,6 +57,17 @@ The shared package `packages/common/screen-relay` installs two commands on every
 
 One viewer owns input at a time. A viewer that opens while another one owns input is view-only until you click **Take control**.
 
+### From the Omarchy launcher
+
+The Omarchy package adds two launcher entries that open the Mac:
+
+| Entry | Runs |
+| --- | --- |
+| Mac Desktop (Tailscale) | `screen-relay-launch rfd-mbp` |
+| Mac Desktop (LAN) | `screen-relay-launch --tunnel rfd-mbp` |
+
+`screen-relay-launch` wraps `screen-relay-open` and reports progress and errors as desktop notifications. With `--tunnel`, it first closes a tunnel to the same host left by an earlier launch, so the LAN entry can be launched again. That tunnel otherwise stays open until the next launch or logout. Approve the 1Password SSH prompt when it appears.
+
 ### From an iPhone or iPad
 
 `screen-relay-open` needs a desktop browser, so on iOS fetch the link by hand. This worked from an iPhone on 24 November 2026.
@@ -152,6 +163,7 @@ The package `packages/omarchy/screen-relay` installs:
 - `~/.config/systemd/user/screen-relay-dp1.service` and `screen-relay-dp2.service`: tied to `graphical-session.target`, so they inherit `WAYLAND_DISPLAY` from the Hyprland session. Each runs one session in the foreground and restarts it 5 seconds after it ends, which covers a resolution change.
 - `screen-relay-dp1.timer` and `screen-relay-dp2.timer`: retry the service every 30 seconds while it is not running.
 - `~/.local/share/screen-relay-agent/output-ready`: the `ExecCondition` copied from wayvnc. A service skips cleanly while its monitor is unplugged or disabled, and its timer starts it once the monitor is back.
+- `~/.local/bin/screen-relay-launch` and `~/.local/share/applications/screen-relay-mac-*.desktop`: the launcher entries for the Mac (see [From the Omarchy launcher](#from-the-omarchy-launcher)).
 - `~/.local/share/screen-relay-agent/run OUTPUT PORT TAILSCALE_PORT`: waits up to two minutes for Tailscale's name, then runs `screen-relay up --name <output in lower case> --backend wayland --display "$WAYLAND_DISPLAY" --output OUTPUT --port PORT --public https://<name>:TAILSCALE_PORT`. It puts `/usr/bin` first on `PATH`, so the system Node runs screen-relay instead of lerd's shim.
 
 ### Set up

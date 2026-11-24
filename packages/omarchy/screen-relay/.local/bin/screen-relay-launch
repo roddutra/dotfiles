@@ -1,0 +1,36 @@
+#!/bin/bash
+# Launcher wrapper around screen-relay-open for desktop entries: there is no
+# terminal, so progress and errors go to desktop notifications.
+#
+#   screen-relay-launch [--tunnel] HOST [SESSION]
+#
+# With --tunnel, an SSH tunnel left by an earlier launch to the same HOST is
+# closed first, so launching again does not fail on a busy local port.
+set -uo pipefail
+
+tunnel=0 args=()
+for arg in "$@"; do
+  [[ $arg == --tunnel ]] && tunnel=1
+  args+=("$arg")
+done
+host=""
+for arg in "$@"; do
+  [[ $arg == -* ]] && continue
+  host=$arg
+  break
+done
+[[ -n $host ]] || { notify-send -u critical "screen-relay" "No host given"; exit 64; }
+
+notify() { notify-send -a screen-relay -h string:x-canonical-private-synchronous:screen-relay "$@"; }
+
+if ((tunnel)); then
+  pattern="^ssh -f -N -o ExitOnForwardFailure=yes( -L [0-9]+:127\.0\.0\.1:[0-9]+)+ $(sed 's/[.[\*^$()+?{|]/\\&/g' <<<"$host")\$"
+  pkill -x -f "$pattern" && sleep 0.5
+fi
+
+notify -t 15000 "Remote desktop" "Connecting to $host$( ((tunnel)) && echo ' over the LAN')..."
+if ! err=$("$HOME/.local/bin/screen-relay-open" "${args[@]}" 2>&1 >/dev/null); then
+  notify -u critical "Remote desktop failed" "${err:-screen-relay-open exited with an error}"
+  exit 1
+fi
+notify -t 3000 "Remote desktop" "Opened $host in the browser"
