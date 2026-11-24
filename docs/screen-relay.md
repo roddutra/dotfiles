@@ -55,7 +55,7 @@ The shared package `packages/common/screen-relay` installs two commands on every
 - `screen-relay-open HOST [SESSION]`: runs `screen-relay-link` on `HOST` over SSH and opens the viewer in the default browser, without printing the token.
 - `screen-relay-link [SESSION]`: prints this machine's own current links. `screen-relay-open` calls it on the host.
 
-`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. The SSH aliases in use are `omarchy` on the Mac and `rfd-mbp` (the Mac's LAN IP) on Omarchy. The alias only fetches the link, so one LAN alias serves both routes: the Tailscale link names the host's MagicDNS name itself. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
+`HOST` is anything `ssh` accepts: an SSH alias, `<user>@<lan-ip>` or a Tailscale name. The SSH aliases in use are `omarchy` on the Mac, and on Omarchy `rfd-mbp` (the Mac's Wi-Fi address) and `rfd-mbp-eth` (its Ethernet address, when the cable is plugged in). These live in `~/.ssh/config`, which is not tracked. `rfd-mbp-eth` sets `HostKeyAlias` to the Wi-Fi address, because the Mac presents the same host keys on both interfaces and the launcher cannot answer a new-host-key prompt. The alias only fetches the link, so one LAN alias serves both routes: the Tailscale link names the host's MagicDNS name itself. Without `SESSION`, the host picks `default` (the Mac), or else its first running session by name (`dp-1`, then `dp-2` when DP-1 is off).
 
 | Goal | Command |
 | --- | --- |
@@ -82,9 +82,10 @@ The Omarchy package adds two launcher entries that open the Mac:
 | Entry | Runs |
 | --- | --- |
 | Mac Desktop (Tailscale) | `screen-relay-launch rfd-mbp` |
-| Mac Desktop (LAN) | `screen-relay-launch --tunnel rfd-mbp` |
+| Mac Desktop (Wi-Fi) | `screen-relay-launch --tunnel rfd-mbp` |
+| Mac Desktop (Ethernet) | `screen-relay-launch --tunnel rfd-mbp-eth` |
 
-`screen-relay-launch` wraps `screen-relay-open` and reports progress and errors as desktop notifications. With `--tunnel`, it first closes a tunnel to the same host left by an earlier launch, so the LAN entry can be launched again. That tunnel otherwise stays open until the next launch or logout. Approve the 1Password SSH prompt when it appears.
+`screen-relay-launch` wraps `screen-relay-open` and reports progress and errors as desktop notifications. With `--tunnel`, it first closes every screen-relay tunnel left by an earlier launch, whatever the host: the Wi-Fi and Ethernet entries reach the same Mac engine and need the same local port 8080. A tunnel otherwise stays open until the next tunnel launch or logout. Use the Ethernet entry when the Mac is cabled: it has lower latency than Wi-Fi. On 24 November 2026 the Ethernet entry kept working with the Mac's Wi-Fi turned off. Approve the 1Password SSH prompt when it appears.
 
 ### From an iPhone or iPad
 

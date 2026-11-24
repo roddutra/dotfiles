@@ -4,8 +4,9 @@
 #
 #   screen-relay-launch [--tunnel] HOST [SESSION]
 #
-# With --tunnel, an SSH tunnel left by an earlier launch to the same HOST is
-# closed first, so launching again does not fail on a busy local port.
+# With --tunnel, every screen-relay tunnel left by an earlier launch is closed
+# first, whatever its host: the Mac's Wi-Fi (rfd-mbp) and Ethernet
+# (rfd-mbp-eth) aliases reach the same engine and need the same local port.
 set -uo pipefail
 
 tunnel=0 args=()
@@ -24,8 +25,7 @@ done
 notify() { notify-send -a screen-relay -h string:x-canonical-private-synchronous:screen-relay "$@"; }
 
 if ((tunnel)); then
-  pattern="^ssh -f -N -o ExitOnForwardFailure=yes( -L [0-9]+:127\.0\.0\.1:[0-9]+)+ $(sed 's/[.[\*^$()+?{|]/\\&/g' <<<"$host")\$"
-  pkill -x -f "$pattern" && sleep 0.5
+  pkill -x -f '^ssh -f -N -o ExitOnForwardFailure=yes( -L [0-9]+:127\.0\.0\.1:[0-9]+)+ [^ ]+$' && sleep 0.5
 fi
 
 notify -t 15000 "Remote desktop" "Connecting to $host$( ((tunnel)) && echo ' over the LAN')..."
