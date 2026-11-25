@@ -24,6 +24,14 @@ Project-level configuration expands environment variables such as `${CONTEXT7_AP
 
 Configured servers are documented directly in `.mcp.json`.
 
+## skill-creator
+
+`.claude/skills/skill-creator/` is Anthropic's skill from `anthropics/skills` (`skills/skill-creator`), matching upstream as of 16 November 2026 apart from one local patch.
+
+`scripts/run_eval.py` runs each trigger-test query in its own empty temporary project. Upstream runs them all in one project, so parallel runs see each other's temporary command files and score real triggers as misses (upstream issue #1352, open fixes in pull requests #908 and #2198). Drop the patch when upstream merges a fix, and reapply it after any sync before then.
+
+The trigger test still under-reports when the skill being tested is already installed, because the agent can pick the installed copy over the test copy. Move the skill's link out of `~/.claude/skills/` for the run and put it back afterwards.
+
 ## Apply
 
 From the repository root:
