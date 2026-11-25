@@ -45,6 +45,7 @@ Tracked Omarchy packages live under `packages/omarchy/`:
 - `sunshine/` contains the Sunshine remote desktop hosts, disabled since 24 November 2026 in favour of screen-relay. See [Remote desktop with Sunshine](#remote-desktop-with-sunshine).
 - `voxtype/` contains managed dictation configuration and Groq cleanup commands. See `docs/voxtype.md`.
 - `wayvnc/` contains the VNC server Termix uses for remote desktop. See [Remote desktop with wayvnc](#remote-desktop-with-wayvnc).
+- `wireplumber/` contains per-device audio rules: the KEF LSX II LT USB sink never suspends, and the Bose speaker connects only on request. See [Bose speaker connects by itself](#bose-speaker-connects-by-itself).
 
 `system/omarchy/` mirrors paths below `/`. `bootstrap-omarchy --hardware` installs those files as root-owned copies; Stow never touches them. After editing one, run the bootstrap again to update the live copy.
 
@@ -186,6 +187,16 @@ systemctl --user enable --now bluetooth-shell-resync.service
 ```
 
 Remove the package once Omarchy ships a Quickshell with the upstream fix.
+
+## Bose speaker connects by itself
+
+Symptom: after boot or wake, the Bose Revolve SoundLink connects and becomes the default output without being asked.
+
+Cause: Omarchy's `~/.config/wireplumber/wireplumber.conf.d/bluetooth-a2dp-autoconnect.conf` sets `bluez5.auto-connect` for every Bluetooth card, so PipeWire connects A2DP to each paired, trusted device whenever the adapter appears. S3 wake resets the dongle, so that happens after every wake as well as at boot. `bluetoothctl untrust` does not help: `omarchy-bluetooth-device connect` trusts the device again each time the panel connects it.
+
+`packages/omarchy/wireplumber/` adds `bluetooth-bose-revolve-manual-connect.conf`, which sets an empty `bluez5.auto-connect` for the speaker's address only. It must sort after Omarchy's file. Connect from the Bluetooth panel when you want it. To apply the same to another device, copy the rule with that device's `bluez_card.<address>` name and run `systemctl --user restart wireplumber`.
+
+This only stops the PC from starting the connection. If the speaker itself reconnects to its last host when switched on (untested), `bt-agent` accepts it, because it authorises any paired device.
 
 ## Shell crashes when the second monitor turns on
 
